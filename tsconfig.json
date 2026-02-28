@@ -24,11 +24,14 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
+      "@/types": ["src/renderer/types/index"],
+      "@/types/*": ["src/renderer/types/*"],
       "@/components/*": ["src/renderer/components/*"],
       "@/hooks/*": ["src/renderer/hooks/*"],
-      "@/stores/*": ["src/renderer/stores/*"],
+      "@/store": ["src/renderer/store/index"],
+      "@/store/*": ["src/renderer/store/*"],
+      "@/utils": ["src/renderer/utils/index"],
       "@/utils/*": ["src/renderer/utils/*"],
-      "@/types/*": ["src/types/*"],
       "@shared/*": ["src/shared/*"]
     }
   },
