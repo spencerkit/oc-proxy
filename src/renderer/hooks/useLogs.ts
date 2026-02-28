@@ -15,11 +15,6 @@ import type { LogEntry } from '@/types';
 const LOGS_REFRESH_INTERVAL = 3000;
 
 /**
- * Default maximum number of logs to fetch
- */
-const DEFAULT_MAX_LOGS = 100;
-
-/**
  * Hook for accessing server logs with auto-refresh
  *
  * @returns Object containing logs, refresh function, and clear function

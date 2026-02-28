@@ -32,12 +32,8 @@ export {
 export {
   useTranslation,
   useT,
-  initI18n,
-  setLocale,
-  getLocale,
-  getAvailableLocales,
+  initializeI18n,
   type TranslateFunction,
-  type Locale,
 } from './useTranslation';
 
 // Theme hooks

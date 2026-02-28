@@ -24,6 +24,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
+      "@/typesi18n": ["src/renderer/i18n/index"],
+      "@/i18n/*": ["src/renderer/i18n/*"],
       "@/types": ["src/renderer/types/index"],
       "@/types/*": ["src/renderer/types/*"],
       "@/components/*": ["src/renderer/components/*"],

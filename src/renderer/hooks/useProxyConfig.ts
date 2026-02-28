@@ -5,7 +5,6 @@
  * Provides config selector and saveConfig action.
  */
 
-import { useEffect } from 'react';
 import { useProxyStore } from '@/store';
 import type { ProxyConfig } from '@/types';
 

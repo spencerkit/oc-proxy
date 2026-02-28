@@ -16,6 +16,7 @@ export default defineConfig({
       '@/types': path.resolve(__dirname, 'src/renderer/types'),
       '@/utils': path.resolve(__dirname, 'src/renderer/utils'),
       '@/store': path.resolve(__dirname, 'src/renderer/store'),
+      '@/i18n': path.resolve(__dirname, 'src/renderer/i18n'),
     },
   },
 });
