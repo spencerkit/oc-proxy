@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OA Proxy</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1>协议中转服务</h1>
+          <div id="serviceState" class="service-state">状态加载中...</div>
+        </div>
+        <div class="topbar-actions">
+          <label class="switch-wrap">
+            <span>服务开关</span>
+            <input id="serviceSwitch" type="checkbox" />
+          </label>
+          <button id="addGroupBtn" class="btn-primary">添加分组</button>
+          <button id="openSettingsBtn">设置</button>
+          <button id="openLogsBtn">日志</button>
+        </div>
+      </header>
+
+      <section id="servicePage" class="view-page">
+        <section class="tabs-panel">
+          <div id="groupTabs" class="tabs"></div>
+          <div id="groupBody" class="group-body"></div>
+        </section>
+      </section>
+
+      <section id="logsPage" class="view-page hidden">
+        <div class="logs-route-head">
+          <button id="backToServiceBtn">返回服务页</button>
+        </div>
+        <section class="logs-panel">
+          <div class="logs-head">
+            <h2>请求链路日志（最近 100 条）</h2>
+            <div class="row-actions">
+              <button id="refreshLogsBtn">刷新</button>
+              <button id="clearLogsBtn">清空</button>
+            </div>
+          </div>
+          <pre id="logsBox" class="logs-plain"></pre>
+        </section>
+      </section>
+    </main>
+
+    <div id="groupModal" class="modal hidden">
+      <div class="modal-card">
+        <h3>添加分组</h3>
+        <label>分组名称</label>
+        <input id="groupNameInput" placeholder="例如 claude" />
+        <label>转发 Path</label>
+        <input id="groupPathInput" placeholder="例如 claude" />
+        <p class="hint">请求路径示例：`/oc/claude`（具体转发方向由生效规则决定）</p>
+        <div class="row-actions">
+          <button id="cancelAddGroupBtn">取消</button>
+          <button id="confirmAddGroupBtn" class="btn-primary">创建</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="settingsModal" class="modal hidden">
+      <div class="modal-card">
+        <h3>服务设置</h3>
+        <label>监听 Host</label>
+        <input id="hostInput" placeholder="0.0.0.0" />
+        <label>服务端口</label>
+        <input id="portInput" type="number" min="1" max="65535" />
+        <label class="check-line">
+          <input id="strictModeInput" type="checkbox" />
+          <span>严格模式（不兼容字段直接报错）</span>
+        </label>
+        <div class="row-actions">
+          <button id="cancelSettingsBtn">取消</button>
+          <button id="saveSettingsBtn" class="btn-primary">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="deleteGroupModal" class="modal hidden">
+      <div class="modal-card">
+        <h3>删除分组确认</h3>
+        <p id="deleteGroupText" class="hint"></p>
+        <div class="row-actions">
+          <button id="cancelDeleteGroupBtn">取消</button>
+          <button id="confirmDeleteGroupBtn" class="btn-danger">确认删除</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+node_modules
+.DS_Store
+dist
+out
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+coverage
+.nyc_output
+release
+.cache
+*.tsbuildinfo
+.env
+.env.*

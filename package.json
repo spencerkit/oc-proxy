@@ -1,0 +1,36 @@
+{
+  "name": "oa-proxy-electron",
+  "version": "0.1.0",
+  "description": "Electron-based OpenAI <-> Claude protocol proxy",
+  "main": "src/main/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "test": "node --test"
+  },
+  "build": {
+    "appId": "com.local.oaproxy",
+    "productName": "OA Proxy",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  },
+  "dependencies": {
+    "electron": "^31.7.7"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.13.3"
+  }
+}
