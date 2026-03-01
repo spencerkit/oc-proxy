@@ -99,6 +99,25 @@ Debug tips:
 - Main-process logs are printed in the terminal running `npm start`.
 - Renderer logs are visible in the app DevTools (opened automatically in current setup).
 
+## Engineering Workflow
+
+Local quality gates:
+
+```bash
+npm run check
+```
+
+Full CI-equivalent local run:
+
+```bash
+npm run ci
+```
+
+GitHub workflows:
+- `CI` (`.github/workflows/ci.yml`): runs on push/PR to `main`, executes install + `npm run ci`.
+- `Release Build` (`.github/workflows/release.yml`): runs on tags like `v1.2.3` (or manual dispatch), packages Windows/macOS installers and uploads artifacts.
+- Dependabot (`.github/dependabot.yml`): weekly updates for npm dependencies and GitHub Actions.
+
 ## Test
 
 ```bash

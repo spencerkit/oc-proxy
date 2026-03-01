@@ -99,6 +99,25 @@ npm start
 - 主进程日志输出在执行 `npm start` 的终端。
 - 渲染进程日志在应用 DevTools 中查看（当前配置会自动打开）。
 
+## 工程化流程
+
+本地质量校验：
+
+```bash
+npm run check
+```
+
+本地完整 CI 等价流程：
+
+```bash
+npm run ci
+```
+
+GitHub 流水线：
+- `CI`（`.github/workflows/ci.yml`）：在 `main` 的 push/PR 触发，执行安装依赖和 `npm run ci`。
+- `Release Build`（`.github/workflows/release.yml`）：在 `v1.2.3` 这类 tag（或手动）触发，打包 Windows/macOS 安装包并上传构建产物。
+- Dependabot（`.github/dependabot.yml`）：每周自动检查 npm 依赖与 GitHub Actions 更新。
+
 ## 测试
 
 ```bash

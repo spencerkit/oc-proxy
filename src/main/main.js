@@ -69,10 +69,30 @@ function getDevServerUrl() {
 const devServerUrl = isDev ? getDevServerUrl() : null;
 console.log('[Main] isDev:', isDev, 'devServerUrl:', devServerUrl);
 
+function resolveAppIconPath() {
+  const isWin = process.platform === "win32";
+  const candidates = isWin
+    ? ["icon.ico", "icon.png", "icon.jpg"]
+    : ["icon.png", "icon.jpg"];
+
+  for (const fileName of candidates) {
+    const srcPath = path.join(__dirname, "../../assets", fileName);
+    const outPath = path.join(__dirname, "../assets", fileName);
+    if (fs.existsSync(srcPath)) return srcPath;
+    if (fs.existsSync(outPath)) return outPath;
+  }
+
+  return undefined;
+}
+
 function createWindow() {
+  const appIconPath = resolveAppIconPath();
   mainWindow = new BrowserWindow({
     width: 1240,
     height: 860,
+    icon: appIconPath,
+    maximizable: false,
+    fullscreenable: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload/preload.js"),
       contextIsolation: true,

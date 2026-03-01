@@ -6,26 +6,42 @@
   "type": "commonjs",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write --unsafe .",
+    "format": "biome format --write .",
+    "check": "npm run typecheck && npm run test",
+    "ci": "npm run check && npm run build",
     "build": "tsc && vite build && node scripts/sync-proxy.js",
     "preview": "vite preview",
     "start": "electron .",
+    "icons:generate": "electron scripts/generate-icons.js",
     "electron:dev": "vite",
     "electron:build": "electron-builder",
-    "test": "node --test"
+    "test": "node --test",
+    "prepare": "husky install"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
   },
   "build": {
     "appId": "com.local.oaproxy",
     "productName": "OA Proxy",
+    "icon": "assets/icon.png",
     "files": [
       "out/**/*",
+      "assets/**/*",
       "package.json"
     ],
     "mac": {
+      "icon": "assets/icon.icns",
       "target": [
         "dmg"
       ]
     },
     "win": {
+      "icon": "assets/icon.ico",
       "target": [
         "nsis",
         "portable"
@@ -34,24 +50,32 @@
   },
   "dependencies": {
     "electron": "^31.7.7",
+    "i18next": "^23.10.0",
+    "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.22.0",
-    "zustand": "^4.5.0",
-    "i18next": "^23.10.0",
     "react-i18next": "^14.0.0",
-    "lucide-react": "^0.344.0"
+    "react-router-dom": "^6.22.0",
+    "zustand": "^4.5.0"
   },
   "devDependencies": {
-    "electron-builder": "^24.13.3",
+    "@biomejs/biome": "^2.4.4",
+    "@types/node": "^20.11.20",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
-    "@types/node": "^20.11.20",
     "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron-builder": "^24.13.3",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.0",
     "typescript": "^5.2.2",
     "vite": "^5.1.0",
     "vite-plugin-electron": "^0.28.1",
-    "concurrently": "^8.2.2",
     "wait-on": "^7.2.0"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": ["biome check --write --unsafe", "biome format --write"],
+    "*.{json,jsonc}": ["biome format --write"],
+    "*.md": ["biome format --write"]
   }
 }
