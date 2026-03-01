@@ -52,7 +52,7 @@ export const GroupList: React.FC<{
                 >
                   <Folder size={16} className={styles.groupIcon} />
                   <span className={styles.groupName}>{group.name}</span>
-                  <span className={styles.groupPath}>/{group.path}</span>
+                  <span className={styles.groupPath}>/{group.id}</span>
                   {group.id === activeGroupId && (
                     <Check size={14} className={styles.activeIcon} />
                   )}
@@ -94,7 +94,7 @@ export const RuleList: React.FC<{
     <div className={styles.ruleList}>
       <div className={styles.ruleListHeader}>
         <div className={styles.ruleHeaderTitle}>
-          <h3>{t('servicePage.model')}</h3>
+          <h3>{t('servicePage.ruleName')}</h3>
           <span className={styles.countBadge}>{rules.length}</span>
           <span className={styles.ruleGroupName} title={groupName}>{groupName}</span>
         </div>
@@ -116,11 +116,14 @@ export const RuleList: React.FC<{
                 <button
                   type="button"
                   className={`${styles.ruleItem} ${rule.id === activeRuleId ? styles.active : ''}`}
-                  onClick={() => handleRuleClick(rule.id)}
+                  onClick={() => {
+                    onSelect(rule.id);
+                    handleRuleClick(rule.id);
+                  }}
                 >
-                  <span className={styles.ruleModel}>{rule.model}</span>
+                  <span className={styles.ruleModel}>{rule.name}</span>
                   <span className={styles.ruleDirection}>
-                    {t(`ruleDirection.${rule.direction}`)}
+                    {t(`ruleProtocol.${rule.protocol}`)}
                   </span>
                   {rule.id === activeRuleId && (
                     <span className={styles.currentBadge}>{t('servicePage.current')}</span>
@@ -134,7 +137,7 @@ export const RuleList: React.FC<{
                     onDelete(rule.id);
                   }}
                   title={t('servicePage.deleteRule')}
-                  aria-label={`${t('servicePage.deleteRule')}: ${rule.model}`}
+                  aria-label={`${t('servicePage.deleteRule')}: ${rule.name}`}
                 >
                   <Trash2 size={14} />
                 </button>

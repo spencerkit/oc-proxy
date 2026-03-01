@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from '@/hooks';
-import { Button, Input, Switch } from '@/components';
-import type { Rule, RuleDirection } from '@/types';
+import { Button, Input } from '@/components';
+import type { Rule } from '@/types';
 import styles from './ServicePage.module.css';
 
 export interface RuleFormProps {
@@ -22,55 +22,68 @@ export const RuleForm: React.FC<RuleFormProps> = ({
   onCancel,
 }) => {
   const { t } = useTranslation();
-  const [model, setModel] = useState(rule?.model ?? '');
-  const [direction, setDirection] = useState<RuleDirection>(rule?.direction ?? 'oc');
+  const [name, setName] = useState(rule?.name ?? '');
+  const [protocol, setProtocol] = useState<Rule['protocol']>(rule?.protocol ?? 'anthropic');
   const [token, setToken] = useState(rule?.token ?? '');
   const [apiAddress, setApiAddress] = useState(rule?.apiAddress ?? '');
+  const [defaultModel, setDefaultModel] = useState(rule?.defaultModel ?? '');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave({
-      model,
-      direction,
+      name,
+      protocol,
       token,
       apiAddress,
+      defaultModel,
+      modelMappings: {},
     });
   };
 
-  const isValid = model.trim() && token.trim() && apiAddress.trim();
+  const isValid = name.trim() && token.trim() && apiAddress.trim() && defaultModel.trim();
 
   return (
     <div className={styles.ruleForm}>
       <h3>{rule ? t('common.edit') : t('servicePage.addRule')}</h3>
       <form onSubmit={handleSubmit}>
         <div className={styles.formGroup}>
-          <label htmlFor="model">{t('servicePage.model')}</label>
+          <label htmlFor="name">{t('servicePage.ruleName')}</label>
           <Input
-            id="model"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="e.g. claude-3-5-sonnet-20241022"
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('ruleForm.ruleNamePlaceholder')}
           />
         </div>
 
         <div className={styles.formGroup}>
-          <label>{t('servicePage.forwardDirection')}</label>
+          <label>{t('servicePage.ruleProtocol')}</label>
           <div className={styles.directionOptions}>
             <button
               type="button"
-              className={`${styles.directionOption} ${direction === 'oc' ? styles.active : ''}`}
-              onClick={() => setDirection('oc')}
+              className={`${styles.directionOption} ${protocol === 'anthropic' ? styles.active : ''}`}
+              onClick={() => setProtocol('anthropic')}
             >
-              {t('ruleDirection.oc')}
+              {t('ruleProtocol.anthropic')}
             </button>
             <button
               type="button"
-              className={`${styles.directionOption} ${direction === 'co' ? styles.active : ''}`}
-              onClick={() => setDirection('co')}
+              className={`${styles.directionOption} ${protocol === 'openai' ? styles.active : ''}`}
+              onClick={() => setProtocol('openai')}
             >
-              {t('ruleDirection.co')}
+              {t('ruleProtocol.openai')}
             </button>
           </div>
+        </div>
+
+        <div className={styles.formGroup}>
+          <label htmlFor="defaultModel">{t('servicePage.defaultModel')}</label>
+          <Input
+            id="defaultModel"
+            value={defaultModel}
+            onChange={(e) => setDefaultModel(e.target.value)}
+            placeholder={t('ruleForm.defaultModelPlaceholder')}
+          />
         </div>
 
         <div className={styles.formGroup}>

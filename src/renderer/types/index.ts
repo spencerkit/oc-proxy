@@ -20,6 +20,7 @@ export type {
   Rule,
   Group,
   RuleDirection,
+  RuleProtocol,
   ProxyStatus,
   ProxyMetrics,
   LogEntry,

@@ -17,12 +17,14 @@ export const RuleEditPage: React.FC = () => {
   const { config, saveConfig } = useProxyStore();
   const { showToast } = useLogs();
 
-  const [model, setModel] = useState('');
-  const [direction, setDirection] = useState<Rule['direction']>('oc');
+  const [name, setName] = useState('');
+  const [protocol, setProtocol] = useState<Rule['protocol']>('anthropic');
   const [token, setToken] = useState('');
   const [apiAddress, setApiAddress] = useState('');
+  const [defaultModel, setDefaultModel] = useState('');
+  const [modelMappings, setModelMappings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [errors, setErrors] = useState<{ model?: string; token?: string; apiAddress?: string }>({});
+  const [errors, setErrors] = useState<{ name?: string; token?: string; apiAddress?: string; defaultModel?: string }>({});
 
   // Find the group and rule
   const group = config?.groups.find((g) => g.id === groupId);
@@ -30,16 +32,19 @@ export const RuleEditPage: React.FC = () => {
 
   useEffect(() => {
     if (rule) {
-      setModel(rule.model);
-      setDirection(rule.direction);
+      setName(rule.name);
+      setProtocol(rule.protocol);
       setToken(rule.token);
       setApiAddress(rule.apiAddress);
+      setDefaultModel(rule.defaultModel);
+      setModelMappings(rule.modelMappings || {});
       setLoading(false);
-    } else if (!loading) {
+    } else if (config) {
+      setLoading(false);
       showToast(t('toast.ruleNotFound'), 'error');
       navigate('/');
     }
-  }, [rule, loading, t, showToast, navigate]);
+  }, [rule, config, t, showToast, navigate]);
 
   const focusField = (id: string) => {
     const input = document.getElementById(id) as HTMLInputElement | null;
@@ -47,10 +52,10 @@ export const RuleEditPage: React.FC = () => {
   };
 
   const validateForm = () => {
-    const nextErrors: { model?: string; token?: string; apiAddress?: string } = {};
+    const nextErrors: { name?: string; token?: string; apiAddress?: string; defaultModel?: string } = {};
 
-    if (!model.trim()) {
-      nextErrors.model = t('validation.required', { field: t('servicePage.model') });
+    if (!name.trim()) {
+      nextErrors.name = t('validation.required', { field: t('servicePage.ruleName') });
     }
     if (!token.trim()) {
       nextErrors.token = t('validation.required', { field: t('servicePage.token') });
@@ -58,11 +63,14 @@ export const RuleEditPage: React.FC = () => {
     if (!apiAddress.trim()) {
       nextErrors.apiAddress = t('validation.required', { field: t('servicePage.apiAddress') });
     }
+    if (!defaultModel.trim()) {
+      nextErrors.defaultModel = t('validation.required', { field: t('servicePage.defaultModel') });
+    }
 
     setErrors(nextErrors);
 
-    if (nextErrors.model) {
-      focusField('model');
+    if (nextErrors.name) {
+      focusField('name');
       return false;
     }
     if (nextErrors.token) {
@@ -71,6 +79,10 @@ export const RuleEditPage: React.FC = () => {
     }
     if (nextErrors.apiAddress) {
       focusField('apiAddress');
+      return false;
+    }
+    if (nextErrors.defaultModel) {
+      focusField('defaultModel');
       return false;
     }
     return true;
@@ -88,7 +100,21 @@ export const RuleEditPage: React.FC = () => {
           return {
             ...group,
             rules: group.rules.map((r) =>
-              r.id === ruleId ? { ...r, model, direction, token, apiAddress } : r
+              r.id === ruleId
+                ? {
+                  ...r,
+                  name: name.trim(),
+                  protocol,
+                  token,
+                  apiAddress,
+                  defaultModel: defaultModel.trim(),
+                  modelMappings: Object.fromEntries(
+                    Object.entries(modelMappings)
+                      .map(([key, value]) => [key.trim(), value.trim()])
+                      .filter(([key, value]) => key && value)
+                  ),
+                }
+                : r
             ),
           };
         }
@@ -105,8 +131,8 @@ export const RuleEditPage: React.FC = () => {
     navigate('/');
   };
 
-  const isValid = model.trim() && token.trim() && apiAddress.trim();
-  const previewPath = `/oc/${group?.path ?? ''}`;
+  const isValid = name.trim() && token.trim() && apiAddress.trim() && defaultModel.trim();
+  const previewPath = `/oc/${group?.id ?? ''}`;
   const previewUpstream = apiAddress.trim() || 'https://...';
 
   if (loading) {
@@ -132,7 +158,7 @@ export const RuleEditPage: React.FC = () => {
           <span className={styles.breadcrumbSeparator}>/</span>
           <span className={styles.breadcrumbItem}>{group?.name}</span>
           <span className={styles.breadcrumbSeparator}>/</span>
-          <span className={styles.breadcrumbItem}>{rule?.model}</span>
+          <span className={styles.breadcrumbItem}>{rule?.name}</span>
         </nav>
       </div>
 
@@ -143,41 +169,85 @@ export const RuleEditPage: React.FC = () => {
               <h2 className={styles.sectionTitle}>{t('ruleForm.sectionRouting')}</h2>
 
               <div className={styles.formGroup}>
-                <label htmlFor="model">{t('servicePage.model')}</label>
+                <label htmlFor="name">{t('servicePage.ruleName')}</label>
                 <Input
-                  id="model"
-                  value={model}
+                  id="name"
+                  value={name}
                   onChange={(e) => {
-                    setModel(e.target.value);
-                    if (errors.model) {
-                      setErrors((prev) => ({ ...prev, model: undefined }));
+                    setName(e.target.value);
+                    if (errors.name) {
+                      setErrors((prev) => ({ ...prev, name: undefined }));
                     }
                   }}
-                  placeholder="e.g. claude-3-5-sonnet-20241022"
+                  placeholder={t('ruleForm.ruleNamePlaceholder')}
                   className={styles.input}
-                  error={errors.model}
+                  error={errors.name}
                 />
               </div>
 
               <div className={styles.formGroup}>
-                <label>{t('servicePage.forwardDirection')}</label>
+                <label>{t('servicePage.ruleProtocol')}</label>
                 <div className={styles.directionOptions}>
                   <button
                     type="button"
-                    className={`${styles.directionOption} ${direction === 'oc' ? styles.active : ''}`}
-                    onClick={() => setDirection('oc')}
+                    className={`${styles.directionOption} ${protocol === 'anthropic' ? styles.active : ''}`}
+                    onClick={() => setProtocol('anthropic')}
                   >
-                    {t('ruleDirection.oc')}
+                    {t('ruleProtocol.anthropic')}
                   </button>
                   <button
                     type="button"
-                    className={`${styles.directionOption} ${direction === 'co' ? styles.active : ''}`}
-                    onClick={() => setDirection('co')}
+                    className={`${styles.directionOption} ${protocol === 'openai' ? styles.active : ''}`}
+                    onClick={() => setProtocol('openai')}
                   >
-                    {t('ruleDirection.co')}
+                    {t('ruleProtocol.openai')}
                   </button>
                 </div>
-                <p className={styles.fieldHint}>{t('ruleForm.directionHint')}</p>
+                <p className={styles.fieldHint}>{t('ruleForm.protocolHint')}</p>
+              </div>
+            </section>
+
+            <section className={styles.formSection}>
+              <h2 className={styles.sectionTitle}>{t('ruleForm.sectionModelSettings')}</h2>
+
+              <div className={styles.formGroup}>
+                <label htmlFor="defaultModel">{t('servicePage.defaultModel')}</label>
+                <Input
+                  id="defaultModel"
+                  value={defaultModel}
+                  onChange={(e) => {
+                    setDefaultModel(e.target.value);
+                    if (errors.defaultModel) {
+                      setErrors((prev) => ({ ...prev, defaultModel: undefined }));
+                    }
+                  }}
+                  placeholder={t('ruleForm.defaultModelPlaceholder')}
+                  className={styles.input}
+                  error={errors.defaultModel}
+                  hint={t('ruleForm.defaultModelHint')}
+                />
+              </div>
+
+              <div className={styles.formGroup}>
+                <label>{t('ruleForm.modelMappings')}</label>
+                <div className={styles.mappingList}>
+                  {(group?.models || []).length === 0 ? (
+                    <p className={styles.fieldHint}>{t('ruleForm.noGroupModels')}</p>
+                  ) : (
+                    (group?.models || []).map((modelName) => (
+                      <div key={modelName} className={styles.mappingRow}>
+                        <span className={styles.mappingLabel}>{modelName}</span>
+                        <Input
+                          value={modelMappings[modelName] ?? ''}
+                          onChange={(e) => {
+                            setModelMappings((prev) => ({ ...prev, [modelName]: e.target.value }));
+                          }}
+                          placeholder={t('ruleForm.mappingPlaceholder')}
+                        />
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </section>
 
@@ -240,7 +310,7 @@ export const RuleEditPage: React.FC = () => {
             </div>
             <div className={styles.previewRow}>
               <span>{t('ruleForm.previewDirection')}</span>
-              <strong>{t(`ruleDirection.${direction}`)}</strong>
+              <strong>{t(`ruleProtocol.${protocol}`)}</strong>
             </div>
             <div className={styles.previewRow}>
               <span>{t('ruleForm.previewUpstream')}</span>

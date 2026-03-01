@@ -139,6 +139,24 @@
   color: var(--text-tertiary);
 }
 
+.mappingList {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.mappingRow {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.mappingLabel {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
 .formActions {
   display: flex;
   gap: var(--sp-2);
@@ -210,6 +228,10 @@
 
   .directionOptions {
     flex-direction: column;
+  }
+
+  .mappingRow {
+    grid-template-columns: 1fr;
   }
 
   .formActions {

@@ -44,18 +44,22 @@ export const zhCN = {
     createFirstGroup: '创建第一个分组',
     noGroupSelected: '请选择一个分组。',
     noRulesHint: '该分组暂无规则，请点击"添加规则"。',
-    groupPath: '分组 Path',
+    groupPath: '分组 ID',
     entryUrl: '入口 URL',
     copyEntryUrl: '复制入口 URL',
     addRule: '添加规则',
+    editGroup: '编辑分组',
     deleteGroup: '删除分组',
     groupName: '分组名称',
     model: '模型名称',
-    forwardDirection: '转发方向',
+    ruleName: '规则名称',
+    ruleProtocol: '下游协议',
+    defaultModel: '默认模型',
     token: 'Token',
     apiAddress: 'API 地址',
     current: '当前生效',
     rulesCount: '{{count}} 条规则',
+    modelsCount: '{{count}} 个模型',
     saveRule: '保存规则',
     deleteRule: '删除',
   },
@@ -64,6 +68,12 @@ export const zhCN = {
   ruleDirection: {
     oc: 'OpenAI -> Anthropic',
     co: 'Anthropic -> OpenAI',
+  },
+
+  // Rule Protocol
+  ruleProtocol: {
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
   },
 
   // Settings
@@ -151,9 +161,9 @@ export const zhCN = {
     addGroupTitle: '添加分组',
     groupNameLabel: '分组名称',
     groupNamePlaceholder: '例如 claude',
-    pathLabel: '转发 Path',
-    pathPlaceholder: '例如 claude',
-    pathHint: '请求路径示例：`/oc/{{path}}`（具体转发方向由生效规则决定）',
+    groupIdLabel: '分组 ID',
+    groupIdPlaceholder: '例如 claude',
+    groupIdHint: '请求路径将固定为 `/oc/{{id}}`，创建后不可修改。',
     create: '创建',
     cancel: '取消',
     save: '保存',
@@ -162,7 +172,7 @@ export const zhCN = {
   // Delete Group Modal
   deleteGroupModal: {
     title: '删除分组确认',
-    confirmText: '将删除分组"{{name}}"（path: {{path}}）。该操作不可撤销，确认继续吗？',
+    confirmText: '将删除分组"{{name}}"（id: {{path}}）。该操作不可撤销，确认继续吗？',
     confirmDelete: '确认删除',
     cancel: '取消',
   },
@@ -187,6 +197,7 @@ export const zhCN = {
     serviceStopped: '服务已停止',
     restartComplete: '重启完成',
     groupCreated: '分组已创建',
+    groupUpdated: '分组已更新',
     groupDeleted: '分组已删除',
     ruleCreated: '规则已创建',
     ruleUpdated: '规则已更新',
@@ -216,14 +227,31 @@ export const zhCN = {
   // Rule Form
   ruleForm: {
     sectionRouting: '路由配置',
+    sectionModelSettings: '模型设置',
     sectionSecurity: '凭证与上游地址',
-    directionHint: '定义 OpenAI 与 Anthropic 协议格式转换方向。',
+    protocolHint: '按请求 URL 识别上游协议，本项用于配置下游协议。',
+    ruleNamePlaceholder: '例如 anth-default',
+    defaultModelPlaceholder: '例如 claude-3-7-sonnet',
+    defaultModelHint: '必填：当上游模型不在分组模型列表中时使用此模型。',
+    modelMappings: '模型映射关系',
+    noGroupModels: '当前分组还没有模型，请先去“编辑分组”添加。',
+    mappingPlaceholder: '输入要转发的模型名',
     tokenHint: '仅本地保存。建议使用最小权限的上游 Token。',
     endpointHint: '请包含协议头，例如 https://api.anthropic.com',
     previewTitle: '规则预览',
     previewPath: '入口路径',
     previewDirection: '转发方向',
     previewUpstream: '上游地址',
+  },
+
+  // Group Edit Page
+  groupEditPage: {
+    title: '编辑分组',
+    sectionBasic: '基础信息',
+    sectionModels: '分组模型',
+    groupIdImmutable: '分组 ID 用于请求路径，创建后不可修改。',
+    noModels: '暂无模型，添加后即可在规则中配置映射。',
+    newModelPlaceholder: '例如 a1',
   },
 
   // Common

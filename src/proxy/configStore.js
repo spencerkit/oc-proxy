@@ -3,7 +3,6 @@ const path = require("node:path");
 const { EventEmitter } = require("node:events");
 const { getDefaultConfig } = require("./defaultConfig");
 const { validateConfig } = require("./schema");
-const { migrateLegacyConfig, isStockAutoGroups, pruneStockSeedGroups } = require("./migrate");
 
 class ConfigStore extends EventEmitter {
   constructor(filePath) {
@@ -16,37 +15,34 @@ class ConfigStore extends EventEmitter {
     const dir = path.dirname(this.filePath);
     fs.mkdirSync(dir, { recursive: true });
 
-    if (!fs.existsSync(this.filePath)) {
+    const resetToDefault = () => {
       const defaultConfig = getDefaultConfig();
       fs.writeFileSync(this.filePath, JSON.stringify(defaultConfig, null, 2), "utf-8");
       this.config = defaultConfig;
+    };
+
+    if (!fs.existsSync(this.filePath)) {
+      resetToDefault();
       return;
     }
 
-    const raw = fs.readFileSync(this.filePath, "utf-8");
-    const parsed = JSON.parse(raw);
-    let result = validateConfig(parsed);
+    let parsed;
+    try {
+      const raw = fs.readFileSync(this.filePath, "utf-8");
+      parsed = JSON.parse(raw);
+    } catch {
+      resetToDefault();
+      return;
+    }
 
+    const normalized = this.normalizeConfig(parsed);
+    const result = validateConfig(normalized);
     if (!result.valid) {
-      const migrated = migrateLegacyConfig(parsed);
-      result = validateConfig(migrated);
-      if (!result.valid) {
-        throw new Error(`Invalid config at ${this.filePath}: ${result.errors.join("; ")}`);
-      }
-      fs.writeFileSync(this.filePath, JSON.stringify(migrated, null, 2), "utf-8");
-      this.config = migrated;
+      resetToDefault();
       return;
     }
 
-    if (isStockAutoGroups(parsed)) {
-      parsed.groups = [];
-      fs.writeFileSync(this.filePath, JSON.stringify(parsed, null, 2), "utf-8");
-    }
-    const pruned = pruneStockSeedGroups(parsed);
-    if (pruned.changed) {
-      fs.writeFileSync(this.filePath, JSON.stringify(pruned.config, null, 2), "utf-8");
-    }
-    this.config = parsed;
+    this.config = normalized;
   }
 
   get() {
@@ -54,17 +50,46 @@ class ConfigStore extends EventEmitter {
   }
 
   save(nextConfig) {
-    const result = validateConfig(nextConfig);
+    const normalized = this.normalizeConfig(nextConfig);
+    const result = validateConfig(normalized);
     if (!result.valid) {
       const err = new Error(`Config validation failed: ${result.errors.join("; ")}`);
       err.statusCode = 400;
       err.details = result.errors;
       throw err;
     }
-    this.config = JSON.parse(JSON.stringify(nextConfig));
+    this.config = JSON.parse(JSON.stringify(normalized));
     fs.writeFileSync(this.filePath, JSON.stringify(this.config, null, 2), "utf-8");
     this.emit("updated", this.get());
     return this.get();
+  }
+
+  normalizeConfig(input) {
+    const defaults = getDefaultConfig();
+    const source = input && typeof input === "object" ? input : {};
+
+    return {
+      ...defaults,
+      ...source,
+      server: {
+        ...defaults.server,
+        ...(source.server || {})
+      },
+      compat: {
+        ...defaults.compat,
+        ...(source.compat || {})
+      },
+      ui: {
+        ...defaults.ui,
+        ...(source.ui || {}),
+        launchOnStartup: !!(source.ui && source.ui.launchOnStartup)
+      },
+      logging: {
+        ...defaults.logging,
+        ...(source.logging || {})
+      },
+      groups: Array.isArray(source.groups) ? source.groups : defaults.groups
+    };
   }
 }
 

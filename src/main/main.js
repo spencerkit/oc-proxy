@@ -1,7 +1,6 @@
 const path = require("node:path");
+const fs = require("node:fs");
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
-const { ConfigStore } = require("../proxy/configStore");
-const { ProxyServer } = require("../proxy/server");
 const { LogStore } = require("./logStore");
 
 let mainWindow = null;
@@ -12,10 +11,29 @@ let logStore = null;
 // 检查是否为开发模式
 // 开发模式：从 out 目录运行，但源代码在 src/main 目录
 // 生产模式：从打包的应用运行
-const fs = require('fs');
-const outDir = path.join(__dirname, '..');
-const srcDir = path.join(__dirname, '../../src');
+const srcDir = path.join(__dirname, "../../src");
 const isDev = fs.existsSync(srcDir);
+
+function loadProxyModules() {
+  const srcProxyDir = path.join(__dirname, "../../src/proxy");
+  const outProxyDir = path.join(__dirname, "../proxy");
+  const preferSrc = isDev && fs.existsSync(srcProxyDir);
+
+  const firstDir = preferSrc ? srcProxyDir : outProxyDir;
+  const secondDir = preferSrc ? outProxyDir : srcProxyDir;
+
+  try {
+    const { ConfigStore } = require(path.join(firstDir, "configStore.js"));
+    const { ProxyServer } = require(path.join(firstDir, "server.js"));
+    return { ConfigStore, ProxyServer };
+  } catch (error) {
+    const { ConfigStore } = require(path.join(secondDir, "configStore.js"));
+    const { ProxyServer } = require(path.join(secondDir, "server.js"));
+    return { ConfigStore, ProxyServer };
+  }
+}
+
+const { ConfigStore, ProxyServer } = loadProxyModules();
 
 // 获取开发服务器URL
 function getDevServerUrl() {

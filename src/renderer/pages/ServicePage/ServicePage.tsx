@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Copy, Trash2, Plus } from 'lucide-react';
+import { Copy, Trash2, Plus, Pencil } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useProxyStore } from '@/store';
 import { Button, Modal, Input } from '@/components';
 import { useTranslation, useLogs } from '@/hooks';
@@ -12,6 +13,7 @@ import styles from './ServicePage.module.css';
  * Main page for managing proxy groups and rules
  */
 export const ServicePage: React.FC = () => {
+  const navigate = useNavigate();
   const { t } = useTranslation();
   const { config, saveConfig, status } = useProxyStore();
   const { showToast } = useLogs();
@@ -22,10 +24,11 @@ export const ServicePage: React.FC = () => {
   const [showDeleteRuleModal, setShowDeleteRuleModal] = useState(false);
   const [pendingDeleteRuleId, setPendingDeleteRuleId] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
-  const [newGroupPath, setNewGroupPath] = useState('');
+  const [newGroupId, setNewGroupId] = useState('');
 
   const groups = config?.groups ?? [];
   const activeGroup = groups.find((g) => g.id === activeGroupId);
+  const activeGroupModels = Array.isArray(activeGroup?.models) ? activeGroup.models : [];
   const activeRule = activeGroup?.rules.find((r) => r.id === selectedRuleId) ?? null;
   const pendingDeleteRule = activeGroup?.rules.find((r) => r.id === pendingDeleteRuleId) ?? null;
 
@@ -44,17 +47,24 @@ export const ServicePage: React.FC = () => {
   };
 
   const handleAddGroup = async () => {
-    if (!newGroupName.trim() || !newGroupPath.trim()) return;
+    if (!newGroupName.trim() || !newGroupId.trim() || !config) return;
+    const normalizedId = newGroupId.trim().replace(/^\/+/, '');
+    if (!/^[a-zA-Z0-9_-]+$/.test(normalizedId)) {
+      showToast(t('validation.invalidFormat', { field: t('modal.groupIdLabel') }), 'error');
+      return;
+    }
+    if ((config.groups || []).some((group) => group.id === normalizedId)) {
+      showToast(t('validation.alreadyExists', { field: t('modal.groupIdLabel') }), 'error');
+      return;
+    }
 
     const newGroup: Group = {
-      id: crypto.randomUUID(),
+      id: normalizedId,
       name: newGroupName.trim(),
-      path: newGroupPath.trim().replace(/^\//, ''),
+      models: [],
       activeRuleId: null,
       rules: [],
     };
-
-    if (!config) return;
 
     const newConfig: ProxyConfig = {
       ...config,
@@ -64,7 +74,7 @@ export const ServicePage: React.FC = () => {
     await saveConfig(newConfig);
     setShowAddGroupModal(false);
     setNewGroupName('');
-    setNewGroupPath('');
+    setNewGroupId('');
     setActiveGroupId(newGroup.id);
     showToast(t('toast.groupCreated'), 'success');
   };
@@ -111,9 +121,7 @@ export const ServicePage: React.FC = () => {
   const handleCopyEntryUrl = async () => {
     if (!activeGroup) return;
 
-    const host = status?.address ?? 'localhost';
-    const port = config?.server.port ?? 8080;
-    const url = `http://${host}:${port}/oc/${activeGroup.path}`;
+    const url = `${getServerBaseUrl()}/oc/${activeGroup.id}`;
 
     try {
       await navigator.clipboard.writeText(url);
@@ -125,9 +133,15 @@ export const ServicePage: React.FC = () => {
 
   const getEntryUrl = () => {
     if (!activeGroup) return '';
-    const host = status?.address ?? 'localhost';
-    const port = config?.server.port ?? 8080;
-    return `http://${host}:${port}/oc/${activeGroup.path}`;
+    return `${getServerBaseUrl()}/oc/${activeGroup.id}`;
+  };
+
+  const getServerBaseUrl = () => {
+    if (status?.address && /^https?:\/\//.test(status.address)) {
+      return status.address.replace(/\/+$/, '');
+    }
+    const port = config?.server.port ?? 8899;
+    return `http://localhost:${port}`;
   };
 
   return (
@@ -172,7 +186,7 @@ export const ServicePage: React.FC = () => {
                       onClick={() => handleSelectGroup(group.id)}
                     >
                       <span className={styles.groupName}>{group.name}</span>
-                      <span className={styles.groupPath}>/{group.path}</span>
+                      <span className={styles.groupPath}>/{group.id}</span>
                       <span className={styles.groupRuleCount}>{group.rules.length}</span>
                     </button>
                   </li>
@@ -196,9 +210,12 @@ export const ServicePage: React.FC = () => {
               <div className={styles.groupInfo}>
                 <h2>{activeGroup.name}</h2>
                 <div className={styles.groupMeta}>
-                  <span className={styles.metaChip}>/{activeGroup.path}</span>
+                  <span className={styles.metaChip}>/{activeGroup.id}</span>
                   <span className={styles.metaChip}>
                     {t('servicePage.rulesCount', { count: activeGroup.rules.length })}
+                  </span>
+                  <span className={styles.metaChip}>
+                    {t('servicePage.modelsCount', { count: activeGroupModels.length })}
                   </span>
                 </div>
                 <div className={styles.entryUrl}>
@@ -213,14 +230,24 @@ export const ServicePage: React.FC = () => {
                   />
                 </div>
               </div>
-              <Button
-                variant="danger"
-                size="small"
-                icon={Trash2}
-                onClick={() => setShowDeleteGroupModal(true)}
-                title={t('servicePage.deleteGroup')}
-                aria-label={t('servicePage.deleteGroup')}
-              />
+              <div className={styles.groupActions}>
+                <Button
+                  variant="default"
+                  size="small"
+                  icon={Pencil}
+                  onClick={() => navigate(`/groups/${activeGroup.id}/edit`)}
+                  title={t('servicePage.editGroup')}
+                  aria-label={t('servicePage.editGroup')}
+                />
+                <Button
+                  variant="danger"
+                  size="small"
+                  icon={Trash2}
+                  onClick={() => setShowDeleteGroupModal(true)}
+                  title={t('servicePage.deleteGroup')}
+                  aria-label={t('servicePage.deleteGroup')}
+                />
+              </div>
             </div>
 
             {/* Rule List */}
@@ -236,15 +263,19 @@ export const ServicePage: React.FC = () => {
             {/* Rule Detail (when rule is selected) */}
             {selectedRuleId && activeRule && (
               <div className={styles.ruleDetail}>
-                <h3>{activeRule.model}</h3>
+                <h3>{activeRule.name}</h3>
                 <div className={styles.ruleInfo}>
                   <div className={styles.ruleInfoItem}>
-                    <span className={styles.label}>{t('servicePage.forwardDirection')}:</span>
-                    <span>{t(`ruleDirection.${activeRule.direction}`)}</span>
+                    <span className={styles.label}>{t('servicePage.ruleProtocol')}:</span>
+                    <span>{t(`ruleProtocol.${activeRule.protocol}`)}</span>
                   </div>
                   <div className={styles.ruleInfoItem}>
                     <span className={styles.label}>{t('servicePage.apiAddress')}:</span>
                     <span>{activeRule.apiAddress}</span>
+                  </div>
+                  <div className={styles.ruleInfoItem}>
+                    <span className={styles.label}>{t('servicePage.defaultModel')}:</span>
+                    <span>{activeRule.defaultModel}</span>
                   </div>
                 </div>
                 <div className={styles.ruleActions}>
@@ -279,14 +310,14 @@ export const ServicePage: React.FC = () => {
             />
           </div>
           <div className={styles.formGroup}>
-            <label htmlFor="groupPath">{t('modal.pathLabel')}</label>
+            <label htmlFor="groupId">{t('modal.groupIdLabel')}</label>
             <Input
-              id="groupPath"
-              value={newGroupPath}
-              onChange={(e) => setNewGroupPath(e.target.value)}
-              placeholder={t('modal.pathPlaceholder')}
+              id="groupId"
+              value={newGroupId}
+              onChange={(e) => setNewGroupId(e.target.value)}
+              placeholder={t('modal.groupIdPlaceholder')}
             />
-            <p className={styles.formHint}>{t('modal.pathHint')}</p>
+            <p className={styles.formHint}>{t('modal.groupIdHint', { id: newGroupId.trim() || 'group-id' })}</p>
           </div>
           <div className={styles.modalActions}>
             <Button variant="default" onClick={() => setShowAddGroupModal(false)}>
@@ -295,7 +326,7 @@ export const ServicePage: React.FC = () => {
             <Button
               variant="primary"
               onClick={handleAddGroup}
-              disabled={!newGroupName.trim() || !newGroupPath.trim()}
+              disabled={!newGroupName.trim() || !newGroupId.trim()}
             >
               {t('modal.create')}
             </Button>
@@ -312,7 +343,7 @@ export const ServicePage: React.FC = () => {
         <div className={styles.modalContent}>
           <p>{t('deleteGroupModal.confirmText', {
             name: activeGroup?.name,
-            path: activeGroup?.path,
+            path: activeGroup?.id,
           })}</p>
           <div className={styles.modalActions}>
             <Button variant="default" onClick={() => setShowDeleteGroupModal(false)}>
@@ -336,7 +367,7 @@ export const ServicePage: React.FC = () => {
       >
         <div className={styles.modalContent}>
           <p>{t('deleteRuleModal.confirmText', {
-            model: pendingDeleteRule?.model ?? '',
+            model: pendingDeleteRule?.name ?? '',
           })}</p>
           <div className={styles.modalActions}>
             <Button

@@ -5,7 +5,8 @@ const { toProxyError } = require("./errors");
 const {
   normalizeOpenAIRequest,
   mapOpenAIToAnthropicRequest,
-  mapAnthropicToOpenAIResponse
+  mapAnthropicToOpenAIResponse,
+  mapOpenAIChatToResponses
 } = require("./mappers/openaiToAnthropic");
 const {
   mapAnthropicToOpenAIRequest,
@@ -51,10 +52,11 @@ function normalizeHeaders(headers) {
   return out;
 }
 
-function findGroupAndRule(config, groupPath) {
-  const group = (config.groups || []).find((g) => g.path === groupPath);
+function findGroupAndRule(config, groupId) {
+  const groups = config.groups || [];
+  const group = groups.find((g) => g.id === groupId);
   if (!group) {
-    const err = new Error(`Group not found for path: ${groupPath}`);
+    const err = new Error(`Group not found for id: ${groupId}`);
     err.statusCode = 404;
     throw err;
   }
@@ -79,8 +81,13 @@ function findGroupAndRule(config, groupPath) {
 }
 
 function assertRuleReady(rule) {
-  if (!rule.model || !String(rule.model).trim()) {
-    const err = new Error("Active rule model is empty");
+  if (!rule.name || !String(rule.name).trim()) {
+    const err = new Error("Active rule name is empty");
+    err.statusCode = 409;
+    throw err;
+  }
+  if (!rule.defaultModel || !String(rule.defaultModel).trim()) {
+    const err = new Error("Active rule defaultModel is empty");
     err.statusCode = 409;
     throw err;
   }
@@ -123,12 +130,12 @@ function resolveUpstreamUrl(apiAddress, defaultPath) {
   return url.toString();
 }
 
-function buildRuleHeaders(direction, rule) {
+function buildRuleHeaders(protocol, rule) {
   const headers = {
     "content-type": "application/json"
   };
 
-  if (direction === "oc") {
+  if (protocol === "anthropic") {
     headers["x-api-key"] = rule.token;
     headers["anthropic-version"] = "2023-06-01";
   } else {
@@ -136,6 +143,77 @@ function buildRuleHeaders(direction, rule) {
   }
 
   return headers;
+}
+
+function parseProxyRequestPath(path) {
+  const matched = path.match(/^\/oc\/([a-zA-Z0-9_-]+)(\/.*)?$/);
+  if (!matched) return null;
+  return {
+    groupId: matched[1],
+    suffixPath: matched[2] || ""
+  };
+}
+
+function detectEntryProtocol(suffixPath) {
+  const normalized = suffixPath && suffixPath !== "/" ? suffixPath : "/chat/completions";
+  const cleanPath = (normalized.startsWith("/") ? normalized : `/${normalized}`).replace(/\/+$/, "") || "/";
+
+  const isAnthropic = cleanPath === "/messages" || cleanPath === "/v1/messages";
+  if (isAnthropic) {
+    return {
+      protocol: "anthropic",
+      endpoint: "messages"
+    };
+  }
+
+  const isOpenAIChat = cleanPath === "/chat/completions" || cleanPath === "/v1/chat/completions";
+  if (isOpenAIChat) {
+    return {
+      protocol: "openai",
+      endpoint: "chat_completions"
+    };
+  }
+
+  const isOpenAIResponses = cleanPath === "/responses" || cleanPath === "/v1/responses";
+  if (isOpenAIResponses) {
+    return {
+      protocol: "openai",
+      endpoint: "responses"
+    };
+  }
+
+  return null;
+}
+
+function resolveTargetModel(rule, group, requestBody) {
+  const requestedModel = requestBody?.model;
+  const normalizedRequestedModel = typeof requestedModel === "string" ? requestedModel.trim() : "";
+  const groupModels = Array.isArray(group.models) ? group.models : [];
+  const mappings = rule.modelMappings && typeof rule.modelMappings === "object" ? rule.modelMappings : {};
+
+  if (!normalizedRequestedModel) {
+    return rule.defaultModel;
+  }
+
+  if (groupModels.includes(normalizedRequestedModel)) {
+    const mapped = mappings[normalizedRequestedModel];
+    if (typeof mapped === "string" && mapped.trim()) {
+      return mapped.trim();
+    }
+    return normalizedRequestedModel;
+  }
+
+  return rule.defaultModel;
+}
+
+function resolveUpstreamPath(targetProtocol, entryEndpoint) {
+  if (targetProtocol === "anthropic") {
+    return "/v1/messages";
+  }
+  if (entryEndpoint === "responses") {
+    return "/v1/responses";
+  }
+  return "/v1/chat/completions";
 }
 
 function ensureModel(body, model) {
@@ -268,6 +346,8 @@ class ProxyServer {
       groupName: null,
       ruleId: null,
       direction: null,
+      entryProtocol: null,
+      downstreamProtocol: null,
       model: null,
       forwardingAddress: null,
       requestHeaders: toRedactedHeaders(headers, config),
@@ -334,9 +414,9 @@ class ProxyServer {
         }
       }
 
-      const matched = path.match(/^\/oc\/([a-zA-Z0-9_-]+)(?:\/.*)?$/);
-      if (method !== "POST" || !matched) {
-        const payload = { error: { code: "not_found", message: "Use POST /oc/:groupPath (optional SDK suffix is supported)" } };
+      const parsedPath = parseProxyRequestPath(path);
+      if (method !== "POST" || !parsedPath) {
+        const payload = { error: { code: "not_found", message: "Use POST /oc/:groupId/:endpoint (messages/chat/completions/responses)" } };
         sendJson(res, 404, payload, { "x-trace-id": traceId });
         this.finalizeRequestChain(chain, started, {
           status: "rejected",
@@ -347,52 +427,65 @@ class ProxyServer {
         return;
       }
 
-      const groupPath = matched[1];
-      chain.groupPath = groupPath;
+      const { groupId, suffixPath } = parsedPath;
+      chain.groupPath = groupId;
 
       const requestBody = await readRequestBody(req);
       chain.requestBody = toRedacted(requestBody, config);
 
-      const { group, rule } = findGroupAndRule(config, groupPath);
+      const entry = detectEntryProtocol(suffixPath);
+      if (!entry) {
+        const err = new Error(`Unsupported entry path: /oc/${groupId}${suffixPath || ""}`);
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const { group, rule } = findGroupAndRule(config, groupId);
       assertRuleReady(rule);
 
       chain.groupName = group.name;
       chain.ruleId = rule.id;
-      chain.model = rule.model;
-      chain.direction = rule.direction;
+      chain.model = rule.name;
+      chain.entryProtocol = entry.protocol;
+      chain.downstreamProtocol = rule.protocol;
+      chain.direction = entry.protocol === "openai" && rule.protocol === "anthropic"
+        ? "oc"
+        : (entry.protocol === "anthropic" && rule.protocol === "openai" ? "co" : null);
 
-      const direction = rule.direction;
-      if (direction !== "oc" && direction !== "co") {
-        const err = new Error(`Unsupported rule direction: ${direction}`);
+      const downstreamProtocol = rule.protocol;
+      if (downstreamProtocol !== "openai" && downstreamProtocol !== "anthropic") {
+        const err = new Error(`Unsupported rule protocol: ${downstreamProtocol}`);
         err.statusCode = 409;
         throw err;
       }
 
-      const upstreamPath = direction === "oc" ? "/v1/messages" : "/v1/chat/completions";
+      const targetModel = resolveTargetModel(rule, group, requestBody);
+      const requestedModel = typeof requestBody?.model === "string" ? requestBody.model : rule.defaultModel;
+      const upstreamPath = resolveUpstreamPath(downstreamProtocol, entry.endpoint);
       const upstreamUrl = resolveUpstreamUrl(rule.apiAddress, upstreamPath);
       chain.forwardingAddress = upstreamUrl;
 
       let upstreamBody;
       let stream = false;
-      const requestedModel = requestBody.model || rule.model;
 
-      if (direction === "oc") {
-        const normalized = requestBody.input != null && requestBody.messages == null
+      if (entry.protocol === "openai" && downstreamProtocol === "anthropic") {
+        const normalized = entry.endpoint === "responses"
           ? normalizeOpenAIRequest("/v1/responses", requestBody)
           : requestBody;
-
-        upstreamBody = mapOpenAIToAnthropicRequest(ensureModel(normalized, rule.model), {
+        upstreamBody = mapOpenAIToAnthropicRequest(ensureModel(normalized, targetModel), {
           strictMode: config.compat.strictMode,
-          targetModel: rule.model
+          targetModel
         });
-        stream = !!upstreamBody.stream;
+      } else if (entry.protocol === "anthropic" && downstreamProtocol === "openai") {
+        upstreamBody = mapAnthropicToOpenAIRequest(ensureModel(requestBody, targetModel), {
+          strictMode: config.compat.strictMode,
+          targetModel
+        });
       } else {
-        upstreamBody = mapAnthropicToOpenAIRequest(ensureModel(requestBody, rule.model), {
-          strictMode: config.compat.strictMode,
-          targetModel: rule.model
-        });
-        stream = !!upstreamBody.stream;
+        upstreamBody = ensureModel(requestBody, targetModel);
       }
+
+      stream = !!upstreamBody.stream;
       chain.forwardRequestBody = toRedacted(upstreamBody, config);
 
       this.metrics.requests += 1;
@@ -405,7 +498,7 @@ class ProxyServer {
       try {
         upstreamResponse = await fetch(upstreamUrl, {
           method: "POST",
-          headers: buildRuleHeaders(direction, rule),
+          headers: buildRuleHeaders(downstreamProtocol, rule),
           body: JSON.stringify(upstreamBody),
           signal: controller.signal
         });
@@ -429,10 +522,12 @@ class ProxyServer {
           throw err;
         }
 
-        if (direction === "oc") {
+        if (entry.protocol === "openai" && downstreamProtocol === "anthropic") {
           await this.bridgeAnthropicToOpenAI(upstreamResponse, res, traceId, requestedModel);
-        } else {
+        } else if (entry.protocol === "anthropic" && downstreamProtocol === "openai") {
           await this.bridgeOpenAIToAnthropic(upstreamResponse, res, traceId, requestedModel);
+        } else {
+          await this.pipeSSE(upstreamResponse, res, traceId);
         }
 
         this.updateLatency(Date.now() - started);
@@ -463,9 +558,10 @@ class ProxyServer {
       }
 
       let outputBody = upstreamJson;
-      if (direction === "oc") {
-        outputBody = mapAnthropicToOpenAIResponse(upstreamJson, { requestModel: requestedModel });
-      } else {
+      if (entry.protocol === "openai" && downstreamProtocol === "anthropic") {
+        const chatBody = mapAnthropicToOpenAIResponse(upstreamJson, { requestModel: requestedModel });
+        outputBody = entry.endpoint === "responses" ? mapOpenAIChatToResponses(chatBody) : chatBody;
+      } else if (entry.protocol === "anthropic" && downstreamProtocol === "openai") {
         outputBody = mapOpenAIToAnthropicResponse(upstreamJson, { requestModel: requestedModel });
       }
 
@@ -500,6 +596,17 @@ class ProxyServer {
       return;
     }
     this.metrics.avgLatencyMs = Math.round(((this.metrics.avgLatencyMs * (n - 1)) + ms) / n);
+  }
+
+  async pipeSSE(upstreamResponse, res, traceId) {
+    beginSSE(res, { "x-trace-id": traceId });
+    const reader = upstreamResponse.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    res.end();
   }
 
   async bridgeAnthropicToOpenAI(upstreamResponse, res, traceId, requestModel) {

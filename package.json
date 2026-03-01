@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node scripts/sync-proxy.js",
     "preview": "vite preview",
     "start": "electron .",
     "electron:dev": "vite",

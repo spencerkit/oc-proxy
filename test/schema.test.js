@@ -19,7 +19,7 @@ test("invalid config returns errors", () => {
       {
         id: "g1",
         name: "n1",
-        path: "bad path",
+        models: [],
         activeRuleId: "r1",
         rules: []
       }
@@ -36,15 +36,17 @@ test("group active rule must exist", () => {
     {
       id: "g1",
       name: "demo",
-      path: "demo",
+      models: ["a1"],
       activeRuleId: "not_exists",
       rules: [
         {
           id: "r1",
-          model: "m1",
+          name: "rule-1",
+          protocol: "anthropic",
           token: "t1",
           apiAddress: "https://api.example.com",
-          direction: "oc"
+          defaultModel: "m1",
+          modelMappings: {}
         }
       ]
     }

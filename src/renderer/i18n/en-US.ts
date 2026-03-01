@@ -44,18 +44,22 @@ export const enUS = {
     createFirstGroup: 'Create First Group',
     noGroupSelected: 'Please select a group.',
     noRulesHint: 'This group has no rules yet. Click "Add Rule" to create one.',
-    groupPath: 'Group Path',
+    groupPath: 'Group ID',
     entryUrl: 'Entry URL',
     copyEntryUrl: 'Copy Entry URL',
     addRule: 'Add Rule',
+    editGroup: 'Edit Group',
     deleteGroup: 'Delete Group',
     groupName: 'Group Name',
     model: 'Model Name',
-    forwardDirection: 'Forward Direction',
+    ruleName: 'Rule Name',
+    ruleProtocol: 'Downstream Protocol',
+    defaultModel: 'Default Model',
     token: 'Token',
     apiAddress: 'API Address',
     current: 'Currently Active',
     rulesCount: '{{count}} rules',
+    modelsCount: '{{count}} models',
     saveRule: 'Save Rule',
     deleteRule: 'Delete',
   },
@@ -64,6 +68,12 @@ export const enUS = {
   ruleDirection: {
     oc: 'OpenAI -> Anthropic',
     co: 'Anthropic -> OpenAI',
+  },
+
+  // Rule Protocol
+  ruleProtocol: {
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
   },
 
   // Settings
@@ -151,9 +161,9 @@ export const enUS = {
     addGroupTitle: 'Add Group',
     groupNameLabel: 'Group Name',
     groupNamePlaceholder: 'e.g. claude',
-    pathLabel: 'Forward Path',
-    pathPlaceholder: 'e.g. claude',
-    pathHint: 'Request path example: `/oc/{{path}}` (forwarding direction determined by active rule)',
+    groupIdLabel: 'Group ID',
+    groupIdPlaceholder: 'e.g. claude',
+    groupIdHint: 'Request path is fixed to `/oc/{{id}}` and cannot be changed after creation.',
     create: 'Create',
     cancel: 'Cancel',
     save: 'Save',
@@ -162,7 +172,7 @@ export const enUS = {
   // Delete Group Modal
   deleteGroupModal: {
     title: 'Confirm Delete Group',
-    confirmText: 'This will delete group "{{name}}" (path: {{path}}). This action cannot be undone. Continue?',
+    confirmText: 'This will delete group "{{name}}" (id: {{path}}). This action cannot be undone. Continue?',
     confirmDelete: 'Confirm Delete',
     cancel: 'Cancel',
   },
@@ -187,6 +197,7 @@ export const enUS = {
     serviceStopped: 'Service stopped',
     restartComplete: 'Restart complete',
     groupCreated: 'Group created',
+    groupUpdated: 'Group updated',
     groupDeleted: 'Group deleted',
     ruleCreated: 'Rule created',
     ruleUpdated: 'Rule updated',
@@ -216,14 +227,31 @@ export const enUS = {
   // Rule Form
   ruleForm: {
     sectionRouting: 'Routing',
+    sectionModelSettings: 'Model Settings',
     sectionSecurity: 'Credentials & Upstream',
-    directionHint: 'Defines conversion direction between OpenAI and Anthropic formats.',
+    protocolHint: 'Upstream protocol is detected by URL. This field configures downstream protocol.',
+    ruleNamePlaceholder: 'e.g. anth-default',
+    defaultModelPlaceholder: 'e.g. claude-3-7-sonnet',
+    defaultModelHint: 'Required: used when upstream model is not listed in group models.',
+    modelMappings: 'Model Mappings',
+    noGroupModels: 'No group models yet. Add models in "Edit Group" first.',
+    mappingPlaceholder: 'Target model name',
     tokenHint: 'Stored locally. Use an upstream token with only required scope.',
     endpointHint: 'Include protocol, e.g. https://api.anthropic.com',
     previewTitle: 'Rule Preview',
     previewPath: 'Entry Path',
     previewDirection: 'Direction',
     previewUpstream: 'Upstream',
+  },
+
+  // Group Edit Page
+  groupEditPage: {
+    title: 'Edit Group',
+    sectionBasic: 'Basic',
+    sectionModels: 'Group Models',
+    groupIdImmutable: 'Group ID is used in request path and cannot be changed after creation.',
+    noModels: 'No models yet. Add models to enable rule mappings.',
+    newModelPlaceholder: 'e.g. a1',
   },
 
   // Common

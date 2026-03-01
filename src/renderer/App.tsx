@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from '@/components';
-import { ServicePage, SettingsPage, LogsPage, RuleEditPage, RuleCreatePage } from '@/pages';
+import { ServicePage, SettingsPage, LogsPage, RuleEditPage, RuleCreatePage, GroupEditPage } from '@/pages';
 import { useProxyStore } from '@/store';
 import { useTranslation } from '@/hooks';
 
@@ -97,6 +97,7 @@ const App: React.FC = () => {
         <Route path="/" element={<ServicePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/logs" element={<LogsPage />} />
+        <Route path="/groups/:groupId/edit" element={<GroupEditPage />} />
         <Route path="/groups/:groupId/rules/new" element={<RuleCreatePage />} />
         <Route path="/groups/:groupId/rules/:ruleId/edit" element={<RuleEditPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

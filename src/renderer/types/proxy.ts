@@ -6,15 +6,22 @@
 export type RuleDirection = 'oc' | 'co';
 
 /**
+ * Protocol family supported by proxy
+ */
+export type RuleProtocol = 'openai' | 'anthropic';
+
+/**
  * Proxy rule interface
  * Defines a single translation rule between API formats
  */
 export interface Rule {
   id: string;
-  model: string;
-  direction: RuleDirection;
+  name: string;
+  protocol: RuleProtocol;
   token: string;
   apiAddress: string;
+  defaultModel: string;
+  modelMappings: Record<string, string>;
 }
 
 /**
@@ -24,7 +31,7 @@ export interface Rule {
 export interface Group {
   id: string;
   name: string;
-  path: string;
+  models: string[];
   activeRuleId: string | null;
   rules: Rule[];
 }
@@ -86,6 +93,8 @@ export interface LogEntry {
   groupName: string | null;
   ruleId: string | null;
   direction: RuleDirection | null;
+  entryProtocol?: RuleProtocol | null;
+  downstreamProtocol?: RuleProtocol | null;
   model: string | null;
   forwardingAddress: string | null;
   requestHeaders?: Record<string, string>;
