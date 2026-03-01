@@ -1,0 +1,358 @@
+/* ServicePage Component Styles */
+
+.servicePage {
+  display: flex;
+  height: 100%;
+  gap: 1rem;
+}
+
+/* Sidebar - Group List */
+.sidebar {
+  width: 280px;
+  min-width: 280px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.groupList {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.groupListHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.groupListHeader h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.groupListContent {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.groupItems {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.groupItem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.75rem;
+  margin-bottom: 0.25rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.groupItem:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+}
+
+.groupItem.active {
+  background: var(--bg-active);
+  border-color: var(--primary-color);
+}
+
+.groupName {
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-right: 0.5rem;
+}
+
+.groupPath {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  font-family: monospace;
+}
+
+/* Main Content */
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto;
+}
+
+.noSelection {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-tertiary);
+}
+
+.emptyHint {
+  color: var(--text-tertiary);
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 1rem;
+}
+
+/* Group Header */
+.groupHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+}
+
+.groupInfo h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.entryUrl {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.entryUrl code {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+/* Rule List */
+.ruleList {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.ruleListHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ruleListHeader h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ruleItems {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.ruleItem {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.75rem;
+  margin-bottom: 0.25rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.ruleItem:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+}
+
+.ruleItem.active {
+  background: var(--bg-active);
+  border-color: var(--primary-color);
+}
+
+.deleteButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  opacity: 0;
+}
+
+.ruleItem:hover + .deleteButton,
+.deleteButton:hover {
+  opacity: 1;
+}
+
+.deleteButton:hover {
+  background: var(--tab-active-bg-2);
+  color: var(--danger);
+}
+
+.ruleModel {
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.ruleDirection {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  margin-right: 0.5rem;
+}
+
+.currentBadge {
+  font-size: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  background: var(--success-color);
+  color: white;
+  border-radius: 9999px;
+  font-weight: 500;
+}
+
+/* Rule Detail */
+.ruleDetail {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.ruleDetail h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.ruleInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.ruleInfoItem {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.ruleInfoItem .label {
+  color: var(--text-tertiary);
+}
+
+.ruleActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Rule Form */
+.ruleForm {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.ruleForm h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.formGroup {
+  margin-bottom: 1rem;
+}
+
+.formGroup label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.directionOptions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.directionOption {
+  flex: 1;
+  padding: 0.5rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.directionOption:hover {
+  background: var(--bg-hover);
+}
+
+.directionOption.active {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: white;
+}
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+/* Modal Content */
+.modalContent {
+  padding: 1rem 0;
+}
+
+.modalContent .formGroup {
+  margin-bottom: 1.5rem;
+}
+
+.formHint {
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  margin-top: 0.5rem;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
