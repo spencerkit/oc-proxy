@@ -17,7 +17,7 @@
     "start": "electron .",
     "icons:generate": "electron scripts/generate-icons.js",
     "electron:dev": "vite",
-    "electron:build": "electron-builder",
+    "electron:build": "npm run build && electron-builder",
     "test": "node --require ./scripts/register-ts.js --test",
     "prepare": "husky install"
   },
@@ -44,8 +44,13 @@
       "icon": "assets/icon.ico",
       "target": [
         "nsis",
-        "portable"
+        "zip"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true
     }
   },
   "dependencies": {
