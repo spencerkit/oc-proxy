@@ -11,7 +11,7 @@ const {
   Tray,
   nativeImage,
 } = require("electron")
-const { LogStore } = require("./logStore")
+const { ProxyRuntimeClient } = require("./proxyRuntimeClient")
 
 if (!require.extensions[".ts"]) {
   require.extensions[".ts"] = require.extensions[".js"]
@@ -19,8 +19,7 @@ if (!require.extensions[".ts"]) {
 
 let mainWindow = null
 let configStore = null
-let proxyServer = null
-let logStore = null
+let proxyRuntime = null
 let tray = null
 let isQuitting = false
 const SHUTDOWN_TIMEOUT_MS = 2500
@@ -46,34 +45,30 @@ function loadProxyModules() {
 
   try {
     const { ConfigStore } = loadModuleFromDir(firstDir, "configStore")
-    const { ProxyServer } = loadModuleFromDir(firstDir, "server")
     const { createGroupsBackupPayload, extractGroupsFromImportPayload } = loadModuleFromDir(
       firstDir,
       "groupBackup"
     )
     return {
       ConfigStore,
-      ProxyServer,
       createGroupsBackupPayload,
       extractGroupsFromImportPayload,
     }
   } catch (_error) {
     const { ConfigStore } = loadModuleFromDir(secondDir, "configStore")
-    const { ProxyServer } = loadModuleFromDir(secondDir, "server")
     const { createGroupsBackupPayload, extractGroupsFromImportPayload } = loadModuleFromDir(
       secondDir,
       "groupBackup"
     )
     return {
       ConfigStore,
-      ProxyServer,
       createGroupsBackupPayload,
       extractGroupsFromImportPayload,
     }
   }
 }
 
-const { ConfigStore, ProxyServer, createGroupsBackupPayload, extractGroupsFromImportPayload } =
+const { ConfigStore, createGroupsBackupPayload, extractGroupsFromImportPayload } =
   loadProxyModules()
 
 // 获取开发服务器URL
@@ -243,14 +238,62 @@ function buildGroupsBackupContent() {
   }
 }
 
+async function syncRuntimeConfig(prevConfig, nextConfig) {
+  if (!proxyRuntime) {
+    return {
+      restarted: false,
+      status: {
+        running: false,
+        address: null,
+        metrics: {
+          requests: 0,
+          streamRequests: 0,
+          errors: 0,
+          avgLatencyMs: 0,
+          uptimeStartedAt: null,
+        },
+      },
+    }
+  }
+
+  const statusBefore = await proxyRuntime.getStatus()
+  await proxyRuntime.setConfig(nextConfig)
+
+  let restarted = false
+  if (statusBefore.running && hasServerSettingChanged(prevConfig, nextConfig)) {
+    await proxyRuntime.stopServer()
+    await proxyRuntime.startServer()
+    restarted = true
+  }
+
+  const status = await proxyRuntime.getStatus()
+  return {
+    restarted,
+    status,
+  }
+}
+
 async function stopProxyServerWithTimeout(timeoutMs = SHUTDOWN_TIMEOUT_MS) {
-  if (!proxyServer || !proxyServer.isRunning()) {
+  if (!proxyRuntime) {
     return
   }
 
   await Promise.race([
-    proxyServer.stop().catch(error => {
+    proxyRuntime.stopServer().catch(error => {
       console.error("Failed to stop proxy server during shutdown:", error)
+    }),
+    new Promise(resolve => setTimeout(resolve, timeoutMs)),
+  ])
+}
+
+async function shutdownRuntimeWithTimeout(timeoutMs = SHUTDOWN_TIMEOUT_MS) {
+  if (!proxyRuntime) {
+    return
+  }
+
+  await Promise.race([
+    proxyRuntime.shutdown(timeoutMs).catch(error => {
+      console.error("Failed to shutdown proxy runtime during app quit:", error)
     }),
     new Promise(resolve => setTimeout(resolve, timeoutMs)),
   ])
@@ -364,12 +407,7 @@ async function importGroupsAndSave(parsedInput, meta = {}) {
   }
   const saved = configStore.save(nextConfig)
 
-  let restarted = false
-  if (proxyServer.isRunning() && hasServerSettingChanged(prevConfig, saved)) {
-    await proxyServer.stop()
-    await proxyServer.start()
-    restarted = true
-  }
+  const { restarted, status } = await syncRuntimeConfig(prevConfig, saved)
 
   return {
     ok: true,
@@ -377,7 +415,7 @@ async function importGroupsAndSave(parsedInput, meta = {}) {
     importedGroupCount: importedGroups.length,
     config: saved,
     restarted,
-    status: proxyServer.getStatus(),
+    status,
     ...meta,
   }
 }
@@ -388,15 +426,15 @@ function setupIpc() {
   })
 
   ipcMain.handle("app:get-status", async () => {
-    return proxyServer.getStatus()
+    return proxyRuntime.getStatus()
   })
 
   ipcMain.handle("app:start-server", async () => {
-    return proxyServer.start()
+    return proxyRuntime.startServer()
   })
 
   ipcMain.handle("app:stop-server", async () => {
-    return proxyServer.stop()
+    return proxyRuntime.stopServer()
   })
 
   ipcMain.handle("config:get", async () => {
@@ -409,18 +447,13 @@ function setupIpc() {
     applyLaunchOnStartupSetting(saved)
     syncTrayByConfig(saved)
 
-    let restarted = false
-    if (proxyServer.isRunning() && hasServerSettingChanged(prevConfig, saved)) {
-      await proxyServer.stop()
-      await proxyServer.start()
-      restarted = true
-    }
+    const { restarted, status } = await syncRuntimeConfig(prevConfig, saved)
 
     return {
       ok: true,
       config: saved,
       restarted,
-      status: proxyServer.getStatus(),
+      status,
     }
   })
 
@@ -546,27 +579,32 @@ function setupIpc() {
   })
 
   ipcMain.handle("logs:list", async (_event, max) => {
-    return logStore.list(max || 100)
+    return proxyRuntime.listLogs(max || 100)
   })
 
   ipcMain.handle("logs:clear", async () => {
-    logStore.clear()
-    return { ok: true }
+    return proxyRuntime.clearLogs()
   })
 }
 
 app.whenReady().then(async () => {
   const configPath = path.join(app.getPath("userData"), "config.json")
   configStore = new ConfigStore(configPath)
-  logStore = new LogStore(100)
 
   configStore.initialize()
   applyLaunchOnStartupSetting(configStore.get())
-  proxyServer = new ProxyServer(configStore, logStore)
+  proxyRuntime = new ProxyRuntimeClient({
+    logLimit: 100,
+  })
+  try {
+    await proxyRuntime.initialize(configStore.get())
+  } catch (err) {
+    console.error("Failed to initialize proxy runtime:", err)
+  }
 
   setupIpc()
   try {
-    await proxyServer.start()
+    await proxyRuntime.startServer()
   } catch (err) {
     console.error("Failed to auto-start proxy service:", err)
   }
@@ -586,6 +624,7 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", async () => {
   if (process.platform !== "darwin") {
     await stopProxyServerWithTimeout()
+    await shutdownRuntimeWithTimeout()
     const forceExitTimer = setTimeout(() => {
       app.exit(0)
     }, SHUTDOWN_TIMEOUT_MS)
@@ -601,4 +640,5 @@ app.on("window-all-closed", async () => {
 app.on("before-quit", async () => {
   isQuitting = true
   destroyTray()
+  await shutdownRuntimeWithTimeout()
 })

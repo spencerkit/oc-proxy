@@ -42,6 +42,39 @@ export default defineConfig({
           },
         },
       },
+      {
+        entry: path.join(rootDir, "src/main/proxyWorker.ts"),
+        vite: {
+          build: {
+            outDir: path.join(rootDir, "out/main"),
+            rollupOptions: {
+              external: ["electron"],
+            },
+          },
+        },
+      },
+      {
+        entry: path.join(rootDir, "src/main/proxyRuntimeClient.ts"),
+        vite: {
+          build: {
+            outDir: path.join(rootDir, "out/main"),
+            rollupOptions: {
+              external: ["electron"],
+            },
+          },
+        },
+      },
+      {
+        entry: path.join(rootDir, "src/main/logStore.ts"),
+        vite: {
+          build: {
+            outDir: path.join(rootDir, "out/main"),
+            rollupOptions: {
+              external: ["electron"],
+            },
+          },
+        },
+      },
     ]),
   ],
   build: {
