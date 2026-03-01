@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const {
   createGroupsBackupPayload,
   extractGroupsFromImportPayload
-} = require("../src/proxy/groupBackup");
+} = require("../src/proxy/groupBackup.ts");
 
 test("createGroupsBackupPayload keeps groups and metadata", () => {
   const groups = [

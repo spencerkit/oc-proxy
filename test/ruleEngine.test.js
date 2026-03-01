@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { resolveRoute } = require("../src/proxy/ruleEngine");
+const { resolveRoute } = require("../src/proxy/ruleEngine.ts");
 
 const baseConfig = {
   providers: [

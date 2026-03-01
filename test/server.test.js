@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { ProxyServer, __test__ } = require("../src/proxy/server");
+const { ProxyServer, __test__ } = require("../src/proxy/server.ts");
 
 const { readRequestBody, buildUpstreamError } = __test__;
 

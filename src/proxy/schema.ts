@@ -1,3 +1,4 @@
+// @ts-nocheck
 function isObject(v) {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }

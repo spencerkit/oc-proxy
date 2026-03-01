@@ -1,3 +1,4 @@
+// @ts-nocheck
 const { EventEmitter } = require("node:events");
 
 class LogStore extends EventEmitter {

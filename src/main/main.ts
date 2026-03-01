@@ -1,7 +1,12 @@
+// @ts-nocheck
 const path = require("node:path");
 const fs = require("node:fs");
 const { app, BrowserWindow, ipcMain, Menu, dialog, clipboard } = require("electron");
-const { LogStore } = require("./logStore");
+const { LogStore } = require("./logStore.ts");
+
+if (!require.extensions[".ts"]) {
+  require.extensions[".ts"] = require.extensions[".js"];
+}
 
 let mainWindow = null;
 let configStore = null;
@@ -22,10 +27,25 @@ function loadProxyModules() {
   const firstDir = preferSrc ? srcProxyDir : outProxyDir;
   const secondDir = preferSrc ? outProxyDir : srcProxyDir;
 
+  function loadModuleFromDir(dir, baseName) {
+    const candidates = [`${baseName}.ts`, `${baseName}.js`];
+
+    let lastError = null;
+    for (const fileName of candidates) {
+      try {
+        return require(path.join(dir, fileName));
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError;
+  }
+
   try {
-    const { ConfigStore } = require(path.join(firstDir, "configStore.js"));
-    const { ProxyServer } = require(path.join(firstDir, "server.js"));
-    const { createGroupsBackupPayload, extractGroupsFromImportPayload } = require(path.join(firstDir, "groupBackup.js"));
+    const { ConfigStore } = loadModuleFromDir(firstDir, "configStore");
+    const { ProxyServer } = loadModuleFromDir(firstDir, "server");
+    const { createGroupsBackupPayload, extractGroupsFromImportPayload } = loadModuleFromDir(firstDir, "groupBackup");
     return {
       ConfigStore,
       ProxyServer,
@@ -33,9 +53,9 @@ function loadProxyModules() {
       extractGroupsFromImportPayload
     };
   } catch (error) {
-    const { ConfigStore } = require(path.join(secondDir, "configStore.js"));
-    const { ProxyServer } = require(path.join(secondDir, "server.js"));
-    const { createGroupsBackupPayload, extractGroupsFromImportPayload } = require(path.join(secondDir, "groupBackup.js"));
+    const { ConfigStore } = loadModuleFromDir(secondDir, "configStore");
+    const { ProxyServer } = loadModuleFromDir(secondDir, "server");
+    const { createGroupsBackupPayload, extractGroupsFromImportPayload } = loadModuleFromDir(secondDir, "groupBackup");
     return {
       ConfigStore,
       ProxyServer,

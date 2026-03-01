@@ -1,3 +1,4 @@
+// @ts-nocheck
 function toProxyError(err, traceId, protocol) {
   const statusCode = err.statusCode || 500;
   return {

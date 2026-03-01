@@ -1,18 +1,19 @@
+// @ts-nocheck
 const http = require("node:http");
 const { randomUUID } = require("node:crypto");
-const { redactPayload } = require("./redact");
-const { toProxyError } = require("./errors");
+const { redactPayload } = require("./redact.ts");
+const { toProxyError } = require("./errors.ts");
 const {
   normalizeOpenAIRequest,
   mapOpenAIToAnthropicRequest,
   mapAnthropicToOpenAIResponse,
   mapOpenAIChatToResponses
-} = require("./mappers/openaiToAnthropic");
+} = require("./mappers/openaiToAnthropic.ts");
 const {
   mapAnthropicToOpenAIRequest,
   mapOpenAIToAnthropicResponse
-} = require("./mappers/anthropicToOpenai");
-const { createSSEParser, beginSSE, writeSSE } = require("./sse");
+} = require("./mappers/anthropicToOpenai.ts");
+const { createSSEParser, beginSSE, writeSSE } = require("./sse.ts");
 
 const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
 

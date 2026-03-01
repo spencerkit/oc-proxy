@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { validateConfig } = require("../src/proxy/schema");
-const { getDefaultConfig } = require("../src/proxy/defaultConfig");
+const { validateConfig } = require("../src/proxy/schema.ts");
+const { getDefaultConfig } = require("../src/proxy/defaultConfig.ts");
 
 test("default config validates", () => {
   const cfg = getDefaultConfig();

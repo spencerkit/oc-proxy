@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, HashRouter } from 'react-router-dom';
 import App from './App';
 import { I18nextProvider } from 'react-i18next';
 import i18n, { initI18n, type Locale } from './i18n';
@@ -33,6 +33,10 @@ function resolveLocale(locale?: unknown): Locale {
   return locale === 'zh-CN' ? 'zh-CN' : 'en-US';
 }
 
+function resolveRouter() {
+  return window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
+}
+
 // Initialize i18n before rendering
 async function init() {
   let initialLocale: Locale = 'en-US';
@@ -59,15 +63,16 @@ async function init() {
   }
 
   console.log('[Main] Root element found, rendering...');
+  const Router = resolveRouter();
 
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <I18nextProvider i18n={i18n}>
         <ToastProvider>
-          <BrowserRouter>
+          <Router>
             <App />
             <ToastContainer />
-          </BrowserRouter>
+          </Router>
         </ToastProvider>
       </I18nextProvider>
     </React.StrictMode>

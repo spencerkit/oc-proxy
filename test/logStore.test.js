@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { LogStore } = require("../src/main/logStore");
+const { LogStore } = require("../src/main/logStore.ts");
 
 test("log store keeps latest 100 entries by default", () => {
   const store = new LogStore();

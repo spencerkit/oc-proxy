@@ -1,3 +1,4 @@
+// @ts-nocheck
 function createSSEParser(onEvent) {
   let buffer = "";
   let currentEvent = "message";

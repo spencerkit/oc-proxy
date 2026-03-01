@@ -1,3 +1,4 @@
+// @ts-nocheck
 const SUPPORTED_ANTHROPIC_KEYS = new Set([
   "model",
   "messages",

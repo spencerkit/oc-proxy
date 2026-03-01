@@ -15,7 +15,7 @@ export default defineConfig({
     react(),
     electron([
       {
-        entry: path.join(rootDir, 'src/main/main.js'),
+        entry: path.join(rootDir, 'src/main/main.ts'),
         onstart(options) {
           options.startup();
         },
@@ -29,7 +29,7 @@ export default defineConfig({
         },
       },
       {
-        entry: path.join(rootDir, 'src/main/preload.js'),
+        entry: path.join(rootDir, 'src/main/preload.ts'),
         onstart(options) {
           options.reload();
         },

@@ -1,8 +1,9 @@
+// @ts-nocheck
 const fs = require("node:fs");
 const path = require("node:path");
 const { EventEmitter } = require("node:events");
-const { getDefaultConfig } = require("./defaultConfig");
-const { validateConfig } = require("./schema");
+const { getDefaultConfig } = require("./defaultConfig.ts");
+const { validateConfig } = require("./schema.ts");
 
 class ConfigStore extends EventEmitter {
   constructor(filePath) {

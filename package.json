@@ -18,7 +18,7 @@
     "icons:generate": "electron scripts/generate-icons.js",
     "electron:dev": "vite",
     "electron:build": "electron-builder",
-    "test": "node --test",
+    "test": "node --require ./scripts/register-ts.js --test",
     "prepare": "husky install"
   },
   "engines": {

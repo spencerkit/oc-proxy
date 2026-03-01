@@ -1,3 +1,4 @@
+// @ts-nocheck
 const DEFAULT_CONFIG = {
   server: {
     host: "0.0.0.0",
