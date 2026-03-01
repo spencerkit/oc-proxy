@@ -1,6 +1,6 @@
-# OA Proxy (Electron)
+# OA Proxy
 
-Desktop proxy service built with Electron for bidirectional protocol forwarding between OpenAI-compatible APIs and Anthropic APIs.
+Desktop proxy service for bidirectional protocol forwarding between OpenAI-compatible APIs and Anthropic APIs.
 
 中文文档: [docs/zh/README.md](docs/zh/README.md)
 
@@ -14,6 +14,7 @@ OA Proxy provides:
   - Anthropic -> OpenAI-compatible
 - Streaming bridge (SSE) and basic tool call mapping
 - Local request chain logs with redaction support
+- Group/rule backup and restore (JSON file and clipboard)
 
 ## Use Cases
 
@@ -56,15 +57,55 @@ npm install
 npm start
 ```
 
+Notes:
+- `npm start` runs the local desktop app using built output in `out/`.
+- If `out/` is stale or missing, run `npm run build` first.
+
+## Development & Debugging
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start renderer dev server (Terminal 1):
+
+```bash
+npm run dev
+```
+
+Start desktop app (Terminal 2):
+
+```bash
+npm start
+```
+
+Debug tips:
+- Main-process logs are printed in the terminal running `npm start`.
+- Renderer logs are visible in the app DevTools (opened automatically in current setup).
+
 ## Test
 
 ```bash
 npm test
 ```
 
+## Build
+
+```bash
+npm run build
+```
+
+Build output:
+- `out/renderer`: frontend assets
+- `out/main`: main process bundle
+- `out/preload`: preload bundle
+- `out/proxy`: synced proxy runtime modules
+
 ## Configuration
 
-On first launch, config is created under Electron `userData/config.json`.
+On first launch, config is created under the app user-data directory as `config.json`.
 
 Core sections:
 - `server`: host/port/auth
@@ -79,6 +120,22 @@ Core sections:
 Notes:
 - No groups are created by default.
 - Logs are kept in-memory with a default limit of 100 entries.
+- Importing backup JSON replaces all current groups and nested rules.
+
+## Backup & Restore
+
+Backup entry is in Settings:
+- Export:
+  - Export to folder (auto file name)
+  - Copy JSON to clipboard
+- Import (with confirmation):
+  - Import from JSON file
+  - Paste/import from clipboard JSON
+
+Accepted import JSON formats:
+- `groups` array directly
+- `{ "groups": [...] }`
+- `{ "config": { "groups": [...] } }`
 
 ## Security Notes
 

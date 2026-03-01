@@ -1,6 +1,6 @@
-# OA Proxy (Electron)
+# OA Proxy
 
-基于 Electron 的桌面代理服务，用于在 OpenAI 兼容协议与 Anthropic 协议之间做双向转发。
+桌面代理服务，用于在 OpenAI 兼容协议与 Anthropic 协议之间做双向转发。
 
 English documentation: [../../README.md](../../README.md)
 
@@ -14,6 +14,7 @@ OA Proxy 提供：
   - Anthropic -> OpenAI 兼容
 - 流式桥接（SSE）与基础工具调用映射
 - 本地请求链路日志与脱敏能力
+- 分组/规则的 JSON 备份与恢复（文件与剪贴板）
 
 ## 使用场景
 
@@ -56,15 +57,55 @@ npm install
 npm start
 ```
 
+说明：
+- `npm start` 启动本地桌面应用，读取 `out/` 中的构建产物。
+- 若 `out/` 不存在或内容过旧，请先执行 `npm run build`。
+
+## 开发与调试
+
+安装依赖：
+
+```bash
+npm install
+```
+
+启动前端开发服务（终端 1）：
+
+```bash
+npm run dev
+```
+
+启动桌面应用（终端 2）：
+
+```bash
+npm start
+```
+
+调试建议：
+- 主进程日志输出在执行 `npm start` 的终端。
+- 渲染进程日志在应用 DevTools 中查看（当前配置会自动打开）。
+
 ## 测试
 
 ```bash
 npm test
 ```
 
+## 构建
+
+```bash
+npm run build
+```
+
+构建产物目录：
+- `out/renderer`：前端静态资源
+- `out/main`：主进程产物
+- `out/preload`：预加载脚本产物
+- `out/proxy`：同步后的代理运行模块
+
 ## 配置说明
 
-首次启动会在 Electron 的 `userData/config.json` 生成配置文件。
+首次启动会在应用用户数据目录生成 `config.json` 配置文件。
 
 核心配置结构：
 - `server`: host/port/auth
@@ -79,6 +120,22 @@ npm test
 补充说明：
 - 默认不会自动创建分组。
 - 日志在内存中保留，默认上限为 100 条。
+- 导入备份 JSON 时会覆盖当前全部分组及其规则。
+
+## 备份与恢复
+
+在设置页可进行分组/规则备份：
+- 导出：
+  - 导出到文件夹（自动生成文件名）
+  - 复制 JSON 到剪贴板
+- 导入（含确认弹框）：
+  - 从 JSON 文件导入
+  - 从剪贴板 JSON 粘贴导入
+
+支持导入的 JSON 结构：
+- 直接传 `groups` 数组
+- `{ "groups": [...] }`
+- `{ "config": { "groups": [...] } }`
 
 ## 安全说明
 
