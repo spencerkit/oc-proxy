@@ -9,21 +9,69 @@ let configStore = null;
 let proxyServer = null;
 let logStore = null;
 
+// 检查是否为开发模式
+// 开发模式：从 out 目录运行，但源代码在 src/main 目录
+// 生产模式：从打包的应用运行
+const fs = require('fs');
+const outDir = path.join(__dirname, '..');
+const srcDir = path.join(__dirname, '../../src');
+const isDev = fs.existsSync(srcDir);
+
+// 获取开发服务器URL
+function getDevServerUrl() {
+  // 尝试从环境变量获取
+  if (process.env.VITE_DEV_SERVER_URL) {
+    return process.env.VITE_DEV_SERVER_URL;
+  }
+  // 尝试读取 Vite 启动时输出的端口
+  // 简单处理：默认尝试多个常用端口
+  const possiblePorts = [5173, 5174, 5175, 5176, 5177, 5178, 5179, 5180];
+  // 返回第一个端口，实际运行时如果失败可以尝试其他端口
+  // 这里我们简化处理，直接用 5173，实际可能需要更智能的检测
+  return 'http://localhost:5173';
+}
+
+const devServerUrl = isDev ? getDevServerUrl() : null;
+console.log('[Main] isDev:', isDev, 'devServerUrl:', devServerUrl);
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1240,
     height: 860,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "../preload/preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: false
     }
   });
 
   Menu.setApplicationMenu(null);
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
+
+  // 开发模式下从 Vite 服务器加载，生产模式从文件加载
+  if (isDev && devServerUrl) {
+    console.log('[Main] Loading from dev server:', devServerUrl);
+    mainWindow.loadURL(devServerUrl).then(() => {
+      console.log('[Main] Page loaded successfully');
+    }).catch((err) => {
+      console.error('[Main] Failed to load page:', err);
+    });
+  } else {
+    mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
+  }
+
+  // 监听页面加载错误
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('[Main] Page failed to load:', errorCode, errorDescription);
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[Main] Page finished loading');
+  });
+
+  // 自动打开开发者工具
+  mainWindow.webContents.openDevTools();
 }
 
 function hasServerSettingChanged(prev, next) {

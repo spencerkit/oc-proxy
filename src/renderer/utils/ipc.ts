@@ -21,6 +21,7 @@ export const ipc = {
    * @returns Promise resolving to server status with metrics
    */
   getStatus(): Promise<ProxyStatus> {
+    console.log('[IPC] getStatus called');
     return window.proxyApp.getStatus();
   },
 
@@ -29,6 +30,7 @@ export const ipc = {
    * @returns Promise resolving to server status with metrics
    */
   startServer(): Promise<ProxyStatus> {
+    console.log('[IPC] startServer called');
     return window.proxyApp.startServer();
   },
 
@@ -37,6 +39,7 @@ export const ipc = {
    * @returns Promise resolving to server status with metrics
    */
   stopServer(): Promise<ProxyStatus> {
+    console.log('[IPC] stopServer called');
     return window.proxyApp.stopServer();
   },
 
@@ -45,6 +48,7 @@ export const ipc = {
    * @returns Promise resolving to proxy configuration
    */
   getConfig(): Promise<ProxyConfig> {
+    console.log('[IPC] getConfig called');
     return window.proxyApp.getConfig();
   },
 
@@ -54,6 +58,7 @@ export const ipc = {
    * @returns Promise resolving to save result with status
    */
   saveConfig(config: ProxyConfig): Promise<SaveConfigResult> {
+    console.log('[IPC] saveConfig called');
     return window.proxyApp.saveConfig(config);
   },
 
@@ -63,6 +68,7 @@ export const ipc = {
    * @returns Promise resolving to array of log entries
    */
   listLogs(max?: number): Promise<LogEntry[]> {
+    console.log('[IPC] listLogs called', max);
     return window.proxyApp.listLogs(max);
   },
 
@@ -71,6 +77,7 @@ export const ipc = {
    * @returns Promise resolving to success status
    */
   clearLogs(): Promise<{ ok: boolean }> {
+    console.log('[IPC] clearLogs called');
     return window.proxyApp.clearLogs();
   },
 };

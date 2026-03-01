@@ -1,0 +1,134 @@
+/**
+ * Switch Component Styles
+ * Toggle switch for boolean values
+ */
+
+/* Wrapper for label + switch */
+.wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  user-select: none;
+}
+
+/* Label styling */
+.label {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-normal);
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* Base switch container */
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 44px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--switch-bg);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  flex-shrink: 0;
+  outline: none;
+}
+
+.switch:hover:not(.disabled) {
+  background: var(--line-strong);
+}
+
+.switch:focus-visible {
+  box-shadow: 0 0 0 2px var(--entry-bg), 0 0 0 4px var(--accent);
+}
+
+/* Disabled state */
+.switch.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Active/checked state */
+.switch.checked {
+  background: var(--switch-active-bg);
+  border-color: var(--switch-active-border);
+}
+
+.switch.checked:hover:not(.disabled) {
+  background: var(--switch-active-bg);
+  filter: brightness(1.1);
+}
+
+/* Toggle knob/thumb */
+.knob {
+  position: absolute;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: white;
+  box: 0 2px 4px rgba(0, 0, 0, 0.15);
+  transition: transform var(--transition-base);
+  flex-shrink: 0;
+}
+
+.knob.checked {
+  transform: translateX(20px);
+}
+
+/* Size variants */
+.small {
+  width: 36px;
+  height: 20px;
+}
+
+.small .knob {
+  width: 16px;
+  height: 16px;
+}
+
+.small .knob.checked {
+  transform: translateX(16px);
+}
+
+.large {
+  width: 52px;
+  height: 28px;
+}
+
+.large .knob {
+  width: 24px;
+  height: 24px;
+}
+
+.large .knob.checked {
+  transform: translateX(24px);
+}
+
+/* Hidden checkbox input */
+.input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* Description/hint text */
+.description {
+  display: block;
+  margin-top: var(--space-1);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-normal);
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* Full width */
+.fullWidth {
+  width: 100%;
+}

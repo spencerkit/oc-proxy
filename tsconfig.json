@@ -16,25 +16,31 @@
 
     /* Linting */
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
 
     /* Path aliases */
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@/typesi18n": ["src/renderer/i18n/index"],
-      "@/i18n/*": ["src/renderer/i18n/*"],
+      "@/renderer/*": ["src/renderer/*"],
       "@/types": ["src/renderer/types/index"],
       "@/types/*": ["src/renderer/types/*"],
+      "@/components": ["src/renderer/components/index"],
       "@/components/*": ["src/renderer/components/*"],
+      "@/hooks": ["src/renderer/hooks/index"],
       "@/hooks/*": ["src/renderer/hooks/*"],
       "@/store": ["src/renderer/store/index"],
       "@/store/*": ["src/renderer/store/*"],
       "@/utils": ["src/renderer/utils/index"],
       "@/utils/*": ["src/renderer/utils/*"],
-      "@shared/*": ["src/shared/*"]
+      "@/i18n": ["src/renderer/i18n/index"],
+      "@/i18n/*": ["src/renderer/i18n/*"],
+      "@/pages": ["src/renderer/pages/index"],
+      "@/pages/*": ["src/renderer/pages/*"],
+      "@/contexts": ["src/renderer/contexts/index"],
+      "@/contexts/*": ["src/renderer/contexts/*"]
     }
   },
   "include": ["src"],

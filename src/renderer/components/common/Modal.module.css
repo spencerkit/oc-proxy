@@ -1,0 +1,181 @@
+/**
+ * Modal Component Styles
+ * Dialog/overlay for focused user interactions
+ */
+
+/* Backdrop overlay */
+.backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--modal-backdrop);
+  z-index: 1000;
+  animation: fadeIn var(--transition-base);
+}
+
+/* Modal container */
+.modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  max-height: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow);
+  animation: slideUp var(--(transition-base));
+  overflow: hidden;
+}
+
+/* Size variants */
+.small {
+  width: 400px;
+}
+
+.medium {
+  width: 500px;
+}
+
+.large {
+  width: 600px;
+}
+
+.full {
+  width: 100%;
+  max-width: 90vw;
+}
+
+/* Modal header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-strong);
+  flex-shrink: 0;
+}
+
+.title {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text);
+  margin: 0;
+}
+
+.closeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  height: var(--space-5);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  transition: all var(--transition-fast);
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.closeButton:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text);
+}
+
+.closeButton:active {
+  transform: scale(0.95);
+}
+
+[data-theme='dark'] .closeButton:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Modal body */
+.body {
+  flex: 1;
+  padding: var(--space-5);
+  overflow-y: auto;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-normal);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 0;
+}
+
+/* Modal footer */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--line);
+  background: var(--panel-strong);
+  flex-shrink: 0;
+}
+
+/* Animation keyframes */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Exiting animation */
+.backdrop.exiting {
+  animation: fadeOut var(--transition-base) forwards;
+}
+
+.modal.exiting {
+  animation: slideDown var(--transition-base) forwards;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+}
+
+/* Focus trap styles */
+[hidden] {
+  display: none !important;
+}

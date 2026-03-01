@@ -1,0 +1,132 @@
+/**
+ * Layout Component Styles
+ * Main application layout wrapper
+ */
+
+/* Layout container */
+.layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg-a);
+}
+
+/* Main content area */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Content wrapper */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+/* Centered content variant */
+.centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Full-height content */
+.fullHeight {
+  height: calc(100vh - 56px); /* Subtract header height */
+}
+
+/* Footer */
+.footer {
+  padding: var(--space-4) var(--space-5);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-normal);
+  color: var(--muted);
+  text-align: center;
+}
+
+/* Loading state */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-10);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-normal);
+  color: var(--muted);
+}
+
+/* Error state */
+.error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-10);
+  text-align: center;
+}
+
+.errorIcon {
+  width: var(--space-12);
+  height: var(--space-12);
+  color: var(--danger);
+}
+
+.errorTitle {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text);
+  margin: 0;
+}
+
+.errorMessage {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-normal);
+  color: var(--muted);
+  margin: 0;
+  max-width: 400px;
+}
+
+/* Empty state */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-10);
+  text-align: center;
+}
+
+.emptyIcon {
+  width: var(--space-12);
+  height: var(--space-12);
+  color: var(--muted);
+}
+
+.emptyTitle {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text);
+  margin: 0;
+}
+
+.emptyMessage {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-normal);
+  color: var(--muted);
+  margin: 0;
+  max-width: 400px;
+}

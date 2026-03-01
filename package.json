@@ -2,14 +2,14 @@
   "name": "oa-proxy-electron",
   "version": "0.2.0",
   "description": "Electron-based OpenAI <-> Claude protocol proxy",
-  "main": "out/main/index.js",
+  "main": "out/main/main.js",
   "type": "commonjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "start": "electron .",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "vite",
     "electron:build": "electron-builder",
     "test": "node --test"
   },

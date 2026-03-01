@@ -111,6 +111,7 @@ export function t(key: string, options?: any): string {
  * Export the i18n instance for use in non-React components
  */
 export { i18n };
+export default i18n;
 
 /**
  * Re-export translation resources for type inference

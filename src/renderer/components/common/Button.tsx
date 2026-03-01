@@ -1,5 +1,6 @@
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import styles from './Button.module.css';
 
 export type ButtonVariant = 'primary' | 'danger' | 'ghost' | 'default';
@@ -35,6 +36,11 @@ export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonE
   fullWidth?: boolean;
 
   /**
+   * Whether to show loading spinner
+   */
+  loading?: boolean;
+
+  /**
    * Button content
    */
   children?: React.ReactNode;
@@ -49,6 +55,7 @@ export const Button: React.FC<ButtonProps> = ({
   icon: Icon,
   iconRight: IconRight,
   fullWidth = false,
+  loading = false,
   disabled,
   className,
   children,
@@ -59,22 +66,27 @@ export const Button: React.FC<ButtonProps> = ({
     variant !== 'default' && styles[variant],
     size !== 'medium' && styles[size],
     fullWidth && styles.fullWidth,
+    loading && styles.loading,
     className,
   ].filter(Boolean).join(' ');
 
   return (
     <button
       className={classes}
-      disabled={disabled}
+      disabled={disabled || loading}
       {...props}
     >
-      {Icon && (
+      {loading ? (
+        <span className={`${styles.icon} ${styles.iconLeft}`}>
+          <Loader2 size={16} strokeWidth={2} className={styles.spinner} />
+        </span>
+      ) : Icon ? (
         <span className={`${styles.icon} ${styles.iconLeft}`}>
           <Icon size={16} strokeWidth={2} />
         </span>
-      )}
+      ) : null}
       {children}
-      {IconRight && (
+      {IconRight && !loading && (
         <span className={`${styles.icon} ${styles.iconRight}`}>
           <IconRight size={16} strokeWidth={2} />
         </span>

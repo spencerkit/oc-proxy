@@ -1,0 +1,196 @@
+/**
+ * Toast Component Styles
+ * Temporary notification messages
+ */
+
+/* Toast container */
+.container {
+  position: fixed;
+  top: var(--space-6);
+  right: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  z-index: 2000;
+  pointer-events: none;
+}
+
+/* Toast item */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 300px;
+  max-width: 500px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--toast);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  animation: slideIn var(--transition-base);
+  pointer-events: auto;
+  color: var(--toast-text);
+}
+
+/* Toast variants */
+.toast.success {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+}
+
+.toast.error {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: white;
+}
+
+.toast.warning {
+  border-color: #f59e0b;
+  background: #f59e0b;
+  color: white;
+}
+
+.toast.info {
+  border-color: var(--line-strong);
+  background: var(--toast-bg);
+  color: var(--text);
+}
+
+/* Icon styling */
+.icon {
+  flex-shrink: 0;
+  width: var(--space-4);
+  height: var(--space-4);
+}
+
+/* Toast content */
+.content {
+  flex: 1;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-normal);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Close button */
+.closeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-4);
+  height: var(--space-4);
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  transition: all var(--transition-fast);
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.closeButton:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
+.toast.info .closeButton {
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--muted);
+}
+
+.toast.info .closeButton:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Progress bar */
+.progressBar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.5);
+  animation: progress var(--progress-duration) linear forwards;
+}
+
+.toast.info .progressBar {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* Toast actions container */
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* Toast action button */
+.actionButton {
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: rgba(255, 255, 255, 0.2);
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  transition: all var(--transition-fast);
+}
+
+.actionButton:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.toast.info .actionButton {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text);
+}
+
+.toast.info .actionButton:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* Animation keyframes */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
+@keyframes progress {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0;
+  }
+}
+
+/* Entering and exiting states */
+.toast.entering {
+  animation: slideIn var(--transition-base);
+}
+
+.toast.exiting {
+  animation: slideOut var(--transition-base) forwards;
+}

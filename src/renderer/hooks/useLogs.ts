@@ -5,8 +5,9 @@
  * Provides logs selector and auto-refresh effect.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useProxyStore } from '@/store';
+import { useToast } from '@/contexts/ToastContext';
 import type { LogEntry } from '@/types';
 
 /**
@@ -31,12 +32,18 @@ export function useLogs() {
   const refreshLogs = useProxyStore((state) => state.refreshLogs);
   const clearLogs = useProxyStore((state) => state.clearLogs);
   const error = useProxyStore((state) => state.error);
+  const { showToast } = useToast();
+
+  const showToastMessage = useCallback((message: string, type?: 'success' | 'error' | 'info' | 'warning') => {
+    showToast(message, type);
+  }, [showToast]);
 
   return {
     logs,
     refreshLogs,
     clearLogs,
     error,
+    showToast: showToastMessage,
   };
 }
 
@@ -56,6 +63,7 @@ export function useLogsAutoRefresh() {
   const logs = useProxyStore((state) => state.logs);
   const refreshLogs = useProxyStore((state) => state.refreshLogs);
   const clearLogs = useProxyStore((state) => state.clearLogs);
+  const { showToast } = useToast();
 
   // Auto-refresh effect
   useEffect(() => {
@@ -73,9 +81,14 @@ export function useLogsAutoRefresh() {
     };
   }, [refreshLogs]);
 
+  const showToastMessage = useCallback((message: string, type?: 'success' | 'error' | 'info' | 'warning') => {
+    showToast(message, type);
+  }, [showToast]);
+
   return {
     logs,
     clearLogs,
+    showToast: showToastMessage,
   };
 }
 
