@@ -32,6 +32,13 @@
   border-bottom: 1px solid var(--border);
 }
 
+.groupHeaderTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
 .groupListHeader h3 {
   font-family: var(--font-body);
   font-size: var(--text-xs);
@@ -39,6 +46,20 @@
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.countBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-full);
+  background: var(--surface-active);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
 }
 
 .groupListContent {
@@ -99,9 +120,33 @@
   color: var(--accent);
 }
 
+.groupItem.active .groupRuleCount {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
 .groupPath {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupRuleCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--surface-active);
+  color: var(--text-tertiary);
+  font-size: 10px;
   font-family: var(--font-mono);
 }
 
@@ -117,11 +162,18 @@
 }
 
 .emptyHint {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-3);
   padding: var(--sp-6) var(--sp-4);
   text-align: center;
   font-size: var(--text-sm);
   color: var(--text-tertiary);
   line-height: var(--leading-relaxed);
+}
+
+.emptyHint p {
+  margin: 0;
 }
 
 /* ── Main Content ── */
@@ -133,6 +185,17 @@
   min-width: 0;
 }
 
+.noSelection {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  color: var(--text-tertiary);
+  background: var(--bg-raised);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+}
+
 /* Group Header */
 .groupHeader {
   background: var(--bg-raised);
@@ -140,15 +203,44 @@
   border-radius: var(--radius-lg);
   padding: var(--sp-5);
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: var(--sp-3);
 }
 
-.groupTitle {
+.groupTitle,
+.groupInfo h2 {
   font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: var(--weight-medium);
   color: var(--text-primary);
+}
+
+.groupInfo {
+  min-width: 0;
+}
+
+.groupMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 var(--sp-3);
+}
+
+.metaChip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .entryUrlRow {
@@ -158,12 +250,19 @@
 }
 
 .entryUrl {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--accent);
   background: var(--accent-subtle);
   padding: var(--sp-2) var(--sp-3);
   border-radius: var(--radius-sm);
+}
+
+.entryUrl code {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -191,6 +290,13 @@
   border-bottom: 1px solid var(--border);
 }
 
+.ruleHeaderTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
 .ruleListHeader h3 {
   font-family: var(--font-body);
   font-size: var(--text-xs);
@@ -198,6 +304,16 @@
   color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.ruleGroupName {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ruleListContent {
@@ -252,14 +368,6 @@
   box-shadow: var(--shadow-sm);
 }
 
-.ruleItem:hover {
-  background: var(--surface-hover);
-}
-
-.ruleItem.active {
-  background: var(--surface-selected);
-}
-
 .ruleModel {
   font-weight: var(--weight-medium);
   font-size: var(--text-sm);
@@ -274,6 +382,9 @@
   font-size: var(--text-xs);
   color: var(--text-tertiary);
   font-family: var(--font-mono);
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-full);
+  background: var(--surface-active);
 }
 
 .currentBadge {
@@ -312,12 +423,49 @@
   color: var(--danger);
 }
 
+.deleteButton:focus-visible {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
 /* ── Rule Detail ── */
 .ruleDetail {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--sp-5);
+}
+
+.ruleDetail h3 {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+  margin-bottom: var(--sp-4);
+}
+
+.ruleInfo {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.ruleInfoItem {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.label {
+  color: var(--text-tertiary);
+  min-width: 92px;
+}
+
+.ruleActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--sp-4);
 }
 
 .ruleDetailTitle {
@@ -433,4 +581,48 @@
   justify-content: flex-end;
   gap: var(--sp-3);
   margin-top: var(--sp-5);
+}
+
+@media (max-width: 1024px) {
+  .servicePage {
+    gap: var(--sp-4);
+  }
+
+  .sidebar {
+    width: 220px;
+    min-width: 220px;
+  }
+}
+
+@media (max-width: 768px) {
+  .servicePage {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .groupHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .entryUrl {
+    flex-wrap: wrap;
+  }
+
+  .entryUrl code {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .ruleItem {
+    min-height: 52px;
+  }
+
+  .deleteButton {
+    opacity: 1;
+  }
 }

@@ -5,6 +5,10 @@ function normalizeBaseUrl(baseURL) {
   return baseURL.replace(/\/+$/, "");
 }
 
+function isObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 function isStockLegacyTemplate(oldConfig) {
   if (!oldConfig || !Array.isArray(oldConfig.providers) || !Array.isArray(oldConfig.models)) {
     return false;
@@ -94,6 +98,18 @@ function migrateLegacyConfig(oldConfig) {
     next.compat.strictMode = oldConfig.compat.strictMode;
   }
 
+  if (oldConfig && isObject(oldConfig.ui)) {
+    if (["light", "dark"].includes(oldConfig.ui.theme)) {
+      next.ui.theme = oldConfig.ui.theme;
+    }
+    if (["en-US", "zh-CN"].includes(oldConfig.ui.locale)) {
+      next.ui.locale = oldConfig.ui.locale;
+    }
+    if (typeof oldConfig.ui.launchOnStartup === "boolean") {
+      next.ui.launchOnStartup = oldConfig.ui.launchOnStartup;
+    }
+  }
+
   if (oldConfig && oldConfig.logging) {
     if (typeof oldConfig.logging.captureBody === "boolean") {
       next.logging.captureBody = oldConfig.logging.captureBody;
@@ -101,6 +117,10 @@ function migrateLegacyConfig(oldConfig) {
     if (Array.isArray(oldConfig.logging.redactRules)) {
       next.logging.redactRules = oldConfig.logging.redactRules.slice();
     }
+  }
+
+  if (oldConfig && Array.isArray(oldConfig.groups)) {
+    next.groups = JSON.parse(JSON.stringify(oldConfig.groups));
   }
 
   if (!oldConfig || !Array.isArray(oldConfig.models) || !Array.isArray(oldConfig.providers)) {

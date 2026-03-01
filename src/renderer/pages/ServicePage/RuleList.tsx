@@ -46,6 +46,7 @@ export const GroupList: React.FC<{
             {groups.map((group) => (
               <li key={group.id}>
                 <button
+                  type="button"
                   className={`${styles.groupItem} ${group.id === activeGroupId ? styles.active : ''}`}
                   onClick={() => onSelect(group.id)}
                 >
@@ -74,11 +75,10 @@ export const RuleList: React.FC<{
   rules: Group['rules'];
   activeRuleId: string | null;
   onSelect: (ruleId: string) => void;
-  onAdd: () => void;
   onDelete: (ruleId: string) => void;
   groupName: string;
   groupId: string;
-}> = ({ rules, activeRuleId, onSelect, onAdd, onDelete, groupName, groupId }) => {
+}> = ({ rules, activeRuleId, onSelect, onDelete, groupName, groupId }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
@@ -93,7 +93,11 @@ export const RuleList: React.FC<{
   return (
     <div className={styles.ruleList}>
       <div className={styles.ruleListHeader}>
-        <h3>{t('servicePage.model')} ({groupName})</h3>
+        <div className={styles.ruleHeaderTitle}>
+          <h3>{t('servicePage.model')}</h3>
+          <span className={styles.countBadge}>{rules.length}</span>
+          <span className={styles.ruleGroupName} title={groupName}>{groupName}</span>
+        </div>
         <Button
           variant="ghost"
           size="small"
@@ -110,6 +114,7 @@ export const RuleList: React.FC<{
             {rules.map((rule) => (
               <li key={rule.id} className={styles.ruleItemContainer}>
                 <button
+                  type="button"
                   className={`${styles.ruleItem} ${rule.id === activeRuleId ? styles.active : ''}`}
                   onClick={() => handleRuleClick(rule.id)}
                 >
@@ -122,12 +127,14 @@ export const RuleList: React.FC<{
                   )}
                 </button>
                 <button
+                  type="button"
                   className={styles.deleteButton}
                   onClick={(e) => {
                     e.stopPropagation();
                     onDelete(rule.id);
                   }}
                   title={t('servicePage.deleteRule')}
+                  aria-label={`${t('servicePage.deleteRule')}: ${rule.model}`}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -140,4 +147,4 @@ export const RuleList: React.FC<{
   );
 };
 
-export default ServicePageProps;
+export default RuleList;

@@ -1,7 +1,9 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Sun, Moon, Globe, Settings as SettingsIcon, FileText, Server, ArrowLeft } from 'lucide-react';
+import { useProxyStore } from '@/store';
+import type { LocaleCode, ThemeMode } from '@/types';
 import styles from './Header.module.css';
 import { Button } from '../common';
 
@@ -77,20 +79,18 @@ export const Header: React.FC<HeaderProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const { t, i18n } = useTranslation();
-  const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const stored = document.documentElement.getAttribute('data-theme');
-    if (stored === 'dark' || stored === 'light') return stored;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  });
+  const { config, saveConfig, loading } = useProxyStore();
 
-  // Apply theme on mount
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-  }, []);
-
-  const currentLocale = i18n.language as 'en-US' | 'zh-CN';
-  const supportedLocales = ['en-US', 'zh-CN'] as const;
+  const supportedLocales: LocaleCode[] = ['en-US', 'zh-CN'];
+  const documentTheme = document.documentElement.getAttribute('data-theme');
+  const theme: ThemeMode = config?.ui?.theme === 'dark'
+    ? 'dark'
+    : config?.ui?.theme === 'light'
+      ? 'light'
+      : documentTheme === 'dark'
+        ? 'dark'
+        : 'light';
+  const currentLocale: LocaleCode = config?.ui?.locale === 'zh-CN' ? 'zh-CN' : 'en-US';
 
   // Determine current view from location
   const getCurrentView = (): HeaderView => {
@@ -102,18 +102,43 @@ export const Header: React.FC<HeaderProps> = ({
 
   const currentView = view ?? getCurrentView();
 
-  // Toggle theme
-  const handleThemeToggle = useCallback(() => {
-    const newTheme = theme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
-    document.documentElement.setAttribute('data-theme', newTheme);
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    if (i18n.language !== currentLocale) {
+      i18n.changeLanguage(currentLocale);
+    }
+  }, [currentLocale, i18n]);
+
+  // Toggle theme
+  const handleThemeToggle = useCallback(() => {
+    if (!config) return;
+
+    const nextTheme: ThemeMode = theme === 'light' ? 'dark' : 'light';
+    saveConfig({
+      ...config,
+      ui: {
+        ...config.ui,
+        theme: nextTheme,
+      },
+    });
+  }, [config, saveConfig, theme]);
+
   // Change language
-  const handleLanguageChange = useCallback((locale: 'en-US' | 'zh-CN') => {
+  const handleLanguageChange = useCallback((locale: LocaleCode) => {
+    if (!config) return;
+
     i18n.changeLanguage(locale);
-    setShowLanguageDropdown(false);
-  }, [i18n]);
+    saveConfig({
+      ...config,
+      ui: {
+        ...config.ui,
+        locale,
+      },
+    });
+  }, [config, i18n, saveConfig]);
 
   // Handle view change - navigates to the appropriate route
   const handleViewChange = useCallback((newView: HeaderView) => {
@@ -133,21 +158,6 @@ export const Header: React.FC<HeaderProps> = ({
       }
     }
   }, [navigate, onViewChange]);
-
-  // Handle click outside language dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (showLanguageDropdown) {
-        const target = event.target as HTMLElement;
-        if (!target.closest(`[data-testid="${testId}-language-selector"]`)) {
-          setShowLanguageDropdown(false);
-        }
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showLanguageDropdown, testId]);
 
   return (
     <header className={styles.header} data-testid={testId}>
@@ -197,7 +207,7 @@ export const Header: React.FC<HeaderProps> = ({
           aria-current={currentView === 'service' ? 'page' : undefined}
         >
           <Server size={16} strokeWidth={2} className={styles.navIcon} />
-          {t('header.serviceSwitch')}
+          <span className={styles.navLabel}>{t('header.serviceSwitch')}</span>
         </button>
         <div className={styles.divider} />
         <button
@@ -207,7 +217,7 @@ export const Header: React.FC<HeaderProps> = ({
           aria-current={currentView === 'settings' ? 'page' : undefined}
         >
           <SettingsIcon size={16} strokeWidth={2} className={styles.navIcon} />
-          {t('header.settings')}
+          <span className={styles.navLabel}>{t('header.settings')}</span>
         </button>
         <button
           type="button"
@@ -216,7 +226,7 @@ export const Header: React.FC<HeaderProps> = ({
           aria-current={currentView === 'logs' ? 'page' : undefined}
         >
           <FileText size={16} strokeWidth={2} className={styles.navIcon} />
-          {t('header.logs')}
+          <span className={styles.navLabel}>{t('header.logs')}</span>
           {errorCount !== undefined && errorCount > 0 && (
             <span className={styles.badge}>{errorCount}</span>
           )}
@@ -230,6 +240,7 @@ export const Header: React.FC<HeaderProps> = ({
           type="button"
           className={styles.themeToggle}
           onClick={handleThemeToggle}
+          disabled={!config || loading}
           aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
           title={theme === 'light' ? 'Dark mode' : 'Light mode'}
         >
@@ -240,38 +251,21 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </button>
 
-        {/* Language selector */}
-        <div className={styles.languageSelector} data-testid={`${testId}-language-selector`}>
-          <button
-            type="button"
-            className={styles.languageButton}
-            onClick={() => setShowLanguageDropdown(!showLanguageDropdown)}
-            aria-expanded={showLanguageDropdown}
-            aria-haspopup="true"
-          >
-            <Globe size={16} strokeWidth={2} />
-            <span>{currentLocale === 'en-US' ? 'EN' : '中文'}</span>
-          </button>
-
-          {showLanguageDropdown && (
-            <div className={styles.languageDropdown} role="menu">
-              {supportedLocales.map((locale) => (
-                <button
-                  key={locale}
-                  type="button"
-                  className={`${styles.languageOption} ${
-                    currentLocale === locale ? 'aria-selected' : ''
-                  }`}
-                  onClick={() => handleLanguageChange(locale)}
-                  role="menuitem"
-                  aria-selected={currentLocale === locale}
-                >
-                  <Globe size={14} strokeWidth={2} />
-                  <span>{locale === 'en-US' ? 'English' : '简体中文'}</span>
-                </button>
-              ))}
-            </div>
-          )}
+        {/* Language segmented control */}
+        <div className={styles.languageSegment} role="group" aria-label={t('settings.language')} data-testid={`${testId}-language-selector`}>
+          <Globe size={14} strokeWidth={2} className={styles.languageIcon} />
+          {supportedLocales.map((locale) => (
+            <button
+              key={locale}
+              type="button"
+              className={`${styles.languageSegmentButton} ${currentLocale === locale ? styles.languageSegmentButtonActive : ''}`}
+              onClick={() => handleLanguageChange(locale)}
+              disabled={!config || loading}
+              aria-pressed={currentLocale === locale}
+            >
+              {locale === 'en-US' ? 'EN' : '中文'}
+            </button>
+          ))}
         </div>
 
         {/* Additional actions */}

@@ -4,8 +4,7 @@ import { useProxyStore } from '@/store';
 import { Button, Modal, Input } from '@/components';
 import { useTranslation, useLogs } from '@/hooks';
 import { RuleList } from './RuleList';
-import { RuleForm } from './RuleForm';
-import type { Group, Rule, ProxyConfig } from '@/types';
+import type { Group, ProxyConfig } from '@/types';
 import styles from './ServicePage.module.css';
 
 /**
@@ -19,14 +18,16 @@ export const ServicePage: React.FC = () => {
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [showAddGroupModal, setShowAddGroupModal] = useState(false);
-  const [showAddRuleForm, setShowAddRuleForm] = useState(false);
   const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
+  const [showDeleteRuleModal, setShowDeleteRuleModal] = useState(false);
+  const [pendingDeleteRuleId, setPendingDeleteRuleId] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupPath, setNewGroupPath] = useState('');
 
   const groups = config?.groups ?? [];
   const activeGroup = groups.find((g) => g.id === activeGroupId);
   const activeRule = activeGroup?.rules.find((r) => r.id === selectedRuleId) ?? null;
+  const pendingDeleteRule = activeGroup?.rules.find((r) => r.id === pendingDeleteRuleId) ?? null;
 
   // Auto-select first group if none selected
   React.useEffect(() => {
@@ -38,7 +39,8 @@ export const ServicePage: React.FC = () => {
   const handleSelectGroup = (groupId: string) => {
     setActiveGroupId(groupId);
     setSelectedRuleId(null);
-    setShowAddRuleForm(false);
+    setShowDeleteRuleModal(false);
+    setPendingDeleteRuleId(null);
   };
 
   const handleAddGroup = async () => {
@@ -79,44 +81,18 @@ export const ServicePage: React.FC = () => {
     showToast(t('toast.groupDeleted'), 'success');
   };
 
-  const handleAddRule = () => {
-    setShowAddRuleForm(true);
-    setSelectedRuleId(null);
+  const handleRequestDeleteRule = (ruleId: string) => {
+    setPendingDeleteRuleId(ruleId);
+    setShowDeleteRuleModal(true);
   };
 
-  const handleSaveRule = async (ruleData: Omit<Rule, 'id'>) => {
-    if (!activeGroupId || !config) return;
-
-    const newRule: Rule = {
-      id: crypto.randomUUID(),
-      ...ruleData,
-    };
+  const handleDeleteRule = async () => {
+    if (!activeGroupId || !config || !pendingDeleteRuleId) return;
 
     const newGroups = config.groups.map((group) => {
       if (group.id === activeGroupId) {
-        return {
-          ...group,
-          rules: [...group.rules, newRule],
-          activeRuleId: group.activeRuleId ?? newRule.id,
-        };
-      }
-      return group;
-    });
-
-    const newConfig = { ...config, groups: newGroups };
-    await saveConfig(newConfig);
-    setShowAddRuleForm(false);
-    setSelectedRuleId(newRule.id);
-    showToast(t('toast.ruleCreated'), 'success');
-  };
-
-  const handleDeleteRule = async (ruleId: string) => {
-    if (!activeGroupId || !config) return;
-
-    const newGroups = config.groups.map((group) => {
-      if (group.id === activeGroupId) {
-        const newRules = group.rules.filter((r) => r.id !== ruleId);
-        const newActiveId = group.activeRuleId === ruleId
+        const newRules = group.rules.filter((r) => r.id !== pendingDeleteRuleId);
+        const newActiveId = group.activeRuleId === pendingDeleteRuleId
           ? (newRules.length > 0 ? newRules[0].id : null)
           : group.activeRuleId;
         return { ...group, rules: newRules, activeRuleId: newActiveId };
@@ -127,6 +103,8 @@ export const ServicePage: React.FC = () => {
     const newConfig = { ...config, groups: newGroups };
     await saveConfig(newConfig);
     setSelectedRuleId(null);
+    setShowDeleteRuleModal(false);
+    setPendingDeleteRuleId(null);
     showToast(t('toast.ruleDeleted'), 'success');
   };
 
@@ -158,28 +136,44 @@ export const ServicePage: React.FC = () => {
       <div className={styles.sidebar}>
         <div className={styles.groupList}>
           <div className={styles.groupListHeader}>
-            <h3>{t('servicePage.groupPath')}</h3>
+            <div className={styles.groupHeaderTitle}>
+              <h3>{t('servicePage.groupPath')}</h3>
+              <span className={styles.countBadge}>{groups.length}</span>
+            </div>
             <Button
               variant="ghost"
               size="small"
               icon={Plus}
               onClick={() => setShowAddGroupModal(true)}
               title={t('header.addGroup')}
+              aria-label={t('header.addGroup')}
             />
           </div>
           <div className={styles.groupListContent}>
             {groups.length === 0 ? (
-              <p className={styles.emptyHint}>{t('servicePage.noGroupsHint')}</p>
+              <div className={styles.emptyHint}>
+                <p>{t('servicePage.noGroupsHint')}</p>
+                <Button
+                  variant="primary"
+                  size="small"
+                  icon={Plus}
+                  onClick={() => setShowAddGroupModal(true)}
+                >
+                  {t('servicePage.createFirstGroup')}
+                </Button>
+              </div>
             ) : (
               <ul className={styles.groupItems}>
                 {groups.map((group) => (
                   <li key={group.id}>
                     <button
+                      type="button"
                       className={`${styles.groupItem} ${group.id === activeGroupId ? styles.active : ''}`}
                       onClick={() => handleSelectGroup(group.id)}
                     >
                       <span className={styles.groupName}>{group.name}</span>
                       <span className={styles.groupPath}>/{group.path}</span>
+                      <span className={styles.groupRuleCount}>{group.rules.length}</span>
                     </button>
                   </li>
                 ))}
@@ -190,7 +184,7 @@ export const ServicePage: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <div className={styles.content}>
+      <div className={styles.mainContent}>
         {!activeGroup ? (
           <div className={styles.noSelection}>
             <p>{t('servicePage.noGroupSelected')}</p>
@@ -201,6 +195,12 @@ export const ServicePage: React.FC = () => {
             <div className={styles.groupHeader}>
               <div className={styles.groupInfo}>
                 <h2>{activeGroup.name}</h2>
+                <div className={styles.groupMeta}>
+                  <span className={styles.metaChip}>/{activeGroup.path}</span>
+                  <span className={styles.metaChip}>
+                    {t('servicePage.rulesCount', { count: activeGroup.rules.length })}
+                  </span>
+                </div>
                 <div className={styles.entryUrl}>
                   <code>{getEntryUrl()}</code>
                   <Button
@@ -209,6 +209,7 @@ export const ServicePage: React.FC = () => {
                     icon={Copy}
                     onClick={handleCopyEntryUrl}
                     title={t('servicePage.copyEntryUrl')}
+                    aria-label={t('servicePage.copyEntryUrl')}
                   />
                 </div>
               </div>
@@ -218,6 +219,7 @@ export const ServicePage: React.FC = () => {
                 icon={Trash2}
                 onClick={() => setShowDeleteGroupModal(true)}
                 title={t('servicePage.deleteGroup')}
+                aria-label={t('servicePage.deleteGroup')}
               />
             </div>
 
@@ -226,23 +228,13 @@ export const ServicePage: React.FC = () => {
               rules={activeGroup.rules}
               activeRuleId={selectedRuleId ?? activeGroup.activeRuleId}
               onSelect={setSelectedRuleId}
-              onAdd={handleAddRule}
-              onDelete={handleDeleteRule}
+              onDelete={handleRequestDeleteRule}
               groupName={activeGroup.name}
               groupId={activeGroup.id}
             />
 
-            {/* Rule Form (when adding new rule) */}
-            {showAddRuleForm && (
-              <RuleForm
-                groupPath={activeGroup.path}
-                onSave={handleSaveRule}
-                onCancel={() => setShowAddRuleForm(false)}
-              />
-            )}
-
             {/* Rule Detail (when rule is selected) */}
-            {selectedRuleId && activeRule && !showAddRuleForm && (
+            {selectedRuleId && activeRule && (
               <div className={styles.ruleDetail}>
                 <h3>{activeRule.model}</h3>
                 <div className={styles.ruleInfo}>
@@ -259,7 +251,7 @@ export const ServicePage: React.FC = () => {
                   <Button
                     variant="danger"
                     size="small"
-                    onClick={() => handleDeleteRule(activeRule.id)}
+                    onClick={() => handleRequestDeleteRule(activeRule.id)}
                   >
                     {t('servicePage.deleteRule')}
                   </Button>
@@ -328,6 +320,36 @@ export const ServicePage: React.FC = () => {
             </Button>
             <Button variant="danger" onClick={handleDeleteGroup}>
               {t('deleteGroupModal.confirmDelete')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Delete Rule Modal */}
+      <Modal
+        open={showDeleteRuleModal}
+        onClose={() => {
+          setShowDeleteRuleModal(false);
+          setPendingDeleteRuleId(null);
+        }}
+        title={t('deleteRuleModal.title')}
+      >
+        <div className={styles.modalContent}>
+          <p>{t('deleteRuleModal.confirmText', {
+            model: pendingDeleteRule?.model ?? '',
+          })}</p>
+          <div className={styles.modalActions}>
+            <Button
+              variant="default"
+              onClick={() => {
+                setShowDeleteRuleModal(false);
+                setPendingDeleteRuleId(null);
+              }}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button variant="danger" onClick={handleDeleteRule}>
+              {t('deleteRuleModal.confirmDelete')}
             </Button>
           </div>
         </div>

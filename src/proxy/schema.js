@@ -34,6 +34,20 @@ function validateConfig(config) {
     errors.push("compat.strictMode must be boolean");
   }
 
+  if (!isObject(config.ui)) {
+    errors.push("ui must be an object");
+  } else {
+    if (!["light", "dark"].includes(config.ui.theme)) {
+      errors.push("ui.theme must be light|dark");
+    }
+    if (!["en-US", "zh-CN"].includes(config.ui.locale)) {
+      errors.push("ui.locale must be en-US|zh-CN");
+    }
+    if (typeof config.ui.launchOnStartup !== "boolean") {
+      errors.push("ui.launchOnStartup must be boolean");
+    }
+  }
+
   if (!isObject(config.logging)) {
     errors.push("logging must be an object");
   } else {

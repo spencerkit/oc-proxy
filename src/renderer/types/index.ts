@@ -11,6 +11,8 @@ export type {
   CompatConfig,
   LoggingConfig,
   UIConfig,
+  ThemeMode,
+  LocaleCode,
 } from './config';
 
 // Proxy types
@@ -37,7 +39,7 @@ export interface ProxyConfig {
   server: ServerConfig;
   compat: CompatConfig;
   logging: LoggingConfig;
-  ui?: UIConfig;
+  ui: UIConfig;
   groups: Group[];
 }
 

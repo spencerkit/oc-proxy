@@ -121,3 +121,32 @@ test("prune stock seed groups while keeping user groups", () => {
   assert.equal(result.config.groups.length, 1);
   assert.equal(result.config.groups[0].id, "group_user");
 });
+
+test("migrate modern config without ui keeps groups and injects ui defaults", () => {
+  const modernWithoutUi = {
+    server: { host: "0.0.0.0", port: 8899, authEnabled: false, localBearerToken: "" },
+    compat: { strictMode: true },
+    logging: { captureBody: true, redactRules: ["token"] },
+    groups: [
+      {
+        id: "group_user",
+        name: "claude",
+        path: "claude",
+        activeRuleId: "r1",
+        rules: [
+          { id: "r1", model: "claude-3-5-sonnet-latest", token: "sk-1", apiAddress: "https://api.anthropic.com", direction: "oc" }
+        ]
+      }
+    ]
+  };
+
+  const migrated = migrateLegacyConfig(modernWithoutUi);
+  const result = validateConfig(migrated);
+
+  assert.equal(result.valid, true);
+  assert.equal(migrated.groups.length, 1);
+  assert.equal(migrated.groups[0].id, "group_user");
+  assert.equal(migrated.ui.theme, "light");
+  assert.equal(migrated.ui.locale, "en-US");
+  assert.equal(migrated.ui.launchOnStartup, false);
+});

@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { I18nextProvider } from 'react-i18next';
-import i18n, { initI18n } from './i18n';
+import i18n, { initI18n, type Locale } from './i18n';
 import { ToastProvider } from './contexts/ToastContext';
 import { ToastContainer } from './components/common/ToastContainer';
 import './styles.css';
@@ -21,10 +21,35 @@ window.onunhandledrejection = (event) => {
 console.log('Renderer starting...');
 console.log('window.proxyApp:', window.proxyApp);
 
+function resolveTheme(theme?: unknown): 'light' | 'dark' {
+  if (theme === 'light' || theme === 'dark') {
+    return theme;
+  }
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function resolveLocale(locale?: unknown): Locale {
+  return locale === 'zh-CN' ? 'zh-CN' : 'en-US';
+}
+
 // Initialize i18n before rendering
 async function init() {
+  let initialLocale: Locale = 'en-US';
+  let initialTheme: 'light' | 'dark' = resolveTheme();
+
+  try {
+    const config = await window.proxyApp.getConfig();
+    initialLocale = resolveLocale(config?.ui?.locale);
+    initialTheme = resolveTheme(config?.ui?.theme);
+  } catch (error) {
+    console.error('[Main] Failed to load config for bootstrap preferences:', error);
+  }
+
+  document.documentElement.setAttribute('data-theme', initialTheme);
+
   console.log('[Main] Initializing i18n...');
-  await initI18n();
+  await initI18n(initialLocale);
   console.log('[Main] i18n initialized');
 
   const rootElement = document.getElementById('root');

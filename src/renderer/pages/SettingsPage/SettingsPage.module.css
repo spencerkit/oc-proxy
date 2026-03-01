@@ -1,15 +1,33 @@
 /* SettingsPage — Copper & Slate */
 
 .settingsPage {
-  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
 }
 
-.settingsPage h2 {
+.header {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.header h2 {
   font-family: var(--font-display);
   font-size: var(--text-xl);
   font-weight: var(--weight-medium);
   color: var(--text-primary);
-  margin-bottom: var(--sp-6);
+}
+
+.subtitle {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
 }
 
 .form {
@@ -20,6 +38,19 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-5);
+}
+
+.section {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.sectionTitle {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .formGroup {
@@ -34,13 +65,72 @@
   color: var(--text-secondary);
 }
 
+.fieldHint {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.choiceGroup {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.choiceButton {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.choiceButton:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.choiceButton:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.choiceButtonActive {
+  border-color: color-mix(in oklab, var(--accent) 60%, var(--border));
+  background: color-mix(in oklab, var(--accent) 12%, var(--bg-raised));
+  color: var(--text-primary);
+}
+
+.choiceTitle {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.choiceValue {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+
 .formGroupSwitch {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--sp-4);
   padding: var(--sp-3) 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+}
+
+.switchLabel {
+  display: grid;
+  gap: var(--sp-1);
 }
 
 .switchLabel label {
@@ -49,14 +139,81 @@
   color: var(--text-primary);
 }
 
-.error {
+.switchLabel p {
   font-size: var(--text-xs);
-  color: var(--danger);
-  margin-top: var(--sp-1);
+  color: var(--text-tertiary);
 }
 
 .actions {
   display: flex;
-  justify-content: flex-end;
-  padding-top: var(--sp-2);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-top: var(--sp-1);
+}
+
+.changeHint {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.previewCard {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-5);
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.previewCard h3 {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.previewRow {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.previewRow span {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.previewRow code,
+.previewRow strong {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.previewRow code {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-active);
+}
+
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .previewCard {
+    order: -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .form {
+    padding: var(--sp-4);
+  }
+
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }

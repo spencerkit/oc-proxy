@@ -81,6 +81,18 @@ function hasServerSettingChanged(prev, next) {
     || prev.server.localBearerToken !== next.server.localBearerToken;
 }
 
+function applyLaunchOnStartupSetting(config) {
+  if (typeof app.setLoginItemSettings !== "function") return;
+
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: !!config?.ui?.launchOnStartup
+    });
+  } catch (error) {
+    console.error("Failed to apply launch-on-startup setting:", error);
+  }
+}
+
 function setupIpc() {
   ipcMain.handle("app:get-status", async () => {
     return proxyServer.getStatus();
@@ -101,6 +113,7 @@ function setupIpc() {
   ipcMain.handle("config:save", async (_event, nextConfig) => {
     const prevConfig = configStore.get();
     const saved = configStore.save(nextConfig);
+    applyLaunchOnStartupSetting(saved);
 
     let restarted = false;
     if (proxyServer.isRunning() && hasServerSettingChanged(prevConfig, saved)) {
@@ -133,6 +146,7 @@ app.whenReady().then(async () => {
   logStore = new LogStore(100);
 
   configStore.initialize();
+  applyLaunchOnStartupSetting(configStore.get());
   proxyServer = new ProxyServer(configStore, logStore);
 
   setupIpc();

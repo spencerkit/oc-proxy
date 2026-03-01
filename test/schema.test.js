@@ -53,3 +53,12 @@ test("group active rule must exist", () => {
   assert.equal(result.valid, false);
   assert.match(result.errors.join(" | "), /activeRuleId/);
 });
+
+test("ui settings must be valid", () => {
+  const cfg = getDefaultConfig();
+  cfg.ui.theme = "system";
+
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, false);
+  assert.match(result.errors.join(" | "), /ui.theme/);
+});

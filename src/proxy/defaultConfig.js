@@ -8,6 +8,11 @@ const DEFAULT_CONFIG = {
   compat: {
     strictMode: true
   },
+  ui: {
+    theme: "light",
+    locale: "en-US",
+    launchOnStartup: false
+  },
   logging: {
     level: "info",
     captureBody: true,

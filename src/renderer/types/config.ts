@@ -27,6 +27,11 @@ export interface LoggingConfig {
 /**
  * UI configuration interface (reserved for future UI-specific settings)
  */
+export type ThemeMode = 'light' | 'dark';
+export type LocaleCode = 'en-US' | 'zh-CN';
+
 export interface UIConfig {
-  [key: string]: unknown;
+  theme: ThemeMode;
+  locale: LocaleCode;
+  launchOnStartup: boolean;
 }
