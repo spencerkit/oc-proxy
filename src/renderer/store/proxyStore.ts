@@ -42,6 +42,8 @@ interface ProxyState {
   clearLogs: () => Promise<void>;
   startPolling: () => void;
   stopPolling: () => void;
+  startServer: () => Promise<void>;
+  stopServer: () => Promise<void>;
 }
 
 /**
@@ -71,13 +73,18 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   init: async () => {
     try {
+      console.log('[Store] Initializing...');
       set({ loading: true, error: null });
 
+      console.log('[Store] Fetching config and status...');
       // Fetch initial config and status in parallel
       const [config, status] = await Promise.all([
         ipc.getConfig(),
         ipc.getStatus(),
       ]);
+
+      console.log('[Store] Config received:', config);
+      console.log('[Store] Status received:', status);
 
       set({
         config,
@@ -85,10 +92,13 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
         loading: false,
       });
 
+      console.log('[Store] Initialization complete');
+
       // Start polling for status and logs
       get().startPolling();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to initialize';
+      console.error('[Store] Initialization error:', errorMessage);
       set({
         error: errorMessage,
         loading: false,
@@ -209,6 +219,34 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
     if (state.logsIntervalId !== null) {
       window.clearInterval(state.logsIntervalId);
       set({ logsIntervalId: null });
+    }
+  },
+
+  /**
+   * Start the proxy server via IPC
+   */
+  startServer: async () => {
+    try {
+      set({ loading: true, error: null });
+      const status = await ipc.startServer();
+      set({ status, loading: false });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start server';
+      set({ error: errorMessage, loading: false });
+    }
+  },
+
+  /**
+   * Stop the proxy server via IPC
+   */
+  stopServer: async () => {
+    try {
+      set({ loading: true, error: null });
+      const status = await ipc.stopServer();
+      set({ status, loading: false });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to stop server';
+      set({ error: errorMessage, loading: false });
     }
   },
 }));
