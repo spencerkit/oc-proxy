@@ -72,6 +72,24 @@ function toAnthropicContent(content) {
   return [{ type: "text", text: JSON.stringify(content) }];
 }
 
+function toAnthropicToolResultContent(content) {
+  if (content == null) {
+    return "";
+  }
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    const textBlocks = content
+      .filter((item) => item && typeof item === "object" && item.type === "text")
+      .map((item) => item.text || "");
+    if (textBlocks.length > 0) {
+      return textBlocks.join("");
+    }
+  }
+  return JSON.stringify(content);
+}
+
 function mapOpenAIToAnthropicRequest(body, { strictMode, targetModel }) {
   assertOpenAICompatibility(body, strictMode);
   const messages = Array.isArray(body.messages) ? body.messages : [];
@@ -108,6 +126,21 @@ function mapOpenAIToAnthropicRequest(body, { strictMode, targetModel }) {
         });
       }
       anthropicMessages.push({ role: "assistant", content });
+      continue;
+    }
+
+    if (msg.role === "tool") {
+      const toolUseId = typeof msg.tool_call_id === "string" && msg.tool_call_id.trim()
+        ? msg.tool_call_id.trim()
+        : `toolu_${Math.random().toString(36).slice(2)}`;
+      anthropicMessages.push({
+        role: "user",
+        content: [{
+          type: "tool_result",
+          tool_use_id: toolUseId,
+          content: toAnthropicToolResultContent(msg.content)
+        }]
+      });
       continue;
     }
 

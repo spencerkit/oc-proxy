@@ -117,6 +117,7 @@ test("bridgeOpenAIToAnthropic emits message_stop once and maps tool deltas", asy
 
   const stopCount = (response.body.match(/event: message_stop/g) || []).length;
   assert.equal(stopCount, 1);
+  assert.match(response.body, /"stop_reason":"tool_use"/);
   assert.match(response.body, /"usage":\{"input_tokens":0,"output_tokens":0\}/);
   assert.match(response.body, /event: content_block_start/);
   assert.match(response.body, /"type":"tool_use"/);

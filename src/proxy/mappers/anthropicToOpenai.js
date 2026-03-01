@@ -38,6 +38,33 @@ function flattenAnthropicContent(content) {
   return texts.join("");
 }
 
+function toOpenAIToolResultContent(content) {
+  if (content == null) {
+    return "";
+  }
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    const texts = [];
+    for (const block of content) {
+      if (block?.type === "text" && typeof block.text === "string") {
+        texts.push(block.text);
+      }
+    }
+    if (texts.length > 0) {
+      return texts.join("");
+    }
+  }
+  return JSON.stringify(content);
+}
+
+function toAnthropicStopReason(finishReason) {
+  if (finishReason === "tool_calls") return "tool_use";
+  if (finishReason === "length") return "max_tokens";
+  return "end_turn";
+}
+
 function mapAnthropicToOpenAIRequest(body, { strictMode, targetModel }) {
   assertAnthropicCompatibility(body, strictMode);
 
@@ -48,7 +75,11 @@ function mapAnthropicToOpenAIRequest(body, { strictMode, targetModel }) {
 
   for (const msg of body.messages || []) {
     if (!msg) continue;
-    const content = msg.content || [];
+    const content = Array.isArray(msg.content)
+      ? msg.content
+      : (msg.content == null
+        ? []
+        : [{ type: "text", text: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content) }]);
     const text = flattenAnthropicContent(content);
 
     if (msg.role === "assistant") {
@@ -70,6 +101,34 @@ function mapAnthropicToOpenAIRequest(body, { strictMode, targetModel }) {
         assistantMsg.tool_calls = toolCalls;
       }
       messages.push(assistantMsg);
+      continue;
+    }
+
+    if (msg.role === "user") {
+      const textParts = [];
+      const flushTextParts = () => {
+        if (textParts.length === 0) return;
+        messages.push({ role: "user", content: textParts.join("") });
+        textParts.length = 0;
+      };
+
+      for (const block of content) {
+        if (!block) continue;
+        if (block.type === "tool_result") {
+          flushTextParts();
+          messages.push({
+            role: "tool",
+            tool_call_id: block.tool_use_id || `tool_${Math.random().toString(36).slice(2)}`,
+            content: toOpenAIToolResultContent(block.content)
+          });
+          continue;
+        }
+        if (block.type === "text") {
+          textParts.push(block.text || "");
+        }
+      }
+
+      flushTextParts();
       continue;
     }
 
@@ -142,7 +201,7 @@ function mapOpenAIToAnthropicResponse(openaiResponse, { requestModel }) {
     role: "assistant",
     model: requestModel || openaiResponse.model,
     content,
-    stop_reason: choice.finish_reason || "end_turn",
+    stop_reason: toAnthropicStopReason(choice.finish_reason),
     usage: {
       input_tokens: openaiResponse.usage?.prompt_tokens || 0,
       output_tokens: openaiResponse.usage?.completion_tokens || 0

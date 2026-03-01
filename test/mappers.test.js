@@ -67,6 +67,7 @@ test("openai response maps to anthropic response", () => {
   const out = mapOpenAIToAnthropicResponse(input, { requestModel: "claude-m" });
   assert.equal(out.model, "claude-m");
   assert.equal(out.content[0].text, "ok");
+  assert.equal(out.stop_reason, "end_turn");
 });
 
 test("strict mode rejects unknown openai fields", () => {
@@ -146,4 +147,78 @@ test("chat response -> responses keeps tool calls", () => {
   assert.equal(mapped.output[0].type, "message");
   assert.equal(mapped.output[1].type, "function_call");
   assert.equal(mapped.output[1].name, "weather_lookup");
+});
+
+test("openai tool message maps to anthropic tool_result", () => {
+  const out = mapOpenAIToAnthropicRequest({
+    model: "m",
+    messages: [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "weather_lookup",
+            arguments: "{\"city\":\"sf\"}"
+          }
+        }]
+      },
+      {
+        role: "tool",
+        tool_call_id: "call_1",
+        content: "sunny"
+      }
+    ]
+  }, { strictMode: true, targetModel: "claude-target" });
+
+  assert.equal(out.messages[0].role, "assistant");
+  assert.equal(out.messages[0].content[0].type, "tool_use");
+  assert.equal(out.messages[1].role, "user");
+  assert.equal(out.messages[1].content[0].type, "tool_result");
+  assert.equal(out.messages[1].content[0].tool_use_id, "call_1");
+  assert.equal(out.messages[1].content[0].content, "sunny");
+});
+
+test("anthropic tool_result maps to openai tool message", () => {
+  const out = mapAnthropicToOpenAIRequest({
+    model: "claude-x",
+    messages: [
+      {
+        role: "assistant",
+        content: [{
+          type: "tool_use",
+          id: "toolu_1",
+          name: "weather_lookup",
+          input: { city: "sf" }
+        }]
+      },
+      {
+        role: "user",
+        content: [{
+          type: "tool_result",
+          tool_use_id: "toolu_1",
+          content: [{ type: "text", text: "sunny" }]
+        }]
+      }
+    ]
+  }, { strictMode: true, targetModel: "gpt-target" });
+
+  assert.equal(out.messages[0].role, "assistant");
+  assert.equal(out.messages[0].tool_calls[0].id, "toolu_1");
+  assert.equal(out.messages[1].role, "tool");
+  assert.equal(out.messages[1].tool_call_id, "toolu_1");
+  assert.equal(out.messages[1].content, "sunny");
+});
+
+test("openai finish_reason tool_calls maps to anthropic tool_use", () => {
+  const out = mapOpenAIToAnthropicResponse({
+    id: "chat_2",
+    model: "gpt-x",
+    choices: [{ message: { content: "" }, finish_reason: "tool_calls" }],
+    usage: { prompt_tokens: 1, completion_tokens: 1 }
+  }, { requestModel: "claude-m" });
+
+  assert.equal(out.stop_reason, "tool_use");
 });
