@@ -322,6 +322,16 @@ function toAnthropicStopReason(finishReason) {
   return "end_turn";
 }
 
+function toOpenAIResponsesUsage(anthropicUsage) {
+  const inputTokens = Number.isFinite(anthropicUsage?.input_tokens) ? anthropicUsage.input_tokens : 0;
+  const outputTokens = Number.isFinite(anthropicUsage?.output_tokens) ? anthropicUsage.output_tokens : 0;
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: inputTokens + outputTokens
+  };
+}
+
 class ProxyServer {
   constructor(configStore, logStore) {
     this.configStore = configStore;
@@ -624,7 +634,11 @@ class ProxyServer {
         }
 
         if (entry.protocol === "openai" && downstreamProtocol === "anthropic") {
-          await this.bridgeAnthropicToOpenAI(upstreamResponse, res, traceId, requestedModel);
+          if (entry.endpoint === "responses") {
+            await this.bridgeAnthropicToOpenAIResponses(upstreamResponse, res, traceId, requestedModel);
+          } else {
+            await this.bridgeAnthropicToOpenAI(upstreamResponse, res, traceId, requestedModel);
+          }
         } else if (entry.protocol === "anthropic" && downstreamProtocol === "openai") {
           await this.bridgeOpenAIToAnthropic(upstreamResponse, res, traceId, requestedModel);
         } else {
@@ -822,6 +836,182 @@ class ProxyServer {
               arguments: payload.delta.partial_json
             }
           }]
+        });
+        return;
+      }
+
+      if (event === "message_stop") {
+        emitDone();
+      }
+    });
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parser.write(decoder.decode(value, { stream: true }));
+    }
+    parser.end();
+    emitDone();
+    res.end();
+  }
+
+  async bridgeAnthropicToOpenAIResponses(upstreamResponse, res, traceId, requestModel) {
+    beginSSE(res, { "x-trace-id": traceId });
+
+    const reader = upstreamResponse.body.getReader();
+    const decoder = new TextDecoder();
+    const responseId = `resp_${randomUUID().replace(/-/g, "")}`;
+    const createdAt = Math.floor(Date.now() / 1000);
+    const outputItems = [];
+    let messageState = null;
+    let doneSent = false;
+    let latestUsage = toOpenAIResponsesUsage();
+
+    const emitEvent = (eventName, payload) => {
+      writeSSE(res, {
+        event: eventName,
+        data: JSON.stringify({
+          type: eventName,
+          ...payload
+        })
+      });
+    };
+
+    emitEvent("response.created", {
+      response: {
+        id: responseId,
+        object: "response",
+        created_at: createdAt,
+        model: requestModel,
+        status: "in_progress",
+        output: [],
+        usage: null
+      }
+    });
+
+    const ensureMessageItem = () => {
+      if (messageState) return messageState;
+      const item = {
+        id: `msg_${randomUUID().replace(/-/g, "")}`,
+        type: "message",
+        status: "in_progress",
+        role: "assistant",
+        content: [{ type: "output_text", text: "" }]
+      };
+      const outputIndex = outputItems.length;
+      outputItems.push(item);
+      messageState = { item, outputIndex };
+      emitEvent("response.output_item.added", {
+        output_index: outputIndex,
+        item
+      });
+      return messageState;
+    };
+
+    const toolStatesByContentIndex = new Map();
+    const ensureToolItem = (payload) => {
+      const contentIndex = Number.isInteger(payload?.index) ? payload.index : toolStatesByContentIndex.size;
+      let state = toolStatesByContentIndex.get(contentIndex);
+      if (state) return state;
+
+      const id = payload?.content_block?.id || `fc_${randomUUID().replace(/-/g, "")}`;
+      const item = {
+        id,
+        type: "function_call",
+        status: "in_progress",
+        call_id: id,
+        name: payload?.content_block?.name || "tool",
+        arguments: ""
+      };
+      const outputIndex = outputItems.length;
+      outputItems.push(item);
+      state = { item, outputIndex };
+      toolStatesByContentIndex.set(contentIndex, state);
+      emitEvent("response.output_item.added", {
+        output_index: outputIndex,
+        item
+      });
+      return state;
+    };
+
+    const emitDone = () => {
+      if (doneSent) return;
+      doneSent = true;
+
+      for (let outputIndex = 0; outputIndex < outputItems.length; outputIndex += 1) {
+        const item = outputItems[outputIndex];
+        item.status = "completed";
+        emitEvent("response.output_item.done", {
+          output_index: outputIndex,
+          item
+        });
+      }
+
+      emitEvent("response.completed", {
+        response: {
+          id: responseId,
+          object: "response",
+          created_at: createdAt,
+          model: requestModel,
+          status: "completed",
+          output: outputItems,
+          usage: latestUsage
+        }
+      });
+
+      res.write("data: [DONE]\n\n");
+    };
+
+    const parser = createSSEParser(({ event, data }) => {
+      if (data === "[DONE]") {
+        emitDone();
+        return;
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(data);
+      } catch {
+        return;
+      }
+
+      if (event === "message_delta" && payload.usage) {
+        latestUsage = toOpenAIResponsesUsage(payload.usage);
+      }
+
+      if (event === "content_block_start" && payload.content_block?.type === "text") {
+        ensureMessageItem();
+        return;
+      }
+
+      if (event === "content_block_delta" && typeof payload.delta?.text === "string" && payload.delta.text.length > 0) {
+        const state = ensureMessageItem();
+        state.item.content[0].text += payload.delta.text;
+        emitEvent("response.output_text.delta", {
+          output_index: state.outputIndex,
+          item_id: state.item.id,
+          content_index: 0,
+          delta: payload.delta.text
+        });
+        return;
+      }
+
+      if (event === "content_block_start" && payload.content_block?.type === "tool_use") {
+        ensureToolItem(payload);
+        return;
+      }
+
+      if (
+        event === "content_block_delta"
+        && payload.delta?.type === "input_json_delta"
+        && typeof payload.delta.partial_json === "string"
+      ) {
+        const state = ensureToolItem(payload);
+        state.item.arguments += payload.delta.partial_json;
+        emitEvent("response.function_call_arguments.delta", {
+          output_index: state.outputIndex,
+          item_id: state.item.id,
+          delta: payload.delta.partial_json
         });
         return;
       }

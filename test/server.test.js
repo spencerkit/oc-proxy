@@ -169,6 +169,69 @@ test("bridgeAnthropicToOpenAI maps tool deltas and emits DONE once", async () =>
   assert.match(response.body, /"finish_reason":"tool_calls"/);
 });
 
+test("bridgeAnthropicToOpenAIResponses emits responses-style stream events", async () => {
+  const proxy = createProxyForStreamTest();
+  const response = new MemoryResponse();
+  const upstreamResponse = {
+    body: createStreamFromString(
+      `event: content_block_start\ndata: ${JSON.stringify({
+        type: "content_block_start",
+        index: 0,
+        content_block: {
+          type: "text",
+          text: ""
+        }
+      })}\n\n`
+      + `event: content_block_delta\ndata: ${JSON.stringify({
+        type: "content_block_delta",
+        index: 0,
+        delta: {
+          type: "text_delta",
+          text: "hello"
+        }
+      })}\n\n`
+      + `event: content_block_start\ndata: ${JSON.stringify({
+        type: "content_block_start",
+        index: 1,
+        content_block: {
+          type: "tool_use",
+          id: "toolu_1",
+          name: "weather_lookup"
+        }
+      })}\n\n`
+      + `event: content_block_delta\ndata: ${JSON.stringify({
+        type: "content_block_delta",
+        index: 1,
+        delta: {
+          type: "input_json_delta",
+          partial_json: "{\"city\":\"sf\"}"
+        }
+      })}\n\n`
+      + `event: message_delta\ndata: ${JSON.stringify({
+        type: "message_delta",
+        usage: {
+          input_tokens: 7,
+          output_tokens: 3
+        },
+        delta: {
+          stop_reason: "tool_use"
+        }
+      })}\n\n`
+      + "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+      + "data: [DONE]\n\n"
+    )
+  };
+
+  await proxy.bridgeAnthropicToOpenAIResponses(upstreamResponse, response, "trace-resp", "m");
+
+  assert.match(response.body, /event: response\.created/);
+  assert.match(response.body, /event: response\.output_text\.delta/);
+  assert.match(response.body, /event: response\.function_call_arguments\.delta/);
+  assert.match(response.body, /event: response\.completed/);
+  assert.match(response.body, /"input_tokens":7/);
+  assert.match(response.body, /"output_tokens":3/);
+});
+
 test("bridgeOpenAIToAnthropic uses upstream usage when provided", async () => {
   const proxy = createProxyForStreamTest();
   const response = new MemoryResponse();

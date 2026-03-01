@@ -94,6 +94,34 @@ test("responses input is normalized", () => {
   assert.equal(normalized.context_management.clear_function_results, false);
 });
 
+test("responses function call I/O is normalized to chat-style tool messages", () => {
+  const normalized = normalizeOpenAIRequest("/v1/responses", {
+    model: "m",
+    max_output_tokens: 2048,
+    instructions: "system prompt",
+    input: [
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "weather_lookup",
+        arguments: { city: "sf" }
+      },
+      {
+        type: "function_call_output",
+        call_id: "call_1",
+        output: [{ type: "output_text", text: "sunny" }]
+      }
+    ]
+  });
+
+  assert.equal(normalized.max_tokens, 2048);
+  assert.equal(normalized.system, "system prompt");
+  assert.equal(normalized.messages[0].role, "assistant");
+  assert.equal(normalized.messages[0].tool_calls[0].id, "call_1");
+  assert.equal(normalized.messages[1].role, "tool");
+  assert.equal(normalized.messages[1].tool_call_id, "call_1");
+});
+
 test("strict mode allows anthropic thinking/context_management fields", () => {
   const input = {
     model: "claude-x",
@@ -147,6 +175,9 @@ test("chat response -> responses keeps tool calls", () => {
   assert.equal(mapped.output[0].type, "message");
   assert.equal(mapped.output[1].type, "function_call");
   assert.equal(mapped.output[1].name, "weather_lookup");
+  assert.equal(mapped.status, "completed");
+  assert.equal(mapped.usage.input_tokens, 0);
+  assert.equal(mapped.usage.output_tokens, 0);
 });
 
 test("openai tool message maps to anthropic tool_result", () => {

@@ -3,13 +3,19 @@ const SUPPORTED_OPENAI_KEYS = new Set([
   "messages",
   "stream",
   "max_tokens",
+  "max_output_tokens",
   "temperature",
   "top_p",
   "tools",
   "tool_choice",
+  "parallel_tool_calls",
   "metadata",
   "stop",
   "input",
+  "instructions",
+  "reasoning",
+  "truncation",
+  "previous_response_id",
   "system",
   "thinking",
   "context_management"
@@ -31,29 +37,114 @@ function normalizeOpenAIRequest(path, body) {
   }
 
   const messages = [];
-  if (typeof body.input === "string") {
-    messages.push({ role: "user", content: body.input });
-  } else if (Array.isArray(body.input)) {
-    for (const item of body.input) {
-      if (!item) continue;
-      if (item.role && item.content != null) {
-        messages.push({ role: item.role, content: item.content });
+  const input = body.input;
+
+  const toText = (value) => {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      const chunks = [];
+      for (const part of value) {
+        if (part == null) continue;
+        if (typeof part === "string") {
+          chunks.push(part);
+          continue;
+        }
+        if (typeof part !== "object") {
+          chunks.push(String(part));
+          continue;
+        }
+        if (typeof part.text === "string") {
+          chunks.push(part.text);
+          continue;
+        }
+        if (typeof part.output_text === "string") {
+          chunks.push(part.output_text);
+          continue;
+        }
+        if (typeof part.input_text === "string") {
+          chunks.push(part.input_text);
+          continue;
+        }
+      }
+      if (chunks.length > 0) {
+        return chunks.join("");
       }
     }
+    return JSON.stringify(value);
+  };
+
+  const toFunctionArguments = (value) => {
+    if (typeof value === "string") {
+      return value;
+    }
+    return JSON.stringify(value || {});
+  };
+
+  const pushInputItemAsMessage = (item) => {
+    if (!item) return;
+
+    if (item.type === "function_call") {
+      messages.push({
+        role: "assistant",
+        content: "",
+        tool_calls: [{
+          id: item.call_id || item.id || `call_${Math.random().toString(36).slice(2)}`,
+          type: "function",
+          function: {
+            name: item.name || item.function?.name || "tool",
+            arguments: toFunctionArguments(item.arguments ?? item.function?.arguments)
+          }
+        }]
+      });
+      return;
+    }
+
+    if (item.type === "function_call_output") {
+      messages.push({
+        role: "tool",
+        tool_call_id: item.call_id || item.id || `call_${Math.random().toString(36).slice(2)}`,
+        content: toText(item.output ?? item.content)
+      });
+      return;
+    }
+
+    const role = item.role || (item.type === "message" ? "user" : null);
+    if (role) {
+      messages.push({
+        role,
+        content: item.content == null ? "" : item.content
+      });
+      return;
+    }
+
+    if (item.type === "input_text" && typeof item.text === "string") {
+      messages.push({ role: "user", content: item.text });
+    }
+  };
+
+  if (typeof input === "string") {
+    messages.push({ role: "user", content: input });
+  } else if (Array.isArray(input)) {
+    for (const item of input) {
+      pushInputItemAsMessage(item);
+    }
+  } else if (input && typeof input === "object") {
+    pushInputItemAsMessage(input);
   }
 
   return {
     model: body.model,
     messages,
     stream: body.stream,
-    max_tokens: body.max_tokens,
+    max_tokens: body.max_tokens ?? body.max_output_tokens,
     temperature: body.temperature,
     top_p: body.top_p,
     tools: body.tools,
     tool_choice: body.tool_choice,
     metadata: body.metadata,
     stop: body.stop,
-    system: body.system,
+    system: body.system ?? body.instructions,
     thinking: body.thinking,
     context_management: body.context_management
   };
@@ -61,7 +152,34 @@ function normalizeOpenAIRequest(path, body) {
 
 function toAnthropicContent(content) {
   if (Array.isArray(content)) {
-    return content;
+    const blocks = [];
+    for (const item of content) {
+      if (item == null) continue;
+      if (typeof item === "string") {
+        if (item.length > 0) {
+          blocks.push({ type: "text", text: item });
+        }
+        continue;
+      }
+      if (typeof item !== "object") {
+        blocks.push({ type: "text", text: String(item) });
+        continue;
+      }
+      if (item.type === "text") {
+        blocks.push(item);
+        continue;
+      }
+      if ((item.type === "input_text" || item.type === "output_text") && typeof item.text === "string") {
+        blocks.push({ type: "text", text: item.text });
+        continue;
+      }
+      if (typeof item.text === "string") {
+        blocks.push({ type: "text", text: item.text });
+        continue;
+      }
+      blocks.push({ type: "text", text: JSON.stringify(item) });
+    }
+    return blocks;
   }
   if (typeof content === "string") {
     return [{ type: "text", text: content }];
@@ -81,8 +199,15 @@ function toAnthropicToolResultContent(content) {
   }
   if (Array.isArray(content)) {
     const textBlocks = content
-      .filter((item) => item && typeof item === "object" && item.type === "text")
-      .map((item) => item.text || "");
+      .filter((item) => item && typeof item === "object")
+      .map((item) => {
+        if (item.type === "text") return item.text || "";
+        if ((item.type === "input_text" || item.type === "output_text") && typeof item.text === "string") {
+          return item.text;
+        }
+        return "";
+      })
+      .filter(Boolean);
     if (textBlocks.length > 0) {
       return textBlocks.join("");
     }
@@ -176,17 +301,23 @@ function mapOpenAIToAnthropicRequest(body, { strictMode, targetModel }) {
 
   if (Array.isArray(body.tools)) {
     request.tools = body.tools.map((tool) => ({
-      name: tool.function?.name,
-      description: tool.function?.description,
-      input_schema: tool.function?.parameters || { type: "object", properties: {} }
+      name: tool.function?.name || tool.name,
+      description: tool.function?.description || tool.description,
+      input_schema: tool.function?.parameters || tool.parameters || tool.input_schema || { type: "object", properties: {} }
     }));
   }
 
-  if (body.tool_choice && typeof body.tool_choice === "object") {
-    request.tool_choice = {
-      type: body.tool_choice.type || "auto",
-      name: body.tool_choice.function?.name
-    };
+  if (body.tool_choice != null) {
+    if (typeof body.tool_choice === "string") {
+      request.tool_choice = {
+        type: body.tool_choice
+      };
+    } else if (typeof body.tool_choice === "object") {
+      request.tool_choice = {
+        type: body.tool_choice.type || "auto",
+        name: body.tool_choice.function?.name || body.tool_choice.name
+      };
+    }
   }
 
   return request;
@@ -266,18 +397,29 @@ function mapOpenAIChatToResponses(chatResponse) {
     output.push({
       type: "function_call",
       id: toolCall.id,
+      call_id: toolCall.id,
+      status: "completed",
       name: toolCall.function?.name,
       arguments: toolCall.function?.arguments || "{}"
     });
   }
+
+  const usage = chatResponse.usage || {};
+  const inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+  const outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
 
   return {
     id: chatResponse.id,
     object: "response",
     created_at: chatResponse.created,
     model: chatResponse.model,
+    status: "completed",
     output,
-    usage: chatResponse.usage || {}
+    usage: {
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: usage.total_tokens ?? (inputTokens + outputTokens)
+    }
   };
 }
 
