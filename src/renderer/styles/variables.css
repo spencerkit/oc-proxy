@@ -39,6 +39,24 @@
   --tab-active-bg-2: #effaf7;
   --tab-active-border: rgba(12, 139, 115, 0.45);
 
+  /* Additional text colors */
+  --text-primary: var(--text);
+  --text-secondary: var(--muted);
+  --text-tertiary: var(--muted);
+
+  /* Background color variants */
+  --bg-secondary: var(--panel-strong);
+  --bg-hover: rgba(0, 0, 0, 0.03);
+  --bg-active: var(--tab-active-bg-1);
+  --bg-tertiary: var(--bg-a);
+
+  /* Border color */
+  --border-color: var(--line);
+
+  /* Primary and success colors */
+  --primary-color: var(--accent);
+  --success-color: var(--accent);
+
   /* Font Family */
   --font-sans: "Avenir Next", "SF Pro Display", "Noto Sans SC", "PingFang SC", "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", "Consolas", monospace;
@@ -121,4 +139,9 @@
   --tab-active-bg-1: rgba(26, 179, 148, 0.15);
   --tab-active-bg-2: rgba(26, 179, 148, 0.08);
   --tab-active-border: rgba(26, 179, 148, 0.4);
+
+  /* Background color variants - Dark Theme */
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: var(--tab-active-bg-1);
+  --bg-tertiary: var(--bg-b);
 }
