@@ -3,18 +3,19 @@
 .servicePage {
   display: flex;
   height: 100%;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 /* Sidebar - Group List */
 .sidebar {
   width: 280px;
   min-width: 280px;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 1rem;
+  background: var(--panel-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--line);
 }
 
 .groupList {
@@ -27,9 +28,9 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border-color);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
 }
 
 .groupListHeader h3 {
@@ -55,11 +56,11 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 0.75rem;
-  margin-bottom: 0.25rem;
+  padding: var(--space-3);
+  margin-bottom: var(--space-1);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
   transition: all 0.15s ease;
@@ -78,7 +79,7 @@
 .groupName {
   font-weight: 500;
   color: var(--text-primary);
-  margin-right: 0.5rem;
+  margin-right: var(--space-2);
 }
 
 .groupPath {
@@ -92,7 +93,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: var(--space-4);
   overflow-y: auto;
 }
 
@@ -108,7 +109,7 @@
   color: var(--text-tertiary);
   font-size: 0.875rem;
   text-align: center;
-  padding: 1rem;
+  padding: var(--space-4);
 }
 
 /* Group Header */
@@ -116,46 +117,48 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding: 1rem;
-  background: var(--bg-secondary);
-  border-radius: 8px;
+  padding: var(--space-4);
+  background: var(--panel-strong);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
 }
 
 .groupInfo h2 {
   font-size: 1.25rem;
   font-weight: 600;
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-2);
   color: var(--text-primary);
 }
 
 .entryUrl {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .entryUrl code {
   font-size: 0.75rem;
   color: var(--text-secondary);
   background: var(--bg-tertiary);
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
 }
 
 /* Rule List */
 .ruleList {
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 1rem;
+  background: var(--panel-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
 }
 
 .ruleListHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border-color);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
 }
 
 .ruleListHeader h3 {
@@ -174,11 +177,11 @@
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 0.75rem;
-  margin-bottom: 0.25rem;
+  padding: var(--space-3);
+  margin-bottom: var(--space-1);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
   transition: all 0.15s ease;
@@ -228,7 +231,7 @@
 .ruleDirection {
   font-size: 0.75rem;
   color: var(--text-tertiary);
-  margin-right: 0.5rem;
+  margin-right: var(--space-2);
 }
 
 .currentBadge {
@@ -242,28 +245,29 @@
 
 /* Rule Detail */
 .ruleDetail {
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 1rem;
+  background: var(--panel-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
 }
 
 .ruleDetail h3 {
   font-size: 1rem;
   font-weight: 600;
-  margin-bottom: 1rem;
+  margin-bottom: var(--space-4);
   color: var(--text-primary);
 }
 
 .ruleInfo {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 
 .ruleInfoItem {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
   font-size: 0.875rem;
 }
 
@@ -273,25 +277,26 @@
 
 .ruleActions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 /* Rule Form */
 .ruleForm {
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 1rem;
+  background: var(--panel-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
 }
 
 .ruleForm h3 {
   font-size: 1rem;
   font-weight: 600;
-  margin-bottom: 1rem;
+  margin-bottom: var(--space-4);
   color: var(--text-primary);
 }
 
 .formGroup {
-  margin-bottom: 1rem;
+  margin-bottom: var(--space-4);
 }
 
 .formGroup label {
@@ -299,20 +304,20 @@
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--text-secondary);
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-2);
 }
 
 .directionOptions {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .directionOption {
   flex: 1;
-  padding: 0.5rem;
+  padding: var(--space-2);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -331,28 +336,28 @@
 .formActions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 1.5rem;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
 }
 
 /* Modal Content */
 .modalContent {
-  padding: 1rem 0;
+  padding: var(--space-4) 0;
 }
 
 .modalContent .formGroup {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-6);
 }
 
 .formHint {
   font-size: 0.75rem;
   color: var(--text-tertiary);
-  margin-top: 0.5rem;
+  margin-top: var(--space-2);
 }
 
 .modalActions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 1.5rem;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
 }
