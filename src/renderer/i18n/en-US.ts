@@ -126,12 +126,28 @@ export const enUS = {
     groupCreated: 'Group created',
     groupDeleted: 'Group deleted',
     ruleCreated: 'Rule created',
+    ruleUpdated: 'Rule updated',
     ruleSaved: 'Rule saved',
     ruleDeleted: 'Rule deleted',
     ruleSwitched: 'Active rule switched',
     entryUrlCopied: 'Entry URL copied',
     copyFailed: 'Copy failed',
     configSaved: 'Configuration saved',
+    ruleNotFound: 'Rule not found',
+    groupNotFound: 'Group not found',
+  },
+
+  // Rule Edit Page
+  ruleEditPage: {
+    title: 'Edit Rule',
+    saveChanges: 'Save Changes',
+  },
+
+  // Rule Create Page
+  ruleCreatePage: {
+    title: 'Create New Rule',
+    newRule: 'New Rule',
+    createRule: 'Create Rule',
   },
 
   // Common

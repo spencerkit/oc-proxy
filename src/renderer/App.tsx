@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from '@/components';
-import { ServicePage, SettingsPage, LogsPage } from '@/pages';
+import { ServicePage, SettingsPage, LogsPage, RuleEditPage, RuleCreatePage } from '@/pages';
 import { useProxyStore } from '@/store';
 import { useTranslation } from '@/hooks';
 
@@ -21,7 +21,7 @@ const App: React.FC = () => {
     console.error('[App] useProxyStore error:', e);
   }
 
-  let t;
+  let t: ((key: string) => string) | undefined;
   try {
     console.log('[App] Calling useTranslation...');
     const result = useTranslation();
@@ -43,18 +43,19 @@ const App: React.FC = () => {
     return key;
   };
 
-  const { init, loading, error, status, startServer, stopServer } = store || {
+  const { init, loading, error, status, startServer, stopServer, config } = store || {
     init: () => {},
     loading: false,
     error: null,
     status: null,
+    config: null,
     startServer: () => {},
     stopServer: () => {}
   };
 
   const isRunning = status?.running ?? false;
-  const serverAddress = status?.address && status?.port
-    ? `http://${status.address}:${status.port}`
+  const serverAddress = status?.address && config?.server.port
+    ? `http://${status.address}:${config.server.port}`
     : undefined;
 
   console.log('[App] loading:', loading, 'error:', error, 'status:', status);
@@ -96,6 +97,8 @@ const App: React.FC = () => {
         <Route path="/" element={<ServicePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/logs" element={<LogsPage />} />
+        <Route path="/groups/:groupId/rules/new" element={<RuleCreatePage />} />
+        <Route path="/groups/:groupId/rules/:ruleId/edit" element={<RuleEditPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

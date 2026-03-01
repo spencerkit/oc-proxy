@@ -229,6 +229,7 @@ export const ServicePage: React.FC = () => {
               onAdd={handleAddRule}
               onDelete={handleDeleteRule}
               groupName={activeGroup.name}
+              groupId={activeGroup.id}
             />
 
             {/* Rule Form (when adding new rule) */}

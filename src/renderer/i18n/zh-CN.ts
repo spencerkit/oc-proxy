@@ -126,12 +126,28 @@ export const zhCN = {
     groupCreated: '分组已创建',
     groupDeleted: '分组已删除',
     ruleCreated: '规则已创建',
+    ruleUpdated: '规则已更新',
     ruleSaved: '规则已保存',
     ruleDeleted: '规则已删除',
     ruleSwitched: '已切换生效规则',
     entryUrlCopied: '入口 URL 已复制',
     copyFailed: '复制失败',
     configSaved: '配置已保存',
+    ruleNotFound: '规则不存在',
+    groupNotFound: '分组不存在',
+  },
+
+  // Rule Edit Page
+  ruleEditPage: {
+    title: '编辑规则',
+    saveChanges: '保存修改',
+  },
+
+  // Rule Create Page
+  ruleCreatePage: {
+    title: '创建新规则',
+    newRule: '新规则',
+    createRule: '创建规则',
   },
 
   // Common

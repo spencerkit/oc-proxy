@@ -1,0 +1,142 @@
+.ruleEditPage {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  margin-bottom: var(--spacing-lg);
+}
+
+.header h1 {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.breadcrumbItem {
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.breadcrumbItem:hover {
+  color: var(--text-primary);
+}
+
+.breadcrumbSeparator {
+  color: var(--text-tertiary);
+}
+
+.formContainer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-width: 600px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.ruleForm {
+  background: var(--bg-base);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.formGroup {
+  margin-bottom: var(--spacing-md);
+}
+
+.formGroup label {
+  display: block;
+  margin-bottom: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.input {
+  width: 100%;
+}
+
+.directionOptions {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.directionOption {
+  flex: 1;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: center;
+}
+
+.directionOption:hover {
+  background: var(--bg-raised);
+  border-color: var(--accent-color);
+  color: var(--text-primary);
+}
+
+.directionOption.active {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: white;
+  font-weight: var(--font-weight-medium);
+}
+
+.formActions {
+  display: flex;
+  gap: var(--spacing-sm);
+  justify-content: flex-end;
+  margin-top: var(--spacing-lg);
+}
+
+.button {
+  min-width: 100px;
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+  .formContainer {
+    padding: 0 var(--spacing-md);
+  }
+
+  .ruleForm {
+    padding: var(--spacing-md);
+  }
+
+  .directionOptions {
+    flex-direction: column;
+  }
+
+  .formActions {
+    flex-direction: column;
+  }
+
+  .button {
+    width: 100%;
+  }
+}

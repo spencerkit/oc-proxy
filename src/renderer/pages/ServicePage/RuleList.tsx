@@ -2,6 +2,7 @@ import React from 'react';
 import { Plus, Folder, ChevronRight, Check, Trash2 } from 'lucide-react';
 import { Button } from '@/components';
 import { useTranslation } from '@/hooks';
+import { useNavigate } from 'react-router-dom';
 import type { Group } from '@/types';
 import styles from './ServicePage.module.css';
 
@@ -76,8 +77,18 @@ export const RuleList: React.FC<{
   onAdd: () => void;
   onDelete: (ruleId: string) => void;
   groupName: string;
-}> = ({ rules, activeRuleId, onSelect, onAdd, onDelete, groupName }) => {
+  groupId: string;
+}> = ({ rules, activeRuleId, onSelect, onAdd, onDelete, groupName, groupId }) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+
+  const handleRuleClick = (ruleId: string) => {
+    navigate(`/groups/${groupId}/rules/${ruleId}/edit`);
+  };
+
+  const handleAddRuleClick = () => {
+    navigate(`/groups/${groupId}/rules/new`);
+  };
 
   return (
     <div className={styles.ruleList}>
@@ -87,7 +98,7 @@ export const RuleList: React.FC<{
           variant="ghost"
           size="small"
           icon={Plus}
-          onClick={onAdd}
+          onClick={handleAddRuleClick}
           title={t('servicePage.addRule')}
         />
       </div>
@@ -97,10 +108,10 @@ export const RuleList: React.FC<{
         ) : (
           <ul className={styles.ruleItems}>
             {rules.map((rule) => (
-              <li key={rule.id}>
+              <li key={rule.id} className={styles.ruleItemContainer}>
                 <button
                   className={`${styles.ruleItem} ${rule.id === activeRuleId ? styles.active : ''}`}
-                  onClick={() => onSelect(rule.id)}
+                  onClick={() => handleRuleClick(rule.id)}
                 >
                   <span className={styles.ruleModel}>{rule.model}</span>
                   <span className={styles.ruleDirection}>
