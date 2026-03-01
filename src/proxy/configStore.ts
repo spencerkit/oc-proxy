@@ -102,6 +102,16 @@ class ConfigStore extends EventEmitter {
       logging: {
         ...defaults.logging,
         ...(source.logging || {}),
+        captureBody:
+          source.logging && Object.hasOwn(source.logging, "captureBody")
+            ? !!source.logging.captureBody
+            : defaults.logging.captureBody,
+        redactRules:
+          source.logging &&
+          Array.isArray(source.logging.redactRules) &&
+          source.logging.redactRules.every(v => typeof v === "string")
+            ? source.logging.redactRules
+            : defaults.logging.redactRules,
       },
       groups: Array.isArray(source.groups) ? source.groups : defaults.groups,
     }

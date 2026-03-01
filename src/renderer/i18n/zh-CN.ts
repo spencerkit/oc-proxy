@@ -94,6 +94,8 @@ export const zhCN = {
     portHint: "允许范围：1 - 65535。",
     strictMode: "严格模式（不兼容字段直接报错）",
     strictModeHint: "开启后，协议不兼容字段将立即失败。",
+    detailedLogs: "详细日志（记录请求/响应体）",
+    detailedLogsHint: "关闭后将不再保存请求体与响应体日志，以提升隐私和性能。",
     launchOnStartup: "开机启动",
     launchOnStartupHint: "系统登录后自动启动 AI Open Router（AOR）。",
     closeToTray: "关闭最小化到托盘",
@@ -155,7 +157,7 @@ export const zhCN = {
 
   // Logs
   logs: {
-    title: "请求链路日志",
+    title: "请求日志",
     recentLogs: "最近 {{count}} 条",
     filteredLogs: "显示 {{shown}} / {{total}} 条",
     refresh: "刷新",
@@ -198,6 +200,20 @@ export const zhCN = {
     downstreamProtocol: "下游协议",
     forwardedModel: "转发模型",
     duration: "耗时",
+    tokens: "Token",
+    tokensCompact: "输入 {{input}} / 输出 {{output}} / 缓存命中 {{cacheRead}}",
+    totalInputTokens: "输入 Token",
+    totalOutputTokens: "输出 Token",
+    totalCacheReadTokens: "缓存命中 Token",
+    totalCacheWriteTokens: "缓存写入 Token",
+    requestMetricsSection: "请求数据",
+    tokenMetricsSection: "Token 统计",
+    requestDataSection: "请求数据",
+    tokenDataSection: "Token 统计数据",
+    tokenInput: "输入 Token",
+    tokenOutput: "输出 Token",
+    tokenCacheRead: "缓存命中 Token",
+    tokenCacheWrite: "缓存写入 Token",
     state: {
       ok: "成功",
       error: "错误",

@@ -8,6 +8,7 @@ test("default config validates", () => {
   const result = validateConfig(cfg)
   assert.equal(result.valid, true)
   assert.equal(result.errors.length, 0)
+  assert.equal(cfg.logging.captureBody, false)
 })
 
 test("invalid config returns errors", () => {

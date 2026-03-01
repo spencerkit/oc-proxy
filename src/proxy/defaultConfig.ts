@@ -7,7 +7,7 @@ const DEFAULT_CONFIG = {
     localBearerToken: "",
   },
   compat: {
-    strictMode: true,
+    strictMode: false,
   },
   ui: {
     theme: "light",
@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = {
   },
   logging: {
     level: "info",
-    captureBody: true,
+    captureBody: false,
     redactRules: ["authorization", "x-api-key", "api-key", "api_key", "token", "password"],
   },
   groups: [],

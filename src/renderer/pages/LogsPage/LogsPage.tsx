@@ -15,7 +15,7 @@ import styles from "./LogsPage.module.css"
 export const LogsPage: React.FC = () => {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { logs, refreshLogs, clearLogs, loading } = useProxyStore()
+  const { logs, refreshLogs, clearLogs, loading, status } = useProxyStore()
   const { showToast } = useLogs()
   const [statusFilter, setStatusFilter] = useState<"all" | LogEntry["status"]>("all")
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -172,6 +172,18 @@ export const LogsPage: React.FC = () => {
                 <span>{log.durationMs}ms</span>
               </div>
             )}
+            {log.tokenUsage && (
+              <div className={styles.logDetail}>
+                <span className={styles.label}>{t("logs.tokens")}:</span>
+                <span>
+                  {t("logs.tokensCompact", {
+                    input: log.tokenUsage.inputTokens,
+                    output: log.tokenUsage.outputTokens,
+                    cacheRead: log.tokenUsage.cacheReadTokens,
+                  })}
+                </span>
+              </div>
+            )}
             <div className={styles.logDetailAction}>
               <span>{t("logs.viewDetail")}</span>
             </div>
@@ -221,24 +233,49 @@ export const LogsPage: React.FC = () => {
         </div>
       </div>
 
-      <div className={styles.summaryGrid}>
-        <div className={styles.summaryCard}>
-          <span className={styles.summaryLabel}>{t("logs.totalRequests")}</span>
-          <strong className={styles.summaryValue}>{logSummary.total}</strong>
+      <div className={styles.metricsSection}>
+        <h3 className={styles.metricsTitle}>{t("logs.requestMetricsSection")}</h3>
+        <div className={styles.summaryGrid}>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>{t("logs.totalRequests")}</span>
+            <strong className={styles.summaryValue}>{logSummary.total}</strong>
+          </div>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>{t("logs.errorsCount")}</span>
+            <strong className={`${styles.summaryValue} ${styles.summaryValueDanger}`}>
+              {logSummary.errorCount}
+            </strong>
+          </div>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>{t("logs.successRate")}</span>
+            <strong className={styles.summaryValue}>{logSummary.successRate}%</strong>
+          </div>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>{t("logs.avgDuration")}</span>
+            <strong className={styles.summaryValue}>{logSummary.avgDuration}ms</strong>
+          </div>
         </div>
-        <div className={styles.summaryCard}>
-          <span className={styles.summaryLabel}>{t("logs.errorsCount")}</span>
-          <strong className={`${styles.summaryValue} ${styles.summaryValueDanger}`}>
-            {logSummary.errorCount}
-          </strong>
-        </div>
-        <div className={styles.summaryCard}>
-          <span className={styles.summaryLabel}>{t("logs.successRate")}</span>
-          <strong className={styles.summaryValue}>{logSummary.successRate}%</strong>
-        </div>
-        <div className={styles.summaryCard}>
-          <span className={styles.summaryLabel}>{t("logs.avgDuration")}</span>
-          <strong className={styles.summaryValue}>{logSummary.avgDuration}ms</strong>
+      </div>
+
+      <div className={styles.metricsSection}>
+        <h3 className={styles.metricsTitle}>{t("logs.tokenMetricsSection")}</h3>
+        <div className={styles.summaryGrid}>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>{t("logs.totalInputTokens")}</span>
+            <strong className={styles.summaryValue}>{status?.metrics.inputTokens ?? 0}</strong>
+          </div>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>{t("logs.totalOutputTokens")}</span>
+            <strong className={styles.summaryValue}>{status?.metrics.outputTokens ?? 0}</strong>
+          </div>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>{t("logs.totalCacheReadTokens")}</span>
+            <strong className={styles.summaryValue}>{status?.metrics.cacheReadTokens ?? 0}</strong>
+          </div>
+          <div className={styles.summaryCard}>
+            <span className={styles.summaryLabel}>{t("logs.totalCacheWriteTokens")}</span>
+            <strong className={styles.summaryValue}>{status?.metrics.cacheWriteTokens ?? 0}</strong>
+          </div>
         </div>
       </div>
 

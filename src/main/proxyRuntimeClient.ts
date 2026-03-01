@@ -3,9 +3,16 @@ const path = require("node:path")
 const fs = require("node:fs")
 const { fork } = require("node:child_process")
 const { EventEmitter } = require("node:events")
+let utilityProcess = null
+try {
+  // Electron runtime only; in plain Node tests this may fail.
+  utilityProcess = require("electron")?.utilityProcess || null
+} catch {
+  utilityProcess = null
+}
 
 const DEFAULT_CALL_TIMEOUT_MS = 15_000
-const DEFAULT_BOOT_TIMEOUT_MS = 10_000
+const DEFAULT_BOOT_TIMEOUT_MS = 20_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3_000
 const RESTART_BACKOFF_MS = [500, 1_000, 2_000, 5_000, 10_000]
 
@@ -29,6 +36,10 @@ function toStatusFallback() {
       streamRequests: 0,
       errors: 0,
       avgLatencyMs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       uptimeStartedAt: null,
     },
   }
@@ -43,10 +54,88 @@ function mapWorkerError(payload) {
   return err
 }
 
+function resolveWorkerPath(explicitPath) {
+  const targetPath = explicitPath || path.join(__dirname, "proxyWorker.js")
+  if (!targetPath.includes("app.asar")) {
+    return targetPath
+  }
+
+  const unpackedPath = targetPath.replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2")
+  if (unpackedPath !== targetPath && fs.existsSync(unpackedPath)) {
+    return unpackedPath
+  }
+
+  return targetPath
+}
+
+function isChildConnected(child) {
+  if (!child) return false
+  if (typeof child.connected === "boolean") return child.connected
+  return child.pid != null
+}
+
+function createUtilityChild(modulePath) {
+  const utility = utilityProcess.fork(modulePath, [], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+    },
+    execArgv: [],
+    serviceName: "ProxyWorker",
+  })
+
+  const wrapped = new EventEmitter()
+  wrapped.stdout = utility.stdout
+  wrapped.stderr = utility.stderr
+  wrapped.connected = true
+  wrapped.pid = utility.pid
+  wrapped.send = (message, callback) => {
+    if (!wrapped.connected) {
+      if (typeof callback === "function") {
+        callback(new Error("Utility worker channel is closed"))
+      }
+      return
+    }
+    try {
+      utility.postMessage(message)
+      if (typeof callback === "function") callback(null)
+    } catch (error) {
+      if (typeof callback === "function") callback(error)
+    }
+  }
+  wrapped.kill = () => {
+    wrapped.connected = false
+    try {
+      return utility.kill()
+    } catch {
+      return false
+    }
+  }
+
+  utility.on("message", messageEvent => {
+    const message =
+      messageEvent && typeof messageEvent === "object" && "data" in messageEvent
+        ? messageEvent.data
+        : messageEvent
+    wrapped.emit("message", message)
+  })
+  utility.on("spawn", () => {
+    wrapped.pid = utility.pid
+    wrapped.emit("spawn")
+  })
+  utility.on("exit", code => {
+    wrapped.connected = false
+    wrapped.pid = undefined
+    wrapped.emit("exit", code, null)
+  })
+
+  return wrapped
+}
+
 class ProxyRuntimeClient extends EventEmitter {
   constructor(options = {}) {
     super()
-    this.workerPath = options.workerPath || path.join(__dirname, "proxyWorker.js")
+    this.workerPath = resolveWorkerPath(options.workerPath)
     this.callTimeoutMs = options.callTimeoutMs || DEFAULT_CALL_TIMEOUT_MS
     this.bootTimeoutMs = options.bootTimeoutMs || DEFAULT_BOOT_TIMEOUT_MS
     this.logLimit =
@@ -198,7 +287,7 @@ class ProxyRuntimeClient extends EventEmitter {
       throw buildRuntimeError("Proxy runtime is shutting down", "runtime_shutting_down")
     }
 
-    if (this.child?.connected) {
+    if (isChildConnected(this.child)) {
       return
     }
 
@@ -220,11 +309,28 @@ class ProxyRuntimeClient extends EventEmitter {
       )
     }
 
-    const child = fork(this.workerPath, [], {
-      stdio: ["ignore", "pipe", "pipe", "ipc"],
-    })
+    const shouldUseUtilityProcess =
+      process.versions?.electron &&
+      utilityProcess?.fork &&
+      process.env.PROXY_WORKER_DISABLE_UTILITY_PROCESS !== "1"
+    const child = shouldUseUtilityProcess
+      ? createUtilityChild(this.workerPath)
+      : fork(this.workerPath, [], {
+          stdio: ["ignore", "pipe", "pipe", "ipc"],
+          execPath: process.execPath,
+          execArgv: [],
+          windowsHide: true,
+          env: {
+            ...process.env,
+            ELECTRON_RUN_AS_NODE: "1",
+          },
+        })
 
     this.child = child
+
+    console.info(
+      `[Main] Proxy worker spawn mode: ${shouldUseUtilityProcess ? "utilityProcess" : "fork"}`
+    )
 
     if (child.stdout) {
       child.stdout.on("data", chunk => {
@@ -250,7 +356,21 @@ class ProxyRuntimeClient extends EventEmitter {
       console.error("[Main] Proxy worker process error:", error)
     })
 
-    await this.bootstrapWorker(child)
+    try {
+      await this.bootstrapWorker(child)
+    } catch (error) {
+      try {
+        if (isChildConnected(child)) {
+          child.kill("SIGKILL")
+        }
+      } catch {
+        // ignore kill errors after bootstrap failure
+      }
+      if (this.child === child) {
+        this.child = null
+      }
+      throw error
+    }
   }
 
   async bootstrapWorker(child) {
@@ -348,7 +468,7 @@ class ProxyRuntimeClient extends EventEmitter {
   }
 
   requestWithChild(child, method, payload, timeoutMs, allowSendRetry) {
-    if (!child || !child.connected) {
+    if (!isChildConnected(child)) {
       throw buildRuntimeError("Proxy worker is disconnected", "worker_disconnected")
     }
 
@@ -356,7 +476,10 @@ class ProxyRuntimeClient extends EventEmitter {
       const id = this.nextRequestId++
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        const err = buildRuntimeError(`Proxy worker request timeout: ${method}`, "worker_timeout")
+        const err = buildRuntimeError(
+          `Proxy worker request timeout: ${method} (${timeoutMs}ms)`,
+          "worker_timeout"
+        )
         reject(err)
       }, timeoutMs)
 

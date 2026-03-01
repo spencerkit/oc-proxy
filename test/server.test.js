@@ -2,7 +2,7 @@ const test = require("node:test")
 const assert = require("node:assert/strict")
 const { ProxyServer, __test__ } = require("../src/proxy/server")
 
-const { readRequestBody, buildUpstreamError } = __test__
+const { readRequestBody, buildUpstreamError, toTokenUsage, extractTokenUsage } = __test__
 
 class MemoryResponse {
   constructor() {
@@ -329,4 +329,41 @@ test("bridgeOpenAIToAnthropic emits usage in message_delta when usage arrives la
   )
   assert.match(response.body, /event: message_delta/)
   assert.match(response.body, /"usage":\{"input_tokens":20,"output_tokens":4\}/)
+})
+
+test("toTokenUsage maps openai and cache token fields", () => {
+  const usage = toTokenUsage({
+    prompt_tokens: 100,
+    completion_tokens: 20,
+    prompt_tokens_details: {
+      cached_tokens: 30,
+      cache_creation_tokens: 5,
+    },
+  })
+
+  assert.deepEqual(usage, {
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheReadTokens: 30,
+    cacheWriteTokens: 5,
+  })
+})
+
+test("extractTokenUsage reads nested responses usage payload", () => {
+  const usage = extractTokenUsage({
+    response: {
+      usage: {
+        input_tokens: 44,
+        output_tokens: 12,
+        cache_read_input_tokens: 9,
+      },
+    },
+  })
+
+  assert.deepEqual(usage, {
+    inputTokens: 44,
+    outputTokens: 12,
+    cacheReadTokens: 9,
+    cacheWriteTokens: 0,
+  })
 })

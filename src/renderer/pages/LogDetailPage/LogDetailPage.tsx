@@ -123,47 +123,67 @@ export const LogDetailPage: React.FC = () => {
             </div>
           </div>
 
-          <div className={styles.section}>
-            <h3>{t("logs.requestHeaders")}</h3>
-            <pre>{toText(log.requestHeaders, t("logs.emptyValue"))}</pre>
-          </div>
-
-          <div className={styles.section}>
-            <h3>{t("logs.forwardRequestHeaders")}</h3>
-            <pre>{toText(log.forwardRequestHeaders, t("logs.emptyValue"))}</pre>
-          </div>
-
-          <div className={styles.section}>
-            <h3>{t("logs.responseHeaders")}</h3>
-            <pre>{toText(log.responseHeaders, t("logs.emptyValue"))}</pre>
-          </div>
-
-          <div className={styles.section}>
-            <h3>{t("logs.upstreamResponseHeaders")}</h3>
-            <pre>{toText(log.upstreamResponseHeaders, t("logs.emptyValue"))}</pre>
-          </div>
-
-          <div className={styles.section}>
-            <h3>{t("logs.requestBody")}</h3>
-            <pre>{toText(log.requestBody, t("logs.emptyValue"))}</pre>
-          </div>
-
-          <div className={styles.section}>
-            <h3>{t("logs.forwardRequestBody")}</h3>
-            <pre>{toText(log.forwardRequestBody, t("logs.emptyValue"))}</pre>
-          </div>
-
-          <div className={styles.section}>
-            <h3>{t("logs.responseBody")}</h3>
-            <pre>{toText(log.responseBody, t("logs.emptyValue"))}</pre>
-          </div>
-
-          {log.error && (
+          <div className={styles.dataArea}>
+            <h3 className={styles.areaTitle}>{t("logs.requestDataSection")}</h3>
             <div className={styles.section}>
-              <h3>{t("logs.errorDetail")}</h3>
-              <pre>{toText(log.error, t("logs.emptyValue"))}</pre>
+              <h3>{t("logs.requestHeaders")}</h3>
+              <pre>{toText(log.requestHeaders, t("logs.emptyValue"))}</pre>
             </div>
-          )}
+
+            <div className={styles.section}>
+              <h3>{t("logs.forwardRequestHeaders")}</h3>
+              <pre>{toText(log.forwardRequestHeaders, t("logs.emptyValue"))}</pre>
+            </div>
+
+            <div className={styles.section}>
+              <h3>{t("logs.responseHeaders")}</h3>
+              <pre>{toText(log.responseHeaders, t("logs.emptyValue"))}</pre>
+            </div>
+
+            <div className={styles.section}>
+              <h3>{t("logs.upstreamResponseHeaders")}</h3>
+              <pre>{toText(log.upstreamResponseHeaders, t("logs.emptyValue"))}</pre>
+            </div>
+
+            <div className={styles.section}>
+              <h3>{t("logs.requestBody")}</h3>
+              <pre>{toText(log.requestBody, t("logs.emptyValue"))}</pre>
+            </div>
+
+            <div className={styles.section}>
+              <h3>{t("logs.responseBody")}</h3>
+              <pre>{toText(log.responseBody, t("logs.emptyValue"))}</pre>
+            </div>
+
+            {log.error && (
+              <div className={styles.section}>
+                <h3>{t("logs.errorDetail")}</h3>
+                <pre>{toText(log.error, t("logs.emptyValue"))}</pre>
+              </div>
+            )}
+          </div>
+
+          <div className={styles.dataArea}>
+            <h3 className={styles.areaTitle}>{t("logs.tokenDataSection")}</h3>
+            <div className={styles.tokenGrid}>
+              <div className={styles.tokenCard}>
+                <span>{t("logs.tokenInput")}</span>
+                <strong>{log.tokenUsage?.inputTokens ?? 0}</strong>
+              </div>
+              <div className={styles.tokenCard}>
+                <span>{t("logs.tokenOutput")}</span>
+                <strong>{log.tokenUsage?.outputTokens ?? 0}</strong>
+              </div>
+              <div className={styles.tokenCard}>
+                <span>{t("logs.tokenCacheRead")}</span>
+                <strong>{log.tokenUsage?.cacheReadTokens ?? 0}</strong>
+              </div>
+              <div className={styles.tokenCard}>
+                <span>{t("logs.tokenCacheWrite")}</span>
+                <strong>{log.tokenUsage?.cacheWriteTokens ?? 0}</strong>
+              </div>
+            </div>
+          </div>
         </>
       )}
     </div>

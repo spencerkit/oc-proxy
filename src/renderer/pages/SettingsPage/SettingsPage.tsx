@@ -8,6 +8,7 @@ import type {
   CompatConfig,
   LocaleCode,
   LocaleMode,
+  LoggingConfig,
   ProxyConfig,
   ServerConfig,
   ThemeMode,
@@ -40,6 +41,7 @@ export const SettingsPage: React.FC = () => {
 
   const [portText, setPortText] = useState("8080")
   const [strictMode, setStrictMode] = useState(false)
+  const [detailedLogs, setDetailedLogs] = useState(false)
   const [launchOnStartup, setLaunchOnStartup] = useState(false)
   const [closeToTray, setCloseToTray] = useState(true)
   const [theme, setTheme] = useState<ThemeMode>("light")
@@ -62,6 +64,7 @@ export const SettingsPage: React.FC = () => {
     if (config) {
       setPortText(String(config.server.port))
       setStrictMode(config.compat.strictMode)
+      setDetailedLogs(!!config.logging.captureBody)
       setLaunchOnStartup(config.ui.launchOnStartup)
       setCloseToTray(config.ui.closeToTray ?? true)
       setTheme(config.ui.theme)
@@ -118,6 +121,7 @@ export const SettingsPage: React.FC = () => {
     config &&
       (String(config.server.port) !== portText ||
         strictMode !== config.compat.strictMode ||
+        detailedLogs !== !!config.logging.captureBody ||
         launchOnStartup !== config.ui.launchOnStartup ||
         closeToTray !== (config.ui.closeToTray ?? true) ||
         theme !== config.ui.theme ||
@@ -154,10 +158,16 @@ export const SettingsPage: React.FC = () => {
       localeMode,
     }
 
+    const newLoggingConfig: LoggingConfig = {
+      ...config.logging,
+      captureBody: detailedLogs,
+    }
+
     const newConfig: ProxyConfig = {
       ...config,
       server: newServerConfig,
       compat: newCompatConfig,
+      logging: newLoggingConfig,
       ui: newUIConfig,
     }
 
@@ -302,6 +312,14 @@ export const SettingsPage: React.FC = () => {
                 <p>{t("settings.strictModeHint")}</p>
               </div>
               <Switch id="strictMode" checked={strictMode} onChange={setStrictMode} />
+            </div>
+
+            <div className={styles.formGroupSwitch}>
+              <div className={styles.switchLabel}>
+                <label htmlFor="detailedLogs">{t("settings.detailedLogs")}</label>
+                <p>{t("settings.detailedLogsHint")}</p>
+              </div>
+              <Switch id="detailedLogs" checked={detailedLogs} onChange={setDetailedLogs} />
             </div>
 
             <div className={styles.formGroupSwitch}>

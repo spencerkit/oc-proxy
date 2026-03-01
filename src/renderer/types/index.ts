@@ -28,6 +28,7 @@ export type {
   Rule,
   RuleDirection,
   RuleProtocol,
+  TokenUsage,
 } from "./proxy"
 
 import type { CompatConfig, LoggingConfig, ServerConfig, UIConfig } from "./config"

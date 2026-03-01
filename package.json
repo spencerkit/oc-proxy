@@ -34,6 +34,11 @@
       "assets/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "out/main/proxyWorker.js",
+      "out/main/logStore.js",
+      "out/proxy/**"
+    ],
     "mac": {
       "icon": "assets/icon.icns",
       "target": [

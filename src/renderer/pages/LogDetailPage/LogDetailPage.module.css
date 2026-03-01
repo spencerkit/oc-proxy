@@ -41,9 +41,9 @@
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
   display: grid;
-  gap: var(--sp-1);
+  gap: 2px;
 }
 
 .metaItem span {
@@ -62,9 +62,47 @@
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
   display: grid;
   gap: var(--sp-2);
+}
+
+.dataArea {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.areaTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+.tokenGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-2);
+}
+
+.tokenCard {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3);
+  display: grid;
+  gap: 2px;
+}
+
+.tokenCard span {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.tokenCard strong {
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-family: var(--font-mono);
 }
 
 .section h3 {

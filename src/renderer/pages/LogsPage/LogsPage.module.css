@@ -73,17 +73,29 @@
 
 .summaryGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-2);
+}
+
+.metricsSection {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.metricsTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
 }
 
 .summaryCard {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
   display: grid;
-  gap: var(--sp-1);
+  gap: 2px;
 }
 
 .summaryLabel {
@@ -94,7 +106,7 @@
 }
 
 .summaryValue {
-  font-size: var(--text-xl);
+  font-size: var(--text-lg);
   line-height: 1;
   color: var(--text-primary);
   font-family: var(--font-display);

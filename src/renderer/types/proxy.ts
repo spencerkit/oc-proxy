@@ -55,7 +55,18 @@ export interface ProxyMetrics {
   streamRequests: number
   errors: number
   avgLatencyMs: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
   uptimeStartedAt: string | null
+}
+
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
 }
 
 /**
@@ -105,6 +116,7 @@ export interface LogEntry {
   requestBody: unknown
   forwardRequestBody: unknown
   responseBody: unknown
+  tokenUsage?: TokenUsage | null
   httpStatus: number | null
   upstreamStatus: number | null
   durationMs: number

@@ -277,15 +277,70 @@ function ensureModel(body, model) {
   }
 }
 
-function toRedacted(payload, config) {
-  if (!config.logging.captureBody) {
-    return { omitted: true }
+function shouldCaptureBody(config) {
+  return !!config?.logging?.captureBody
+}
+
+function toLoggedBody(payload, config) {
+  if (!shouldCaptureBody(config)) {
+    return null
   }
   return redactPayload(payload, config.logging.redactRules)
 }
 
 function toRedactedHeaders(payload, config) {
   return redactPayload(payload, config.logging.redactRules)
+}
+
+function toTokenInt(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.floor(n)
+}
+
+function toTokenUsage(usage) {
+  if (!usage || typeof usage !== "object") return null
+
+  const inputTokens = toTokenInt(
+    usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usage.promptTokens
+  )
+  const outputTokens = toTokenInt(
+    usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usage.completionTokens
+  )
+  const cacheReadTokens = toTokenInt(
+    usage.cache_read_input_tokens ??
+      usage.cache_read_tokens ??
+      usage.prompt_cache_hit_tokens ??
+      usage.input_tokens_details?.cached_tokens ??
+      usage.prompt_tokens_details?.cached_tokens
+  )
+  const cacheWriteTokens = toTokenInt(
+    usage.cache_creation_input_tokens ??
+      usage.cache_write_input_tokens ??
+      usage.prompt_cache_miss_tokens ??
+      usage.input_tokens_details?.cache_creation_tokens ??
+      usage.prompt_tokens_details?.cache_creation_tokens
+  )
+
+  if (inputTokens === 0 && outputTokens === 0 && cacheReadTokens === 0 && cacheWriteTokens === 0) {
+    return null
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+  }
+}
+
+function extractTokenUsage(payload) {
+  if (!payload || typeof payload !== "object") return null
+  const direct = toTokenUsage(payload.usage)
+  if (direct) return direct
+  const nested = toTokenUsage(payload.response?.usage)
+  if (nested) return nested
+  return null
 }
 
 function mapAnthropicStopReason(stopReason) {
@@ -357,6 +412,10 @@ class ProxyServer {
       streamRequests: 0,
       errors: 0,
       avgLatencyMs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       uptimeStartedAt: null,
     }
   }
@@ -400,6 +459,7 @@ class ProxyServer {
             requestBody: null,
             forwardRequestBody: null,
             responseBody: null,
+            tokenUsage: null,
             httpStatus: mapped.statusCode,
             upstreamStatus: err.upstreamStatus || null,
             durationMs: 0,
@@ -494,6 +554,7 @@ class ProxyServer {
       requestBody: null,
       forwardRequestBody: null,
       responseBody: null,
+      tokenUsage: null,
       httpStatus: null,
       upstreamStatus: null,
       durationMs: 0,
@@ -524,7 +585,7 @@ class ProxyServer {
           status: "ok",
           httpStatus: 200,
           responseHeaders: toRedactedHeaders(responseHeadersForJson(traceId), config),
-          responseBody: { ok: true, running: true },
+          responseBody: toLoggedBody({ ok: true, running: true }, config),
         })
         return
       }
@@ -535,7 +596,7 @@ class ProxyServer {
           status: "ok",
           httpStatus: 200,
           responseHeaders: toRedactedHeaders(responseHeadersForJson(traceId), config),
-          responseBody: this.metrics,
+          responseBody: toLoggedBody(this.metrics, config),
         })
         return
       }
@@ -552,7 +613,7 @@ class ProxyServer {
             status: "rejected",
             httpStatus: 401,
             responseHeaders: toRedactedHeaders(responseHeadersForJson(traceId), config),
-            responseBody: payload,
+            responseBody: toLoggedBody(payload, config),
             error: { message: "invalid_local_token", code: "unauthorized" },
           })
           return
@@ -572,7 +633,7 @@ class ProxyServer {
           status: "rejected",
           httpStatus: 404,
           responseHeaders: toRedactedHeaders(responseHeadersForJson(traceId), config),
-          responseBody: payload,
+          responseBody: toLoggedBody(payload, config),
           error: { message: "invalid_path", code: "not_found" },
         })
         return
@@ -582,7 +643,7 @@ class ProxyServer {
       chain.groupPath = groupId
 
       const requestBody = await readRequestBody(req)
-      chain.requestBody = toRedacted(requestBody, config)
+      chain.requestBody = toLoggedBody(requestBody, config)
 
       const entry = detectEntryProtocol(suffixPath)
       if (!entry) {
@@ -644,7 +705,7 @@ class ProxyServer {
       }
 
       stream = !!upstreamBody.stream
-      chain.forwardRequestBody = toRedacted(upstreamBody, config)
+      chain.forwardRequestBody = null
       const upstreamRequestHeaders = buildRuleHeaders(downstreamProtocol, rule)
       chain.forwardRequestHeaders = toRedactedHeaders(upstreamRequestHeaders, config)
 
@@ -686,29 +747,42 @@ class ProxyServer {
           )
         }
 
+        let streamTokenUsage = null
         if (entry.protocol === "openai" && downstreamProtocol === "anthropic") {
           if (entry.endpoint === "responses") {
-            await this.bridgeAnthropicToOpenAIResponses(
+            streamTokenUsage = await this.bridgeAnthropicToOpenAIResponses(
               upstreamResponse,
               res,
               traceId,
               requestedModel
             )
           } else {
-            await this.bridgeAnthropicToOpenAI(upstreamResponse, res, traceId, requestedModel)
+            streamTokenUsage = await this.bridgeAnthropicToOpenAI(
+              upstreamResponse,
+              res,
+              traceId,
+              requestedModel
+            )
           }
         } else if (entry.protocol === "anthropic" && downstreamProtocol === "openai") {
-          await this.bridgeOpenAIToAnthropic(upstreamResponse, res, traceId, requestedModel)
+          streamTokenUsage = await this.bridgeOpenAIToAnthropic(
+            upstreamResponse,
+            res,
+            traceId,
+            requestedModel
+          )
         } else {
-          await this.pipeSSE(upstreamResponse, res, traceId)
+          streamTokenUsage = await this.pipeSSE(upstreamResponse, res, traceId)
         }
 
+        this.updateTokenMetrics(streamTokenUsage)
         this.updateLatency(Date.now() - started)
         this.finalizeRequestChain(chain, started, {
           status: "ok",
           httpStatus: 200,
           responseHeaders: toRedactedHeaders(responseHeadersForSSE(traceId), config),
-          responseBody: { stream: true },
+          responseBody: toLoggedBody({ stream: true }, config),
+          tokenUsage: streamTokenUsage,
         })
         return
       }
@@ -741,14 +815,18 @@ class ProxyServer {
         outputBody = mapOpenAIToAnthropicResponse(upstreamJson, { requestModel: requestedModel })
       }
 
+      const tokenUsage = extractTokenUsage(upstreamJson) || extractTokenUsage(outputBody)
+
       sendJson(res, 200, outputBody, { "x-trace-id": traceId })
+      this.updateTokenMetrics(tokenUsage)
       this.updateLatency(Date.now() - started)
 
       this.finalizeRequestChain(chain, started, {
         status: "ok",
         httpStatus: 200,
         responseHeaders: toRedactedHeaders(responseHeadersForJson(traceId), config),
-        responseBody: toRedacted(outputBody, config),
+        responseBody: toLoggedBody(outputBody, config),
+        tokenUsage,
       })
     } catch (err) {
       this.finalizeRequestChain(chain, started, {
@@ -776,15 +854,42 @@ class ProxyServer {
     this.metrics.avgLatencyMs = Math.round((this.metrics.avgLatencyMs * (n - 1) + ms) / n)
   }
 
+  updateTokenMetrics(tokenUsage) {
+    if (!tokenUsage) return
+    this.metrics.inputTokens += toTokenInt(tokenUsage.inputTokens)
+    this.metrics.outputTokens += toTokenInt(tokenUsage.outputTokens)
+    this.metrics.cacheReadTokens += toTokenInt(tokenUsage.cacheReadTokens)
+    this.metrics.cacheWriteTokens += toTokenInt(tokenUsage.cacheWriteTokens)
+  }
+
   async pipeSSE(upstreamResponse, res, traceId) {
     beginSSE(res, { "x-trace-id": traceId })
     const reader = upstreamResponse.body.getReader()
+    const decoder = new TextDecoder()
+    let latestTokenUsage = null
+    const parser = createSSEParser(({ data }) => {
+      if (!data || data === "[DONE]") return
+      let payload = null
+      try {
+        payload = JSON.parse(data)
+      } catch {
+        return
+      }
+      const tokenUsage = extractTokenUsage(payload)
+      if (tokenUsage) {
+        latestTokenUsage = tokenUsage
+      }
+    })
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
+      parser.write(decoder.decode(value, { stream: true }))
       res.write(Buffer.from(value))
     }
+    parser.end()
     res.end()
+    return latestTokenUsage
   }
 
   async bridgeAnthropicToOpenAI(upstreamResponse, res, traceId, requestModel) {
@@ -798,6 +903,7 @@ class ProxyServer {
     let emittedRole = false
     let doneSent = false
     let finishReason = "stop"
+    let latestTokenUsage = null
     const toolIndexesByContentIndex = new Map()
     let nextToolIndex = 0
 
@@ -850,6 +956,11 @@ class ProxyServer {
 
       if (event === "message_start" && payload.message?.id) {
         messageId = payload.message.id
+      }
+
+      const tokenUsage = extractTokenUsage(payload) || toTokenUsage(payload.message?.usage)
+      if (tokenUsage) {
+        latestTokenUsage = tokenUsage
       }
 
       if (event === "message_delta" && payload.delta?.stop_reason) {
@@ -921,6 +1032,7 @@ class ProxyServer {
     parser.end()
     emitDone()
     res.end()
+    return latestTokenUsage
   }
 
   async bridgeAnthropicToOpenAIResponses(upstreamResponse, res, traceId, requestModel) {
@@ -934,6 +1046,7 @@ class ProxyServer {
     let messageState = null
     let doneSent = false
     let latestUsage = toOpenAIResponsesUsage()
+    let latestTokenUsage = null
 
     const emitEvent = (eventName, payload) => {
       writeSSE(res, {
@@ -1047,6 +1160,10 @@ class ProxyServer {
 
       if (event === "message_delta" && payload.usage) {
         latestUsage = toOpenAIResponsesUsage(payload.usage)
+        const tokenUsage = toTokenUsage(payload.usage)
+        if (tokenUsage) {
+          latestTokenUsage = tokenUsage
+        }
       }
 
       if (event === "content_block_start" && payload.content_block?.type === "text") {
@@ -1103,6 +1220,7 @@ class ProxyServer {
     parser.end()
     emitDone()
     res.end()
+    return latestTokenUsage
   }
 
   async bridgeOpenAIToAnthropic(upstreamResponse, res, traceId, requestModel) {
@@ -1116,6 +1234,7 @@ class ProxyServer {
     let started = false
     let usageSnapshot = null
     let latestUsage = toAnthropicUsage()
+    let latestTokenUsage = null
     let finalStopReason = "end_turn"
     let finalDeltaSent = false
     let nextContentIndex = 0
@@ -1153,6 +1272,10 @@ class ProxyServer {
       if (usageSnapshot === nextSnapshot) return
       usageSnapshot = nextSnapshot
       latestUsage = mapped
+      const tokenUsage = toTokenUsage(usage)
+      if (tokenUsage) {
+        latestTokenUsage = tokenUsage
+      }
       writeSSE(res, {
         event: "message_delta",
         data: JSON.stringify({
@@ -1269,6 +1392,11 @@ class ProxyServer {
       emitMessageStart(payload.usage)
       if (payload.usage) {
         emitUsageDelta(payload.usage)
+      } else {
+        const tokenUsage = extractTokenUsage(payload)
+        if (tokenUsage) {
+          latestTokenUsage = tokenUsage
+        }
       }
       const choice = payload.choices?.[0]
       const delta = choice?.delta || {}
@@ -1324,6 +1452,7 @@ class ProxyServer {
     emitFinalMessageDelta()
     emitMessageStop()
     res.end()
+    return latestTokenUsage
   }
 }
 
@@ -1336,5 +1465,7 @@ module.exports = {
     toStatusCode,
     toAnthropicUsage,
     toAnthropicStopReason,
+    toTokenUsage,
+    extractTokenUsage,
   },
 }

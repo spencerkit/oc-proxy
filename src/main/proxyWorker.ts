@@ -2,6 +2,13 @@
 const path = require("node:path")
 const fs = require("node:fs")
 const { LogStore } = require("./logStore")
+const { parentPort: workerThreadParentPort } = require("node:worker_threads")
+
+const utilityParentPort =
+  process.parentPort && typeof process.parentPort.postMessage === "function"
+    ? process.parentPort
+    : null
+const parentPort = utilityParentPort || workerThreadParentPort || null
 
 if (!require.extensions[".ts"]) {
   require.extensions[".ts"] = require.extensions[".js"]
@@ -128,11 +135,16 @@ async function handleCommand(method, payload) {
 }
 
 function sendToParent(message) {
-  if (typeof process.send !== "function") return
-  process.send(message)
+  if (typeof process.send === "function") {
+    process.send(message)
+    return
+  }
+  if (parentPort && typeof parentPort.postMessage === "function") {
+    parentPort.postMessage(message)
+  }
 }
 
-process.on("message", async message => {
+async function handleParentMessage(message) {
   if (!message || message.type !== "request") return
 
   const id = message.id
@@ -155,7 +167,18 @@ process.on("message", async message => {
       error: toSerializableError(error),
     })
   }
-})
+}
+
+process.on("message", handleParentMessage)
+if (parentPort && typeof parentPort.on === "function") {
+  parentPort.on("message", messageEvent => {
+    const message =
+      messageEvent && typeof messageEvent === "object" && "data" in messageEvent
+        ? messageEvent.data
+        : messageEvent
+    handleParentMessage(message)
+  })
+}
 
 process.on("disconnect", () => {
   shutdownAndExit(0).catch(error => {
@@ -163,6 +186,14 @@ process.on("disconnect", () => {
     process.exit(1)
   })
 })
+if (parentPort && typeof parentPort.on === "function") {
+  parentPort.on("close", () => {
+    shutdownAndExit(0).catch(error => {
+      console.error("[ProxyWorker] Failed to shutdown on parent port close:", error)
+      process.exit(1)
+    })
+  })
+}
 
 process.on("SIGTERM", () => {
   shutdownAndExit(0).catch(error => {

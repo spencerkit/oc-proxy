@@ -20,6 +20,7 @@ export interface CompatConfig {
  */
 export interface LoggingConfig {
   level: string
+  // Controls whether request/response bodies are captured in logs.
   captureBody: boolean
   redactRules: string[]
 }
