@@ -1,4 +1,3 @@
-#!/bin/sh
-. "$(dirname "$0")/_/husky.sh"
-
-npx --no -- commitlint --edit "$1"
+if node -e "require.resolve('@commitlint/cli')" >/dev/null 2>&1; then
+  npx --no -- commitlint --edit "$1"
+fi
