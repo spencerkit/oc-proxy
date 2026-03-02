@@ -24,6 +24,7 @@ use url::Url;
 use uuid::Uuid;
 
 const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
+const MAX_STREAM_LOG_BODY_BYTES: usize = 256 * 1024;
 const REQUEST_TIMEOUT_MS: u64 = 60_000;
 
 #[derive(Clone)]
@@ -644,11 +645,24 @@ async fn handle_proxy_request(
             let mut bytes_stream = upstream_resp.bytes_stream();
             let mut usage_acc = StreamTokenAccumulator::default();
             let mut stream_failed = false;
+            let mut stream_body = Vec::<u8>::new();
+            let mut stream_body_truncated = false;
 
             loop {
                 match bytes_stream.try_next().await {
                     Ok(Some(bytes)) => {
                         usage_acc.consume_chunk(bytes.as_ref());
+                        if stream_capture_body && !stream_body_truncated {
+                            let remaining = MAX_STREAM_LOG_BODY_BYTES.saturating_sub(stream_body.len());
+                            if remaining == 0 {
+                                stream_body_truncated = true;
+                            } else if bytes.len() <= remaining {
+                                stream_body.extend_from_slice(bytes.as_ref());
+                            } else {
+                                stream_body.extend_from_slice(&bytes.as_ref()[..remaining]);
+                                stream_body_truncated = true;
+                            }
+                        }
                         if tx.send(Ok(bytes)).await.is_err() {
                             break;
                         }
@@ -676,6 +690,15 @@ async fn handle_proxy_request(
                 stream_started.elapsed().as_millis() as u64,
             );
 
+            let stream_response_body = if stream_capture_body {
+                Some(json!({
+                    "stream": true,
+                    "payload": String::from_utf8_lossy(&stream_body).to_string(),
+                    "truncated": stream_body_truncated,
+                }))
+            } else {
+                Some(json!({"stream": true}))
+            };
             let mut response_headers = response_headers_sse(&stream_trace_id);
             finalize_log(
                 &stream_state,
@@ -690,7 +713,7 @@ async fn handle_proxy_request(
                 Some(&stream_upstream_url),
                 Some(stream_request_body),
                 Some(stream_upstream_body),
-                Some(json!({"stream": true})),
+                stream_response_body,
                 if stream_failed { Some(502) } else { Some(200) },
                 Some(stream_upstream_status),
                 Some(stream_upstream_headers),

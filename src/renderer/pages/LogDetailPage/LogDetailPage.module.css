@@ -126,6 +126,90 @@
   overflow-x: auto;
 }
 
+.treeContainer {
+  margin: 0;
+  padding: var(--sp-2);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  overflow-x: auto;
+}
+
+.jsonRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 20px;
+}
+
+.toggleButton {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 14px;
+  cursor: pointer;
+}
+
+.toggleButton:hover {
+  color: var(--text-primary);
+}
+
+.toggleSpacer {
+  width: 14px;
+  flex: 0 0 14px;
+}
+
+.nodeKey {
+  color: var(--text-primary);
+}
+
+.nodeColon {
+  color: var(--text-tertiary);
+}
+
+.nodeSummary {
+  color: var(--text-secondary);
+}
+
+.nodeChildren {
+  display: grid;
+}
+
+.valueString {
+  color: #7fdbca;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.valueNumber {
+  color: #f2b86f;
+}
+
+.valueBoolean {
+  color: #94d2ff;
+}
+
+.valueNull {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.valueFallback {
+  color: var(--text-secondary);
+}
+
+.emptyNode {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
 .emptyState {
   min-height: 240px;
   display: flex;
