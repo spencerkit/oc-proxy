@@ -26,3 +26,16 @@ updates:
       prefix: "ci"
     labels:
       - "dependencies"
+
+  - package-ecosystem: "cargo"
+    directory: "/src-tauri"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(rust)"
+    labels:
+      - "dependencies"

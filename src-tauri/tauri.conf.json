@@ -28,10 +28,7 @@
   "bundle": {
     "active": true,
     "targets": ["dmg", "nsis"],
-    "icon": [
-      "../assets/icon.ico",
-      "../assets/icon.icns"
-    ],
+    "icon": ["../assets/icon.ico", "../assets/icon.icns"],
     "windows": {
       "nsis": {
         "installerIcon": "../assets/icon.ico"

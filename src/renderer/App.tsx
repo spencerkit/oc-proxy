@@ -13,7 +13,10 @@ import {
   SettingsPage,
 } from "@/pages"
 import { useProxyStore } from "@/store"
-import { formatServerAddressForDisplay, resolveReachableServerBaseUrls } from "@/utils/serverAddress"
+import {
+  formatServerAddressForDisplay,
+  resolveReachableServerBaseUrls,
+} from "@/utils/serverAddress"
 
 /**
  * Main App Component

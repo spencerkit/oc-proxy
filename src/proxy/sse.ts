@@ -17,31 +17,23 @@ function createSSEParser(onEvent) {
 
   function write(chunk) {
     buffer += chunk
-    let idx = buffer.indexOf("\n")
-    while (idx !== -1) {
+    while (true) {
+      const idx = buffer.indexOf("\n")
+      if (idx === -1) break
+
       const raw = buffer.slice(0, idx)
       buffer = buffer.slice(idx + 1)
       const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw
 
       if (line === "") {
         flushEvent()
-        continue
-      }
-
-      if (line.startsWith(":")) {
-        continue
-      }
-
-      if (line.startsWith("event:")) {
+      } else if (line.startsWith(":")) {
+        // comment/heartbeat line
+      } else if (line.startsWith("event:")) {
         currentEvent = line.slice(6).trim()
-        continue
-      }
-
-      if (line.startsWith("data:")) {
+      } else if (line.startsWith("data:")) {
         dataLines.push(line.slice(5).trimStart())
       }
-
-      idx = buffer.indexOf("\n")
     }
   }
 

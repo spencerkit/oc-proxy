@@ -121,7 +121,9 @@
   font-size: var(--text-xs);
   font-family: var(--font-mono);
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .ruleOption + .ruleOption {

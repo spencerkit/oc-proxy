@@ -9,7 +9,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write --unsafe .",
     "format": "biome format --write .",
-    "check": "npm run typecheck && npm run test",
+    "check": "npm run lint && npm run typecheck && npm run test:ci",
     "ci": "npm run check && npm run build",
     "build": "tsc && vite build",
     "preview": "vite preview",
@@ -19,6 +19,7 @@
     "tauri:build": "CARGO_TARGET_DIR=\"$PWD/dist/target\" cargo tauri build && npm run tauri:collect",
     "tauri:build:win": "CARGO_TARGET_DIR=\"$PWD/dist/target\" cargo tauri build --target x86_64-pc-windows-gnu && npm run tauri:collect",
     "test": "node --require ./scripts/register-ts.js --test",
+    "test:ci": "node --require ./scripts/register-ts.js --test --test-timeout=30000",
     "prepare": "husky install"
   },
   "engines": {
@@ -44,17 +45,5 @@
     "lint-staged": "^16.3.0",
     "typescript": "^5.2.2",
     "vite": "^5.1.0"
-  },
-  "lint-staged": {
-    "*.{js,jsx,ts,tsx}": [
-      "biome check --write --unsafe",
-      "biome format --write"
-    ],
-    "*.{json,jsonc}": [
-      "biome format --write"
-    ],
-    "*.md": [
-      "biome format --write"
-    ]
   }
 }

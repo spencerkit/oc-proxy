@@ -8,7 +8,7 @@ use crate::models::{
     Rule, RuleProtocol, TokenUsage,
 };
 use crate::stats_store::StatsStore;
-use axum::body::{to_bytes, Body};
+use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, UdpSocket};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use url::Url;
 use uuid::Uuid;
@@ -81,6 +81,66 @@ struct ParsedPath {
 struct PathEntry {
     protocol: EntryProtocol,
     endpoint: EntryEndpoint,
+}
+
+#[derive(Default)]
+struct StreamTokenAccumulator {
+    line_buffer: String,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+}
+
+impl StreamTokenAccumulator {
+    fn consume_chunk(&mut self, chunk: &[u8]) {
+        self.line_buffer.push_str(&String::from_utf8_lossy(chunk));
+        while let Some(newline_idx) = self.line_buffer.find('\n') {
+            let mut line = self.line_buffer[..newline_idx].to_string();
+            if line.ends_with('\r') {
+                let _ = line.pop();
+            }
+            self.consume_line(&line);
+            self.line_buffer.drain(..=newline_idx);
+        }
+    }
+
+    fn consume_line(&mut self, line: &str) {
+        let Some(rest) = line.strip_prefix("data:") else {
+            return;
+        };
+        let payload = rest.trim_start();
+        if payload.is_empty() || payload == "[DONE]" {
+            return;
+        }
+
+        if let Ok(parsed) = serde_json::from_str::<Value>(payload) {
+            if let Some(usage) = extract_token_usage(&parsed) {
+                // Stream payloads can contain repeated/cumulative usage snapshots.
+                self.input_tokens = self.input_tokens.max(usage.input_tokens);
+                self.output_tokens = self.output_tokens.max(usage.output_tokens);
+                self.cache_read_tokens = self.cache_read_tokens.max(usage.cache_read_tokens);
+                self.cache_write_tokens = self.cache_write_tokens.max(usage.cache_write_tokens);
+            }
+        }
+    }
+
+    fn into_token_usage(self) -> Option<TokenUsage> {
+        if self.input_tokens == 0
+            && self.output_tokens == 0
+            && self.cache_read_tokens == 0
+            && self.cache_write_tokens == 0
+        {
+            return None;
+        }
+
+        Some(TokenUsage {
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            cache_read_tokens: self.cache_read_tokens,
+            cache_write_tokens: self.cache_write_tokens,
+        })
+    }
 }
 
 fn normalized_host(host: &str) -> &str {
@@ -571,48 +631,105 @@ async fn handle_proxy_request(
         .to_lowercase();
 
     if stream && upstream_ct.contains("text/event-stream") {
-        let bytes_stream = upstream_resp
-            .bytes_stream()
-            .map_ok(|bytes| bytes)
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "stream read failed"));
+        let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+        let stream_state = state.clone();
+        let stream_trace_id = trace_id.clone();
+        let stream_method = method.clone();
+        let stream_parsed_path = ParsedPath {
+            group_id: parsed_path.group_id.clone(),
+            suffix: parsed_path.suffix.clone(),
+        };
+        let stream_group = group.clone();
+        let stream_rule = rule.clone();
+        let stream_entry = PathEntry {
+            protocol: entry.protocol,
+            endpoint: entry.endpoint,
+        };
+        let stream_requested_model = requested_model.clone();
+        let stream_target_model = target_model.clone();
+        let stream_upstream_url = upstream_url.clone();
+        let stream_request_body = request_body.clone();
+        let stream_upstream_body = upstream_body.clone();
+        let stream_upstream_headers = upstream_headers_plain.clone();
+        let stream_capture_body = capture_body;
+        let stream_upstream_status = upstream_status;
+        let stream_started = started;
 
-        let body = Body::from_stream(bytes_stream);
+        tokio::spawn(async move {
+            let mut bytes_stream = upstream_resp.bytes_stream();
+            let mut usage_acc = StreamTokenAccumulator::default();
+            let mut stream_failed = false;
+
+            loop {
+                match bytes_stream.try_next().await {
+                    Ok(Some(bytes)) => {
+                        usage_acc.consume_chunk(bytes.as_ref());
+                        if tx.send(Ok(bytes)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(_) => {
+                        stream_failed = true;
+                        let _ = tx
+                            .send(Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                "stream read failed",
+                            )))
+                            .await;
+                        break;
+                    }
+                }
+            }
+
+            let token_usage = usage_acc.into_token_usage();
+            if let Some(ref usage) = token_usage {
+                update_token_metrics(&stream_state.metrics, usage);
+            }
+            update_latency(
+                &stream_state.metrics,
+                stream_started.elapsed().as_millis() as u64,
+            );
+
+            let mut response_headers = response_headers_sse(&stream_trace_id);
+            finalize_log(
+                &stream_state,
+                &stream_trace_id,
+                &stream_method,
+                &stream_parsed_path,
+                &stream_group,
+                &stream_rule,
+                &stream_entry,
+                Some(&stream_requested_model),
+                Some(&stream_target_model),
+                Some(&stream_upstream_url),
+                Some(stream_request_body),
+                Some(stream_upstream_body),
+                Some(json!({"stream": true})),
+                if stream_failed { Some(502) } else { Some(200) },
+                Some(stream_upstream_status),
+                Some(stream_upstream_headers),
+                Some(response_headers.drain().collect()),
+                token_usage,
+                stream_started.elapsed().as_millis() as u64,
+                if stream_failed { "error" } else { "ok" },
+                stream_capture_body,
+            );
+        });
+
+        let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        }));
         let mut resp = Response::new(body);
         *resp.status_mut() = StatusCode::OK;
 
-        let mut response_headers = response_headers_sse(&trace_id);
+        let response_headers = response_headers_sse(&trace_id);
         for (k, v) in &response_headers {
             let _ = resp.headers_mut().insert(
                 axum::http::header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
                 axum::http::HeaderValue::from_str(v).unwrap_or_else(|_| axum::http::HeaderValue::from_static("")),
             );
         }
-
-        finalize_log(
-            &state,
-            &trace_id,
-            &method,
-            &parsed_path,
-            &group,
-            &rule,
-            &entry,
-            Some(&requested_model),
-            Some(&target_model),
-            Some(&upstream_url),
-            Some(request_body),
-            Some(upstream_body),
-            Some(json!({"stream": true})),
-            Some(200),
-            Some(upstream_status),
-            Some(upstream_headers_plain),
-            Some(response_headers.drain().collect()),
-            None,
-            started.elapsed().as_millis() as u64,
-            "ok",
-            capture_body,
-        );
-
-        update_latency(&state.metrics, started.elapsed().as_millis() as u64);
         return resp;
     }
 
@@ -968,7 +1085,11 @@ fn is_cross_protocol(entry: &PathEntry, downstream: &RuleProtocol) -> bool {
 }
 
 fn extract_token_usage(payload: &Value) -> Option<TokenUsage> {
-    let usage = payload.get("usage").or_else(|| payload.get("response").and_then(|r| r.get("usage")))?;
+    let usage = payload
+        .get("usage")
+        .or_else(|| payload.get("response").and_then(|r| r.get("usage")))
+        .or_else(|| payload.get("message").and_then(|m| m.get("usage")))
+        .or_else(|| payload.get("delta").and_then(|d| d.get("usage")))?;
 
     let input_tokens = first_u64(
         usage,

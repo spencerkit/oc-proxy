@@ -1,3 +1,14 @@
-if node -e "require.resolve('@commitlint/cli')" >/dev/null 2>&1; then
-  npx --no -- commitlint --edit "$1"
+#!/usr/bin/env sh
+set -eu
+
+message_file="${1:?commit message file is required}"
+first_line="$(head -n 1 "${message_file}" | tr -d '\r')"
+
+if printf '%s' "${first_line}" | grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'; then
+  exit 0
 fi
+
+echo "Invalid commit message:"
+echo "  ${first_line}"
+echo "Expected Conventional Commits, e.g. 'feat(ui): add model filter'"
+exit 1
