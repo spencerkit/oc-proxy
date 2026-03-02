@@ -1,6 +1,6 @@
 import { RefreshCw, Trash2 } from "lucide-react"
 import type React from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button, Modal } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
@@ -23,9 +23,11 @@ export const LogsPage: React.FC = () => {
   const { showToast } = useLogs()
   const [statusFilter, setStatusFilter] = useState<"all" | LogEntry["status"]>("all")
   const [ruleFilter, setRuleFilter] = useState("all")
-  const [ruleSearchText, setRuleSearchText] = useState("")
+  const [ruleInputValue, setRuleInputValue] = useState("")
+  const [ruleDropdownOpen, setRuleDropdownOpen] = useState(false)
   const [hoursFilter, setHoursFilter] = useState<number>(24)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const ruleComboboxRef = useRef<HTMLDivElement | null>(null)
   const statusFilters: Array<"all" | LogEntry["status"]> = [
     "all",
     "error",
@@ -50,25 +52,25 @@ export const LogsPage: React.FC = () => {
   }, [config, t])
 
   const visibleRuleOptions = useMemo(() => {
-    const keyword = ruleSearchText.trim().toLowerCase()
+    const keyword = ruleInputValue.trim().toLowerCase()
     if (!keyword) {
       return ruleOptions
     }
 
-    const filtered = ruleOptions.filter(option => {
-      if (option.key === "all") return true
+    return ruleOptions.filter(option => {
+      if (option.key === "all") return false
       return option.label.toLowerCase().includes(keyword)
     })
+  }, [ruleInputValue, ruleOptions])
 
-    if (ruleFilter !== "all" && !filtered.some(option => option.key === ruleFilter)) {
-      const selected = ruleOptions.find(option => option.key === ruleFilter)
-      if (selected) {
-        filtered.unshift(selected)
-      }
+  useEffect(() => {
+    const selected = ruleOptions.find(option => option.key === ruleFilter)
+    if (selected?.key === "all") {
+      setRuleInputValue("")
+    } else {
+      setRuleInputValue(selected?.label ?? "")
     }
-
-    return filtered
-  }, [ruleFilter, ruleOptions, ruleSearchText])
+  }, [ruleFilter, ruleOptions])
 
   useEffect(() => {
     void refreshLogsStats(hoursFilter, ruleFilter === "all" ? undefined : ruleFilter)
@@ -80,6 +82,19 @@ export const LogsPage: React.FC = () => {
     }, 3000)
     return () => window.clearInterval(timer)
   }, [hoursFilter, refreshLogsStats, ruleFilter])
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!ruleComboboxRef.current) return
+      const target = event.target as Node
+      if (!ruleComboboxRef.current.contains(target)) {
+        setRuleDropdownOpen(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick)
+    return () => document.removeEventListener("mousedown", handleOutsideClick)
+  }, [])
 
   const handleRefresh = async () => {
     try {
@@ -148,6 +163,12 @@ export const LogsPage: React.FC = () => {
   }
 
   const getHoursLabel = (hours: number) => t(`logs.statsHours${hours}`)
+
+  const applyRuleOption = (option: { key: string; label: string }) => {
+    setRuleFilter(option.key)
+    setRuleInputValue(option.key === "all" ? "" : option.label)
+    setRuleDropdownOpen(false)
+  }
 
   const renderLogEntry = (log: LogEntry) => {
     return (
@@ -270,6 +291,9 @@ export const LogsPage: React.FC = () => {
             {t("logs.clear")}
           </Button>
         </div>
+      </div>
+
+      <div className={styles.filterRow}>
         <div className={styles.filterGroup}>
           {statusFilters.map(filter => (
             <button
@@ -282,27 +306,50 @@ export const LogsPage: React.FC = () => {
               {getFilterLabel(filter)}
             </button>
           ))}
-          <div className={styles.inlineFilterTools}>
-            <div className={styles.ruleFilterCombo}>
-              <input
-                className={styles.inlineInput}
-                type="text"
-                value={ruleSearchText}
-                onChange={e => setRuleSearchText(e.target.value)}
-                placeholder={t("logs.statsRuleSearchPlaceholder")}
-              />
-              <select
-                className={styles.inlineSelect}
-                value={ruleFilter}
-                onChange={e => setRuleFilter(e.target.value)}
-              >
+        </div>
+        <div className={styles.advancedFilterGroup}>
+          <div className={styles.ruleCombobox} ref={ruleComboboxRef}>
+            <input
+              className={styles.inlineInput}
+              type="text"
+              value={ruleInputValue}
+              onFocus={() => setRuleDropdownOpen(true)}
+              onChange={e => {
+                const next = e.target.value
+                setRuleInputValue(next)
+                setRuleDropdownOpen(true)
+                if (!next.trim()) {
+                  setRuleFilter("all")
+                }
+              }}
+              onKeyDown={e => {
+                if (e.key === "Escape") {
+                  setRuleDropdownOpen(false)
+                }
+                if (e.key === "Enter" && visibleRuleOptions.length > 0) {
+                  e.preventDefault()
+                  applyRuleOption(visibleRuleOptions[0])
+                }
+              }}
+              placeholder={t("logs.statsRuleAll")}
+            />
+            {ruleDropdownOpen && visibleRuleOptions.length > 0 && (
+              <div className={styles.ruleDropdown}>
                 {visibleRuleOptions.map(option => (
-                  <option key={option.key} value={option.key}>
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={`${styles.ruleOption} ${ruleFilter === option.key ? styles.ruleOptionActive : ""}`}
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={() => applyRuleOption(option)}
+                  >
                     {option.label}
-                  </option>
+                  </button>
                 ))}
-              </select>
-            </div>
+              </div>
+            )}
+          </div>
+          <div className={styles.selectWrap}>
             <select
               className={styles.inlineSelect}
               value={hoursFilter}
