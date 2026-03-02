@@ -124,6 +124,7 @@ struct PartialUiConfig {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PartialRemoteGitConfig {
+    enabled: Option<bool>,
     repo_url: Option<String>,
     token: Option<String>,
     branch: Option<String>,
@@ -170,6 +171,28 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
             }
         });
     let normalized_locale_mode = if locale_mode == "manual" { "manual" } else { "auto" }.to_string();
+
+    let remote_repo_url = partial
+        .remote_git
+        .as_ref()
+        .and_then(|r| r.repo_url.clone())
+        .unwrap_or(defaults.remote_git.repo_url);
+    let remote_token = partial
+        .remote_git
+        .as_ref()
+        .and_then(|r| r.token.clone())
+        .unwrap_or(defaults.remote_git.token);
+    let remote_branch = partial
+        .remote_git
+        .as_ref()
+        .and_then(|r| r.branch.clone())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or(defaults.remote_git.branch);
+    let remote_enabled = partial
+        .remote_git
+        .as_ref()
+        .and_then(|r| r.enabled)
+        .unwrap_or_else(|| !remote_repo_url.trim().is_empty() || !remote_token.trim().is_empty());
 
     Ok(ProxyConfig {
         server: crate::models::ServerConfig {
@@ -236,22 +259,10 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
                 .unwrap_or(defaults.ui.close_to_tray),
         },
         remote_git: crate::models::RemoteGitConfig {
-            repo_url: partial
-                .remote_git
-                .as_ref()
-                .and_then(|r| r.repo_url.clone())
-                .unwrap_or(defaults.remote_git.repo_url),
-            token: partial
-                .remote_git
-                .as_ref()
-                .and_then(|r| r.token.clone())
-                .unwrap_or(defaults.remote_git.token),
-            branch: partial
-                .remote_git
-                .as_ref()
-                .and_then(|r| r.branch.clone())
-                .filter(|v| !v.trim().is_empty())
-                .unwrap_or(defaults.remote_git.branch),
+            enabled: remote_enabled,
+            repo_url: remote_repo_url,
+            token: remote_token,
+            branch: remote_branch,
         },
         groups,
     })

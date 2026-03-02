@@ -41,6 +41,7 @@ export interface UIConfig {
 }
 
 export interface RemoteGitConfig {
+  enabled: boolean
   repoUrl: string
   token: string
   branch: string

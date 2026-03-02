@@ -56,6 +56,7 @@ interface ProxyState {
   readClipboardText: () => Promise<ClipboardTextResult>
   setActiveGroupId: (groupId: string | null) => void
   clearLogs: () => Promise<void>
+  clearLogsStats: () => Promise<void>
   startPolling: () => void
   stopPolling: () => void
   startServer: () => Promise<void>
@@ -324,21 +325,18 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   remoteRulesPull: async (force?: boolean) => {
     try {
-      set({ loading: true, error: null })
+      set({ error: null })
       const result = await ipc.remoteRulesPull(force)
       if (result.config && result.status) {
         set({
           config: result.config,
           status: result.status,
-          loading: false,
         })
-      } else {
-        set({ loading: false })
       }
       return result
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to pull remote rules"
-      set({ error: errorMessage, loading: false })
+      set({ error: errorMessage })
       throw error
     }
   },
@@ -374,6 +372,17 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to clear logs"
       set({ error: errorMessage })
+    }
+  },
+
+  clearLogsStats: async () => {
+    try {
+      await ipc.clearLogsStats()
+      set({ logsStats: null, error: null })
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to clear logs stats"
+      set({ error: errorMessage })
+      throw error
     }
   },
 

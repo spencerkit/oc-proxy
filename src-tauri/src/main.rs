@@ -432,6 +432,12 @@ async fn logs_stats_summary(
     Ok(state.runtime.stats_summary(hours, rule_key))
 }
 
+#[tauri::command]
+async fn logs_stats_clear(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    state.runtime.clear_stats()?;
+    Ok(json!({ "ok": true }))
+}
+
 fn create_tray(app: &AppHandle) -> Result<(), String> {
     let show_hide = MenuItem::with_id(app, "toggle-window", "Show/Hide AI Open Router", true, None::<&str>)
         .map_err(|e| format!("create tray menu failed: {e}"))?;
@@ -605,6 +611,7 @@ async fn main() {
             logs_list,
             logs_clear,
             logs_stats_summary,
+            logs_stats_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

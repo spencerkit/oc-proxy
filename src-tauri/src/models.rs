@@ -37,6 +37,7 @@ pub struct UiConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteGitConfig {
+    pub enabled: bool,
     pub repo_url: String,
     pub token: String,
     pub branch: String,
@@ -283,6 +284,7 @@ pub struct GroupsBackupPayload {
 
 pub fn default_remote_git_config() -> RemoteGitConfig {
     RemoteGitConfig {
+        enabled: false,
         repo_url: String::new(),
         token: String::new(),
         branch: "main".to_string(),

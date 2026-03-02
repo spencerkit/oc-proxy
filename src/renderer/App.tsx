@@ -106,7 +106,9 @@ const App: React.FC = () => {
 
   console.log("[App] About to render layout")
 
-  if (loading && !error) {
+  const isInitialLoading = loading && !error && !config && !status
+
+  if (isInitialLoading) {
     console.log("[App] Showing loading screen")
     return (
       <div className="loading-screen">

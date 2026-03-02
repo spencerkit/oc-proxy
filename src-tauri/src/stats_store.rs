@@ -236,6 +236,15 @@ impl StatsStore {
         }
     }
 
+    pub fn clear(&self) -> Result<(), String> {
+        let snapshot = {
+            let mut guard = self.inner.lock().map_err(|_| "stats lock poisoned".to_string())?;
+            guard.clear();
+            guard.clone()
+        };
+        self.persist_locked(&snapshot)
+    }
+
     fn persist_locked(&self, data: &HashMap<String, StatsBucket>) -> Result<(), String> {
         let payload = PersistedStats {
             version: 1,

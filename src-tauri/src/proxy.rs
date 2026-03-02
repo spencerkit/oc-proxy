@@ -351,6 +351,10 @@ impl ProxyRuntime {
         self.inner.stats_store.summarize(hours, rule_key)
     }
 
+    pub fn clear_stats(&self) -> Result<(), String> {
+        self.inner.stats_store.clear()
+    }
+
     fn is_running(&self) -> bool {
         self.inner
             .server

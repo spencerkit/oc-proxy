@@ -1,5 +1,5 @@
 import type React from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button, Input, Modal, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { useProxyStore } from "@/store"
@@ -10,6 +10,7 @@ import styles from "./SettingsPage.module.css"
 
 type ImportSource = "file" | "clipboard"
 type ExportTarget = "folder" | "clipboard"
+type RemoteSyncAction = "upload" | "pull" | null
 
 function buildImmediateConfig(config: ProxyConfig, next: Partial<ProxyConfig>): ProxyConfig {
   return {
@@ -50,6 +51,7 @@ export const SettingsPage: React.FC = () => {
   const [closeToTray, setCloseToTray] = useState(true)
   const [theme, setTheme] = useState<ThemeMode>("light")
   const [locale, setLocale] = useState<LocaleCode>("en-US")
+  const [remoteSyncEnabled, setRemoteSyncEnabled] = useState(false)
   const [remoteRepoUrl, setRemoteRepoUrl] = useState("")
   const [remoteToken, setRemoteToken] = useState("")
   const [remoteBranch, setRemoteBranch] = useState("main")
@@ -62,17 +64,33 @@ export const SettingsPage: React.FC = () => {
   const [importJsonText, setImportJsonText] = useState("")
   const [readingClipboard, setReadingClipboard] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const [remoteSyncing, setRemoteSyncing] = useState(false)
+  const [remoteSyncAction, setRemoteSyncAction] = useState<RemoteSyncAction>(null)
   const [aboutLoading, setAboutLoading] = useState(false)
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
+  const lastConfigPortRef = useRef("")
+  const remoteSyncing = remoteSyncAction !== null
 
   // Load initial values from config
   useEffect(() => {
     if (!config) return
     const currentPort = String(config.server.port)
-    if (portText === "" || portText === currentPort) {
-      setPortText(currentPort)
-    }
+    setPortText(prevPort => {
+      if (!lastConfigPortRef.current) {
+        return currentPort
+      }
+
+      // Keep in-progress user input unless the config port actually changed.
+      if (currentPort !== lastConfigPortRef.current) {
+        return currentPort
+      }
+
+      if (prevPort === lastConfigPortRef.current) {
+        return currentPort
+      }
+
+      return prevPort
+    })
+    lastConfigPortRef.current = currentPort
     setStrictMode(config.compat.strictMode)
     setDetailedLogs(!!config.logging.captureBody)
     setLaunchOnStartup(config.ui.launchOnStartup)
@@ -88,7 +106,8 @@ export const SettingsPage: React.FC = () => {
     setRemoteRepoUrl(config.remoteGit.repoUrl ?? "")
     setRemoteToken(config.remoteGit.token ?? "")
     setRemoteBranch(config.remoteGit.branch || "main")
-  }, [config, portText])
+    setRemoteSyncEnabled(!!config.remoteGit.enabled)
+  }, [config])
 
   const validatePort = (value: string): boolean => {
     if (!/^\d+$/.test(value)) {
@@ -136,10 +155,12 @@ export const SettingsPage: React.FC = () => {
 
   const persistRemoteConfig = async () => {
     if (!config) return false
+    const nextEnabled = remoteSyncEnabled
     const nextRepoUrl = remoteRepoUrl.trim()
     const nextToken = remoteToken.trim()
     const nextBranch = remoteBranch.trim() || "main"
     const changed =
+      nextEnabled !== !!config.remoteGit.enabled ||
       nextRepoUrl !== (config.remoteGit.repoUrl ?? "") ||
       nextToken !== (config.remoteGit.token ?? "") ||
       nextBranch !== (config.remoteGit.branch ?? "main")
@@ -149,6 +170,7 @@ export const SettingsPage: React.FC = () => {
       await saveConfig({
         ...config,
         remoteGit: {
+          enabled: nextEnabled,
           repoUrl: nextRepoUrl,
           token: nextToken,
           branch: nextBranch,
@@ -276,7 +298,7 @@ export const SettingsPage: React.FC = () => {
     if (!(await persistRemoteConfig())) return
 
     try {
-      setRemoteSyncing(true)
+      setRemoteSyncAction("upload")
       let result = await remoteRulesUpload()
       if (result.needsConfirmation) {
         const confirmed = window.confirm(
@@ -295,7 +317,7 @@ export const SettingsPage: React.FC = () => {
     } catch (error) {
       showToast(t("errors.operationFailed", { message: String(error) }), "error")
     } finally {
-      setRemoteSyncing(false)
+      setRemoteSyncAction(null)
     }
   }
 
@@ -307,7 +329,7 @@ export const SettingsPage: React.FC = () => {
     if (!(await persistRemoteConfig())) return
 
     try {
-      setRemoteSyncing(true)
+      setRemoteSyncAction("pull")
       let result = await remoteRulesPull()
       if (result.needsConfirmation) {
         const confirmed = window.confirm(
@@ -326,7 +348,7 @@ export const SettingsPage: React.FC = () => {
     } catch (error) {
       showToast(t("errors.operationFailed", { message: String(error) }), "error")
     } finally {
-      setRemoteSyncing(false)
+      setRemoteSyncAction(null)
     }
   }
 
@@ -363,12 +385,12 @@ export const SettingsPage: React.FC = () => {
               <label htmlFor="port">{t("settings.servicePort")}</label>
               <Input
                 id="port"
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={portText}
                 onChange={e => handlePortChange(e.target.value)}
                 placeholder="8080"
-                min={1}
-                max={65535}
                 hint={!portError ? t("settings.portHint") : undefined}
                 error={portError || undefined}
                 endAdornment={
@@ -607,66 +629,92 @@ export const SettingsPage: React.FC = () => {
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>{t("settings.remoteSection")}</h3>
 
-            <div className={styles.formGroup}>
-              <label htmlFor="settings-remote-repo">{t("settings.remoteRepoUrl")}</label>
-              <Input
-                id="settings-remote-repo"
-                value={remoteRepoUrl}
-                onChange={e => setRemoteRepoUrl(e.target.value)}
-                onBlur={() => {
-                  void persistRemoteConfig()
+            <div className={styles.formGroupSwitch}>
+              <div className={styles.switchLabel}>
+                <label htmlFor="remoteSyncEnabled">{t("settings.remoteSyncEnabled")}</label>
+                <p>{t("settings.remoteSyncEnabledHint")}</p>
+              </div>
+              <Switch
+                id="remoteSyncEnabled"
+                checked={remoteSyncEnabled}
+                onChange={next => {
+                  setRemoteSyncEnabled(next)
+                  void applyImmediateConfig(current =>
+                    buildImmediateConfig(current, {
+                      remoteGit: {
+                        ...current.remoteGit,
+                        enabled: next,
+                      },
+                    })
+                  )
                 }}
-                placeholder={t("settings.remoteRepoUrlPlaceholder")}
               />
             </div>
 
-            <div className={styles.formGroup}>
-              <label htmlFor="settings-remote-token">{t("settings.remoteToken")}</label>
-              <Input
-                id="settings-remote-token"
-                type="password"
-                value={remoteToken}
-                onChange={e => setRemoteToken(e.target.value)}
-                onBlur={() => {
-                  void persistRemoteConfig()
-                }}
-                placeholder={t("settings.remoteTokenPlaceholder")}
-              />
-            </div>
+            {remoteSyncEnabled && (
+              <>
+                <div className={styles.formGroup}>
+                  <label htmlFor="settings-remote-repo">{t("settings.remoteRepoUrl")}</label>
+                  <Input
+                    id="settings-remote-repo"
+                    value={remoteRepoUrl}
+                    onChange={e => setRemoteRepoUrl(e.target.value)}
+                    onBlur={() => {
+                      void persistRemoteConfig()
+                    }}
+                    placeholder={t("settings.remoteRepoUrlPlaceholder")}
+                  />
+                </div>
 
-            <div className={styles.formGroup}>
-              <label htmlFor="settings-remote-branch">{t("settings.remoteBranch")}</label>
-              <Input
-                id="settings-remote-branch"
-                value={remoteBranch}
-                onChange={e => setRemoteBranch(e.target.value)}
-                onBlur={() => {
-                  void persistRemoteConfig()
-                }}
-                placeholder="main"
-                hint={t("settings.remoteBranchHint")}
-              />
-            </div>
+                <div className={styles.formGroup}>
+                  <label htmlFor="settings-remote-token">{t("settings.remoteToken")}</label>
+                  <Input
+                    id="settings-remote-token"
+                    type="password"
+                    value={remoteToken}
+                    onChange={e => setRemoteToken(e.target.value)}
+                    onBlur={() => {
+                      void persistRemoteConfig()
+                    }}
+                    placeholder={t("settings.remoteTokenPlaceholder")}
+                  />
+                </div>
 
-            <div className={styles.backupActions}>
-              <Button
-                variant="default"
-                onClick={handleRemoteUpload}
-                disabled={loading || remoteSyncing}
-                loading={remoteSyncing}
-              >
-                {t("settings.remoteRulesUpload")}
-              </Button>
-              <Button
-                variant="default"
-                onClick={handleRemotePull}
-                disabled={loading || remoteSyncing}
-                loading={remoteSyncing}
-              >
-                {t("settings.remoteRulesUpdate")}
-              </Button>
-            </div>
-            <p className={styles.fieldHint}>{t("settings.remoteHint")}</p>
+                <div className={styles.formGroup}>
+                  <label htmlFor="settings-remote-branch">{t("settings.remoteBranch")}</label>
+                  <Input
+                    id="settings-remote-branch"
+                    value={remoteBranch}
+                    onChange={e => setRemoteBranch(e.target.value)}
+                    onBlur={() => {
+                      void persistRemoteConfig()
+                    }}
+                    placeholder="main"
+                    hint={t("settings.remoteBranchHint")}
+                  />
+                </div>
+
+                <div className={styles.backupActions}>
+                  <Button
+                    variant="default"
+                    onClick={handleRemoteUpload}
+                    disabled={loading || remoteSyncing}
+                    loading={remoteSyncAction === "upload"}
+                  >
+                    {t("settings.remoteRulesUpload")}
+                  </Button>
+                  <Button
+                    variant="default"
+                    onClick={handleRemotePull}
+                    disabled={loading || remoteSyncing}
+                    loading={remoteSyncAction === "pull"}
+                  >
+                    {t("settings.remoteRulesUpdate")}
+                  </Button>
+                </div>
+                <p className={styles.fieldHint}>{t("settings.remoteHint")}</p>
+              </>
+            )}
           </div>
 
           <div className={styles.section}>

@@ -102,4 +102,8 @@ export const ipc = {
     if (typeof ruleKey === "string") args.ruleKey = ruleKey
     return getInvoke()<StatsSummaryResult>("logs_stats_summary", args)
   },
+
+  clearLogsStats(): Promise<{ ok: boolean }> {
+    return getInvoke()<{ ok: boolean }>("logs_stats_clear")
+  },
 }
