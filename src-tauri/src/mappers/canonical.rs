@@ -1,5 +1,10 @@
+//! Module Overview
+//! Canonical protocol-neutral data model used by all adapters.
+//! Acts as the stable intermediate representation between protocol-specific request/response formats.
+
 use serde_json::Value;
 
+/// Supported protocol surfaces for mapping adapters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapperSurface {
     AnthropicMessages,
@@ -7,6 +12,7 @@ pub enum MapperSurface {
     OpenaiResponses,
 }
 
+/// Runtime options passed through mapping pipeline.
 #[derive(Clone, Debug)]
 pub struct MapOptions {
     pub strict_mode: bool,
@@ -14,6 +20,7 @@ pub struct MapOptions {
 }
 
 impl MapOptions {
+    /// Build mapping options with strict-mode switch and resolved target model.
     pub fn new(strict_mode: bool, target_model: &str) -> Self {
         Self {
             strict_mode,
@@ -22,6 +29,7 @@ impl MapOptions {
     }
 }
 
+/// Canonical role enum shared across protocol adapters.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CanonicalRole {
     System,
@@ -32,6 +40,7 @@ pub enum CanonicalRole {
 }
 
 impl CanonicalRole {
+    /// Parse role string into canonical enum (unknown roles preserved in `Other`).
     pub fn from_str(role: &str) -> Self {
         match role {
             "system" => Self::System,
@@ -42,6 +51,7 @@ impl CanonicalRole {
         }
     }
 
+    /// Convert canonical role enum back to role string.
     pub fn as_str(&self) -> &str {
         match self {
             Self::System => "system",
@@ -53,6 +63,7 @@ impl CanonicalRole {
     }
 }
 
+/// Canonical content blocks used to represent text/tool interactions.
 #[derive(Clone, Debug)]
 pub enum CanonicalBlock {
     Text(String),
@@ -67,12 +78,14 @@ pub enum CanonicalBlock {
     },
 }
 
+/// Canonical message made of role plus structured content blocks.
 #[derive(Clone, Debug)]
 pub struct CanonicalMessage {
     pub role: CanonicalRole,
     pub blocks: Vec<CanonicalBlock>,
 }
 
+/// Canonical tool declaration used by adapters.
 #[derive(Clone, Debug)]
 pub struct CanonicalTool {
     pub name: String,
@@ -80,12 +93,14 @@ pub struct CanonicalTool {
     pub input_schema: Value,
 }
 
+/// Canonical tool choice abstraction.
 #[derive(Clone, Debug)]
 pub struct CanonicalToolChoice {
     pub kind: String,
     pub name: Option<String>,
 }
 
+/// Canonical request model shared by all request adapters.
 #[derive(Clone, Debug)]
 pub struct CanonicalRequest {
     pub model: String,
@@ -102,6 +117,7 @@ pub struct CanonicalRequest {
     pub context_management: Option<Value>,
 }
 
+/// Canonical tool call emitted by assistant response.
 #[derive(Clone, Debug)]
 pub struct CanonicalToolCall {
     pub id: String,
@@ -109,6 +125,7 @@ pub struct CanonicalToolCall {
     pub arguments: String,
 }
 
+/// Canonical finish reason abstraction for protocol differences.
 #[derive(Clone, Debug)]
 pub enum CanonicalFinishReason {
     Stop,
@@ -117,6 +134,7 @@ pub enum CanonicalFinishReason {
     Other(String),
 }
 
+/// Canonical token usage structure for responses.
 #[derive(Clone, Debug)]
 pub struct CanonicalUsage {
     pub input_tokens: u64,
@@ -124,6 +142,7 @@ pub struct CanonicalUsage {
     pub total_tokens: Option<u64>,
 }
 
+/// Canonical response model shared by all response adapters.
 #[derive(Clone, Debug)]
 pub struct CanonicalResponse {
     pub id: String,

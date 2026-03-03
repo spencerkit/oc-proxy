@@ -1,3 +1,7 @@
+//! Module Overview
+//! Application entrypoint that wires Tauri commands and shared state.
+//! Keeps startup responsibilities minimal and delegates runtime logic to domain modules.
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;

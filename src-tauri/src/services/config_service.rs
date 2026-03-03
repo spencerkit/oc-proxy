@@ -1,3 +1,7 @@
+//! Module Overview
+//! Service layer orchestration for feature-specific workflows.
+//! Coordinates validation, persistence, runtime sync, and structured results.
+
 use crate::app_state::{apply_launch_on_startup_setting, sync_runtime_config, SharedState};
 use crate::backup::extract_groups_from_import_payload;
 use crate::models::{GroupBackupImportResult, ProxyConfig, ProxyStatus, SaveConfigResult};

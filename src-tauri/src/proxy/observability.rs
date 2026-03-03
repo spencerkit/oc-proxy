@@ -1,3 +1,7 @@
+//! Module Overview
+//! Observability helpers for metrics, response headers, and request chain logs.
+//! Provides token usage extraction and unified error response construction.
+
 use super::routing::{EntryProtocol, ParsedPath, PathEntry};
 use super::ServiceState;
 use axum::response::{IntoResponse, Response};
@@ -38,6 +42,7 @@ impl MetricsState {
         }
     }
 
+    /// Read a consistent metrics snapshot for API responses/UI polling.
     pub(super) fn snapshot(&self) -> ProxyMetrics {
         let requests = self.requests.load(Ordering::Relaxed);
         let total_latency_ms = self.total_latency_ms.load(Ordering::Relaxed);
@@ -75,6 +80,7 @@ impl MetricsState {
         }
     }
 
+    /// Record one request and optionally one stream request.
     pub(super) fn increment_request(&self, stream: bool) {
         let _ = self.requests.fetch_add(1, Ordering::Relaxed);
         if stream {
@@ -82,16 +88,19 @@ impl MetricsState {
         }
     }
 
+    /// Record one request-level error.
     pub(super) fn increment_error(&self) {
         let _ = self.errors.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Add elapsed latency to running aggregate used for average latency reporting.
     pub(super) fn add_latency(&self, elapsed_ms: u64) {
         let _ = self
             .total_latency_ms
             .fetch_add(elapsed_ms, Ordering::Relaxed);
     }
 
+    /// Aggregate token counters from one completed request/stream.
     pub(super) fn add_token_usage(&self, usage: &TokenUsage) {
         let _ = self
             .input_tokens
@@ -118,6 +127,7 @@ pub(super) struct StreamTokenAccumulator {
 }
 
 impl StreamTokenAccumulator {
+    /// Consume raw SSE bytes and extract best-effort usage snapshots from `data:` lines.
     pub(super) fn consume_chunk(&mut self, chunk: &[u8]) {
         self.line_buffer.push_str(&String::from_utf8_lossy(chunk));
         while let Some(newline_idx) = self.line_buffer.find('\n') {
@@ -150,6 +160,7 @@ impl StreamTokenAccumulator {
         }
     }
 
+    /// Return final usage when at least one non-zero token dimension is observed.
     pub(super) fn into_token_usage(self) -> Option<TokenUsage> {
         if self.input_tokens == 0
             && self.output_tokens == 0
@@ -168,6 +179,9 @@ impl StreamTokenAccumulator {
     }
 }
 
+/// Extract token usage from different upstream/downstream payload shapes.
+///
+/// Supports OpenAI/Anthropic variants and nested detail fields used by streaming events.
 pub(super) fn extract_token_usage(payload: &Value) -> Option<TokenUsage> {
     let usage = payload
         .get("usage")
@@ -248,6 +262,7 @@ fn first_u64(obj: &Value, fields: &[&str]) -> u64 {
     0
 }
 
+/// Headers used for JSON responses emitted by local proxy.
 pub(super) fn response_headers_json(trace_id: &str) -> HashMap<String, String> {
     HashMap::from([
         (
@@ -258,6 +273,7 @@ pub(super) fn response_headers_json(trace_id: &str) -> HashMap<String, String> {
     ])
 }
 
+/// Headers used for SSE responses emitted by local proxy.
 pub(super) fn response_headers_sse(trace_id: &str) -> HashMap<String, String> {
     HashMap::from([
         (
@@ -271,6 +287,7 @@ pub(super) fn response_headers_sse(trace_id: &str) -> HashMap<String, String> {
     ])
 }
 
+/// Apply header map to Axum response object, skipping invalid name/value pairs.
 pub(super) fn apply_headers(resp: &mut Response, headers: &HashMap<String, String>) {
     for (k, v) in headers {
         if let (Ok(name), Ok(value)) = (
@@ -282,6 +299,7 @@ pub(super) fn apply_headers(resp: &mut Response, headers: &HashMap<String, Strin
     }
 }
 
+/// Convert upstream response headers into lowercase plain-string map for logging.
 pub(super) fn plain_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, String> {
     headers
         .iter()
@@ -294,6 +312,7 @@ pub(super) fn plain_headers(headers: &reqwest::header::HeaderMap) -> HashMap<Str
         .collect()
 }
 
+/// Append a simple log line for non-forwarding endpoints such as healthz/metrics.
 pub(super) fn log_simple(
     state: &ServiceState,
     trace_id: String,
@@ -341,6 +360,10 @@ pub(super) fn log_simple(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Append finalized request-chain log with full forwarding context.
+///
+/// This is called exactly once for successful flows and for handled error flows
+/// where request context is available.
 pub(super) fn finalize_log(
     state: &ServiceState,
     trace_id: &str,

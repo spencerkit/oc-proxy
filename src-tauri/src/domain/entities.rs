@@ -1,3 +1,7 @@
+//! Module Overview
+//! Domain entity definitions reused by multiple modules.
+//! Keeps core data contracts independent from transport-specific concerns.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

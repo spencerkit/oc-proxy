@@ -1,3 +1,7 @@
+//! Module Overview
+//! Request processing pipeline for /oc endpoints.
+//! Handles auth, routing, request/response mapping, upstream I/O, streaming, metrics, and final logging.
+
 use super::observability::{
     apply_headers, extract_token_usage, finalize_log, log_simple, plain_headers,
     proxy_error_response, response_headers_json, response_headers_sse, StreamTokenAccumulator,
@@ -45,6 +49,7 @@ pub(super) async fn healthz(State(state): State<ServiceState>) -> Response {
     resp
 }
 
+/// Lightweight runtime metrics endpoint for renderer polling.
 pub(super) async fn metrics_lite(State(state): State<ServiceState>) -> Response {
     let trace_id = Uuid::new_v4().to_string();
     let metrics = state.metrics.snapshot();
@@ -67,6 +72,9 @@ pub(super) async fn metrics_lite(State(state): State<ServiceState>) -> Response 
     resp
 }
 
+/// `/oc/:group_id` shorthand entry.
+///
+/// Defaults to chat-completions endpoint to preserve legacy behavior.
 pub(super) async fn handle_proxy_root(
     State(state): State<ServiceState>,
     Path(group_id): Path<String>,
@@ -87,6 +95,7 @@ pub(super) async fn handle_proxy_root(
     .await
 }
 
+/// `/oc/:group_id/*suffix` entry that keeps user-provided endpoint suffix.
 pub(super) async fn handle_proxy_suffix(
     State(state): State<ServiceState>,
     Path((group_id, suffix)): Path<(String, String)>,
@@ -107,6 +116,15 @@ pub(super) async fn handle_proxy_suffix(
     .await
 }
 
+/// Main proxy request pipeline.
+///
+/// High-level stages:
+/// 1. Validate method/auth/path and route selection.
+/// 2. Parse request body and resolve target model/protocol.
+/// 3. Map request surface if cross-protocol routing is needed.
+/// 4. Forward to upstream (streaming or non-streaming).
+/// 5. Map response surface back to downstream expectation.
+/// 6. Finalize metrics + structured log.
 pub(super) async fn handle_proxy_request(
     state: ServiceState,
     method: Method,
@@ -745,6 +763,12 @@ pub(super) async fn handle_proxy_request(
     resp
 }
 
+/// Build upstream payload for the selected target protocol surface.
+///
+/// - Same-surface forwarding is pass-through plus resolved target model override.
+/// - Cross-surface forwarding uses canonical mapper conversion.
+/// - Cross-surface requests currently force `stream=false` until stream-bridge
+///   mapping is fully implemented for every protocol pair.
 pub(super) fn build_upstream_body(
     entry: &PathEntry,
     target_protocol: &RuleProtocol,
@@ -774,6 +798,7 @@ pub(super) fn build_upstream_body(
     Ok(mapped)
 }
 
+/// Map upstream response body back to the downstream entry surface.
 fn map_response_body(
     entry: &PathEntry,
     target_protocol: &RuleProtocol,
@@ -790,6 +815,7 @@ fn map_response_body(
     map_response_by_surface(source_surface, target_surface, upstream_json, request_model)
 }
 
+/// Convert parsed downstream endpoint into mapper surface enum.
 fn surface_from_entry(entry: &PathEntry) -> MapperSurface {
     match entry.endpoint {
         EntryEndpoint::Messages => MapperSurface::AnthropicMessages,
@@ -798,6 +824,7 @@ fn surface_from_entry(entry: &PathEntry) -> MapperSurface {
     }
 }
 
+/// Convert active rule protocol into mapper surface enum.
 fn surface_from_rule_protocol(protocol: &RuleProtocol) -> MapperSurface {
     match protocol {
         RuleProtocol::Anthropic => MapperSurface::AnthropicMessages,
@@ -806,6 +833,7 @@ fn surface_from_rule_protocol(protocol: &RuleProtocol) -> MapperSurface {
     }
 }
 
+/// Preserve request object shape while enforcing resolved forwarded model.
 fn passthrough_with_model(request_body: &Value, target_model: &str) -> Value {
     let mut with_model = if request_body.is_object() {
         request_body.clone()
@@ -816,6 +844,7 @@ fn passthrough_with_model(request_body: &Value, target_model: &str) -> Value {
     with_model
 }
 
+/// Build immediate reject response and emit a minimal log entry.
 async fn reject_and_log(
     state: &ServiceState,
     trace_id: String,

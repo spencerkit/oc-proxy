@@ -1,3 +1,7 @@
+//! Module Overview
+//! Config semantic validation rules.
+//! Ensures persisted and imported config data is internally consistent before runtime use.
+
 use crate::config::migrator::CURRENT_CONFIG_VERSION;
 use crate::domain::entities::ProxyConfig;
 

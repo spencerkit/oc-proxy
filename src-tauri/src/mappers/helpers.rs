@@ -1,3 +1,7 @@
+//! Module Overview
+//! Shared helper utilities for mapper adapters.
+//! Contains content flattening and protocol-specific text/tool argument extraction helpers.
+
 use serde_json::Value;
 
 pub(crate) fn as_array<'a>(v: &'a Value, key: &str) -> Vec<&'a Value> {

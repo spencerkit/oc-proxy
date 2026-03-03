@@ -1,3 +1,7 @@
+//! Module Overview
+//! OpenAI Chat Completions adapter implementation.
+//! Encodes/decodes chat-completions payloads to/from canonical structures.
+
 use super::super::canonical::{
     CanonicalBlock, CanonicalFinishReason, CanonicalMessage, CanonicalRequest, CanonicalResponse,
     CanonicalRole, CanonicalTool, CanonicalToolCall, CanonicalToolChoice, CanonicalUsage,

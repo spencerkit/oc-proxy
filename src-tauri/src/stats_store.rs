@@ -1,3 +1,7 @@
+//! Module Overview
+//! Aggregated statistics store derived from request logs.
+//! Maintains hourly buckets, persistence, retention pruning, and summary query APIs.
+
 use crate::models::{HourlyStatsPoint, LogEntry, StatsRuleOption, StatsSummaryResult};
 use chrono::{DateTime, Duration, Timelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -54,6 +58,7 @@ impl StatsStore {
         }
     }
 
+    /// Initialize stats storage from disk and start background flush worker.
     pub fn initialize(&self) -> Result<(), String> {
         if let Some(parent) = self.file_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("create stats dir failed: {e}"))?;
@@ -98,6 +103,9 @@ impl StatsStore {
         Ok(())
     }
 
+    /// Aggregate one finalized request log into hourly counters.
+    ///
+    /// Only `/oc/*` entries are included in proxy stats.
     pub fn append_log(&self, entry: &LogEntry) {
         if !entry.request_path.starts_with("/oc/") {
             return;
@@ -143,6 +151,7 @@ impl StatsStore {
         self.dirty.store(true, Ordering::Release);
     }
 
+    /// Build summary for a time window and optional `group::rule` filter.
     pub fn summarize(&self, hours: Option<u32>, rule_key: Option<String>) -> StatsSummaryResult {
         let requested_hours = hours.unwrap_or(DEFAULT_HOURS).clamp(1, MAX_HOURS);
         let cutoff = Utc::now() - Duration::hours(requested_hours as i64);
@@ -250,6 +259,7 @@ impl StatsStore {
         }
     }
 
+    /// Clear in-memory and persisted stats data.
     pub fn clear(&self) -> Result<(), String> {
         {
             let mut guard = self

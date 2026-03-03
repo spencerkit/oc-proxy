@@ -1,3 +1,7 @@
+//! Module Overview
+//! Mapper contract and behavior tests.
+//! Covers protocol mapping semantics, strict-mode behavior, and snapshot-based compatibility checks.
+
 use super::{
     map_anthropic_to_openai_request, map_anthropic_to_openai_response,
     map_anthropic_to_openai_responses_request, map_openai_chat_to_responses,

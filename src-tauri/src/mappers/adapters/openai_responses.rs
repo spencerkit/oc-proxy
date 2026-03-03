@@ -1,3 +1,7 @@
+//! Module Overview
+//! OpenAI Responses adapter implementation.
+//! Bridges responses-specific input/output shapes with the canonical mapping model.
+
 use super::super::canonical::{
     CanonicalBlock, CanonicalFinishReason, CanonicalRequest, CanonicalResponse, CanonicalRole,
     CanonicalToolChoice, MapOptions,

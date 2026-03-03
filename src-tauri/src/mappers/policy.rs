@@ -1,3 +1,7 @@
+//! Module Overview
+//! Strict-mode compatibility policy for mapper request fields.
+//! Validates supported keys per source surface and rejects unknown fields when requested.
+
 use super::canonical::MapperSurface;
 use serde_json::Value;
 

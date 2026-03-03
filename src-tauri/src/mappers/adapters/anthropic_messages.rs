@@ -1,3 +1,7 @@
+//! Module Overview
+//! Anthropic Messages adapter implementation.
+//! Encodes/decodes Anthropic request and response payloads to/from canonical structures.
+
 use super::super::canonical::{
     CanonicalBlock, CanonicalFinishReason, CanonicalMessage, CanonicalRequest, CanonicalResponse,
     CanonicalRole, CanonicalTool, CanonicalToolCall, CanonicalToolChoice, CanonicalUsage,

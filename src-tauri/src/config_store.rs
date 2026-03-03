@@ -1,3 +1,7 @@
+//! Module Overview
+//! Persistent config store load/save helpers.
+//! Encapsulates disk I/O and provides a single source of truth for runtime config access.
+
 use crate::config::migrator::migrate_config;
 use crate::config::schema::normalize_config;
 use crate::models::{default_config, validate_config, ProxyConfig};

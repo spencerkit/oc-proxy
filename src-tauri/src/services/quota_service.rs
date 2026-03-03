@@ -1,3 +1,7 @@
+//! Module Overview
+//! Service layer orchestration for feature-specific workflows.
+//! Coordinates validation, persistence, runtime sync, and structured results.
+
 use crate::app_state::SharedState;
 use crate::models::{Rule, RuleProtocol, RuleQuotaConfig, RuleQuotaSnapshot, RuleQuotaTestResult};
 use crate::quota;

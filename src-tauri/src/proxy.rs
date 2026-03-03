@@ -1,3 +1,7 @@
+//! Module Overview
+//! Proxy runtime bootstrap and lifecycle management for the Axum server.
+//! Owns shared state objects and exposes start/stop/status/log access APIs.
+
 use crate::log_store::LogStore;
 use crate::models::{LogEntry, ProxyConfig, ProxyStatus};
 use crate::stats_store::StatsStore;
@@ -57,6 +61,7 @@ struct ServiceState {
 }
 
 impl ProxyRuntime {
+    /// Construct proxy runtime with shared config/stores and prebuilt route index.
     pub fn new(
         config: Arc<RwLock<ProxyConfig>>,
         config_revision: Arc<AtomicU64>,
@@ -91,6 +96,7 @@ impl ProxyRuntime {
         })
     }
 
+    /// Start Axum proxy server if not already running.
     pub async fn start(&self) -> Result<ProxyStatus, String> {
         if self.is_running() {
             return Ok(self.get_status());
@@ -162,6 +168,7 @@ impl ProxyRuntime {
         Ok(self.get_status())
     }
 
+    /// Stop proxy server and return latest runtime status snapshot.
     pub async fn stop(&self) -> Result<ProxyStatus, String> {
         let running = self
             .inner
@@ -183,6 +190,7 @@ impl ProxyRuntime {
         Ok(self.get_status())
     }
 
+    /// Read lightweight runtime status including metrics and listen addresses.
     pub fn get_status(&self) -> ProxyStatus {
         let running_guard = self.inner.server.lock();
         let (running, address, lan_address) = if let Ok(guard) = running_guard {
@@ -205,14 +213,17 @@ impl ProxyRuntime {
         }
     }
 
+    /// List in-memory request logs.
     pub fn list_logs(&self, max: usize) -> Vec<LogEntry> {
         self.inner.log_store.list(max)
     }
 
+    /// Clear in-memory request logs.
     pub fn clear_logs(&self) {
         self.inner.log_store.clear();
     }
 
+    /// Query aggregated stats from `StatsStore`.
     pub fn stats_summary(
         &self,
         hours: Option<u32>,
@@ -221,6 +232,7 @@ impl ProxyRuntime {
         self.inner.stats_store.summarize(hours, rule_key)
     }
 
+    /// Clear aggregated stats data.
     pub fn clear_stats(&self) -> Result<(), String> {
         self.inner.stats_store.clear()
     }
@@ -455,10 +467,7 @@ mod tests {
             resolve_upstream_path(&RuleProtocol::Anthropic),
             "/v1/messages"
         );
-        assert_eq!(
-            resolve_upstream_path(&RuleProtocol::Openai),
-            "/responses"
-        );
+        assert_eq!(resolve_upstream_path(&RuleProtocol::Openai), "/responses");
         assert_eq!(
             resolve_upstream_path(&RuleProtocol::OpenaiCompletion),
             "/chat/completions"

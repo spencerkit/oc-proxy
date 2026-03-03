@@ -1,3 +1,7 @@
+//! Module Overview
+//! Service layer orchestration for feature-specific workflows.
+//! Coordinates validation, persistence, runtime sync, and structured results.
+
 use crate::app_state::SharedState;
 use crate::backup::{backup_default_file_name, create_groups_backup_payload};
 use crate::models::{GroupBackupExportResult, GroupBackupImportResult};

@@ -1,3 +1,7 @@
+//! Module Overview
+//! In-memory bounded log storage used by the proxy runtime.
+//! Implements append/list/clear with synchronized access and fixed retention size.
+
 use crate::models::LogEntry;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -16,6 +20,7 @@ impl LogStore {
         }
     }
 
+    /// Append one log entry and evict oldest entries when capacity is exceeded.
     pub fn append(&self, entry: LogEntry) {
         let mut guard = self.inner.lock().expect("log mutex poisoned");
         guard.push_back(entry);
@@ -24,6 +29,7 @@ impl LogStore {
         }
     }
 
+    /// Return at most `max` latest logs in chronological order.
     pub fn list(&self, max: usize) -> Vec<LogEntry> {
         let guard = self.inner.lock().expect("log mutex poisoned");
         guard
@@ -37,6 +43,7 @@ impl LogStore {
             .collect()
     }
 
+    /// Remove all in-memory logs.
     pub fn clear(&self) {
         let mut guard = self.inner.lock().expect("log mutex poisoned");
         guard.clear();

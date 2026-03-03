@@ -1,8 +1,13 @@
+//! Module Overview
+//! Request mapping engine built around decode-to-canonical then encode-to-target flow.
+//! Centralizes adapter dispatch and strict-field policy enforcement.
+
 use super::adapters::{anthropic_messages, openai_chat_completions, openai_responses};
 use super::canonical::{CanonicalRequest, MapOptions, MapperSurface};
 use super::policy::validate_request_fields;
 use serde_json::Value;
 
+/// Decode source request payload into canonical request representation.
 fn decode_request(
     source: MapperSurface,
     body: &Value,
@@ -17,6 +22,7 @@ fn decode_request(
     }
 }
 
+/// Encode canonical request into concrete target protocol surface payload.
 fn encode_request(target: MapperSurface, request: &CanonicalRequest) -> Value {
     match target {
         MapperSurface::AnthropicMessages => anthropic_messages::encode_request(request),
@@ -25,6 +31,10 @@ fn encode_request(target: MapperSurface, request: &CanonicalRequest) -> Value {
     }
 }
 
+/// Generic request mapping pipeline:
+/// - validate source fields (optional strict mode),
+/// - decode source payload into canonical model,
+/// - encode canonical model into target payload shape.
 pub fn map_request(
     source: MapperSurface,
     target: MapperSurface,

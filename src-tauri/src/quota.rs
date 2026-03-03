@@ -1,3 +1,7 @@
+//! Module Overview
+//! Quota probing workflow and response normalization.
+//! Executes provider checks, parses payloads, and updates quota snapshot status.
+
 mod parser;
 
 use crate::models::{

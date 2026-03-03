@@ -1,3 +1,7 @@
+//! Module Overview
+//! Application bootstrap orchestration.
+//! Creates stores/services/runtime and prepares shared state used by Tauri commands.
+
 use crate::app_state::{apply_launch_on_startup_setting, AppState, SharedState};
 use crate::config_store::ConfigStore;
 use crate::log_store::LogStore;

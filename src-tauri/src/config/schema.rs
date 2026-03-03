@@ -1,3 +1,7 @@
+//! Module Overview
+//! Canonical config schema and default values.
+//! Defines persisted config version contract and default initialization behavior.
+
 use crate::config::migrator::CURRENT_CONFIG_VERSION;
 use crate::domain::entities::{
     CompatConfig, LoggingConfig, ProxyConfig, ProxyMetrics, RemoteGitConfig, ServerConfig, UiConfig,

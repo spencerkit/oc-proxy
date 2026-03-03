@@ -1,6 +1,17 @@
+//! Module Overview
+//! Input normalization helpers, mainly for OpenAI Responses format interoperability.
+//! Converts heterogeneous input items into message-oriented structures used by mapping adapters.
+
 use super::helpers::{input_item_function_arguments, input_item_to_text};
 use serde_json::{json, Value};
 
+/// Convert one OpenAI Responses `input` item into a chat-like message entry.
+///
+/// This normalizes:
+/// - `function_call`      -> assistant tool_calls message
+/// - `function_call_output` -> tool message
+/// - `message`/role payloads -> plain role/content message
+/// - `input_text`         -> user text message
 fn push_responses_input_item_as_message(messages: &mut Vec<Value>, item: &Value) {
     if item.is_null() {
         return;
@@ -76,6 +87,11 @@ fn push_responses_input_item_as_message(messages: &mut Vec<Value>, item: &Value)
     }
 }
 
+/// Normalize OpenAI request payloads for adapter reuse.
+///
+/// Current behavior:
+/// - For `/v1/responses`, convert heterogeneous `input` into chat-like `messages`.
+/// - For other paths, return payload unchanged.
 pub fn normalize_openai_request(path: &str, body: &Value) -> Value {
     if path != "/v1/responses" {
         return body.clone();

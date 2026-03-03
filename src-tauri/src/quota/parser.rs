@@ -1,3 +1,7 @@
+//! Module Overview
+//! Quota response parser and expression evaluator.
+//! Extracts normalized remaining/total/percent values across heterogeneous provider payloads.
+
 use crate::models::{QuotaStatus, QuotaUnitType, Rule};
 use serde_json::Value;
 

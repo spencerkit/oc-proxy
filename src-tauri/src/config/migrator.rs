@@ -1,3 +1,7 @@
+//! Module Overview
+//! Config migration logic between schema versions.
+//! Transforms legacy config payloads to the current schema in a deterministic way.
+
 use serde_json::{Map, Value};
 
 pub const CURRENT_CONFIG_VERSION: u32 = 2;

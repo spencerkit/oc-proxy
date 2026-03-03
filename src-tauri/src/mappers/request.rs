@@ -1,7 +1,16 @@
+//! Module Overview
+//! Public request mapping entrypoints and compatibility aliases.
+//! Provides surface-aware mapping APIs for OpenAI/Anthropic request transformations.
+
 use super::canonical::{MapOptions, MapperSurface};
 use super::engine::map_request;
 use serde_json::Value;
 
+/// Heuristically classify OpenAI request payload as `responses` or `chat/completions`.
+///
+/// The signal is intentionally simple and backward-compatible:
+/// - if `input` exists and `messages` is absent => responses surface,
+/// - otherwise => chat-completions surface.
 fn detect_openai_surface(body: &Value) -> MapperSurface {
     if body.get("input").is_some() && body.get("messages").is_none() {
         MapperSurface::OpenaiResponses
@@ -10,6 +19,7 @@ fn detect_openai_surface(body: &Value) -> MapperSurface {
     }
 }
 
+/// Map request body between two explicit protocol surfaces.
 pub fn map_request_by_surface(
     source: MapperSurface,
     target: MapperSurface,
@@ -25,6 +35,7 @@ pub fn map_request_by_surface(
     )
 }
 
+/// Map OpenAI (chat/responses auto-detected) request into Anthropic messages request.
 pub fn map_openai_to_anthropic_request(
     body: &Value,
     strict_mode: bool,
@@ -39,6 +50,7 @@ pub fn map_openai_to_anthropic_request(
     )
 }
 
+/// Map Anthropic messages request into OpenAI chat-completions request.
 pub fn map_anthropic_to_openai_completions_request(
     body: &Value,
     strict_mode: bool,
@@ -53,6 +65,7 @@ pub fn map_anthropic_to_openai_completions_request(
     )
 }
 
+/// Map Anthropic messages request into OpenAI responses request.
 pub fn map_anthropic_to_openai_responses_request(
     body: &Value,
     strict_mode: bool,

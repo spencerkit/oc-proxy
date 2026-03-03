@@ -1,3 +1,7 @@
+//! Module Overview
+//! Mapper module exports.
+//! Exposes request/response mapping entrypoints and canonical surface enums.
+
 mod adapters;
 mod canonical;
 mod engine;
