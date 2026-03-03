@@ -1,0 +1,57 @@
+{
+  "_doc": "Proxy-chain benchmark config: load-test via local proxy endpoint (/oc/:groupId/*), not direct upstream.",
+  "_docAuth": "If server.authEnabled=false, delete headers.authorization.",
+  "_docNonStreamMode": "nonStream.mode: fixed_requests | duration; duration gives more stable curves.",
+  "_docWarmup": "warmupSec is preheat traffic before each non-stream matrix point and is excluded from metrics.",
+  "warmupSec": 3,
+  "baseUrl": "http://localhost:8999",
+  "path": "/oc/mock-group/responses",
+  "method": "POST",
+  "headers": {
+    "authorization": "Bearer __LOCAL_BEARER_TOKEN_IF_AUTH_ENABLED__"
+  },
+  "expectStatus": [200],
+  "requestTimeoutMs": 65000,
+  "streamTimeoutMs": 600000,
+  "nonStream": {
+    "enabled": true,
+    "mode": "duration",
+    "durationSec": 15,
+    "warmupSec": 3,
+    "concurrency": [1, 8, 32, 128],
+    "totalRequests": 400,
+    "path": "/oc/mock-group/responses",
+    "body": {
+      "model": "mock-model",
+      "input": "ping"
+    }
+  },
+  "stream": {
+    "enabled": true,
+    "concurrency": [10, 50, 100],
+    "durationSec": 30,
+    "path": "/oc/mock-group/responses",
+    "body": {
+      "model": "mock-model",
+      "input": "stream test",
+      "stream": true
+    }
+  },
+  "mixed": {
+    "enabled": true,
+    "durationSec": 30,
+    "nonStreamConcurrency": 32,
+    "streamConcurrency": 20,
+    "nonStreamPath": "/oc/mock-group/responses",
+    "streamPath": "/oc/mock-group/responses",
+    "nonStreamBody": {
+      "model": "mock-model",
+      "input": "mixed non-stream"
+    },
+    "streamBody": {
+      "model": "mock-model",
+      "input": "mixed stream",
+      "stream": true
+    }
+  }
+}
