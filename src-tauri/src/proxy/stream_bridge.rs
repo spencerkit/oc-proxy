@@ -11,8 +11,18 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-pub(super) enum StreamBridge {
-    OpenaiChatToAnthropic(OpenaiChatToAnthropicBridge),
+type DynBridgeAdapter = dyn BridgeAdapter + Send;
+type BridgeBuilder = fn(&str) -> Box<DynBridgeAdapter>;
+
+const BRIDGE_REGISTRY: &[(MapperSurface, MapperSurface, BridgeBuilder)] = &[(
+    MapperSurface::OpenaiChatCompletions,
+    MapperSurface::AnthropicMessages,
+    build_openai_chat_to_anthropic_bridge,
+)];
+
+pub(super) struct StreamBridge {
+    parser: SseDataParser,
+    adapter: Box<DynBridgeAdapter>,
 }
 
 pub(super) fn create_stream_bridge(
@@ -20,26 +30,115 @@ pub(super) fn create_stream_bridge(
     target: MapperSurface,
     request_model: &str,
 ) -> Option<StreamBridge> {
-    match (source, target) {
-        (MapperSurface::OpenaiChatCompletions, MapperSurface::AnthropicMessages) => Some(
-            StreamBridge::OpenaiChatToAnthropic(OpenaiChatToAnthropicBridge::new(request_model)),
-        ),
-        _ => None,
-    }
+    let builder = BRIDGE_REGISTRY
+        .iter()
+        .find_map(|(src, tgt, build)| ((*src == source) && (*tgt == target)).then_some(*build))?;
+
+    Some(StreamBridge {
+        parser: SseDataParser::default(),
+        adapter: builder(request_model),
+    })
 }
 
 impl StreamBridge {
     pub(super) fn consume_chunk(&mut self, chunk: &[u8]) -> Vec<Bytes> {
-        match self {
-            StreamBridge::OpenaiChatToAnthropic(bridge) => bridge.consume_chunk(chunk),
+        let frames = self.parser.consume_chunk(chunk);
+        let mut out = Vec::new();
+        for frame in frames {
+            match frame {
+                SseDataFrame::Json(payload) => self.adapter.on_json_frame(&payload, &mut out),
+                SseDataFrame::Done => self.adapter.on_done_frame(&mut out),
+            }
         }
+        out
     }
 
     pub(super) fn finish(&mut self) -> Vec<Bytes> {
-        match self {
-            StreamBridge::OpenaiChatToAnthropic(bridge) => bridge.finish(),
+        let mut out = Vec::new();
+
+        // Handle potential last data line without trailing newline.
+        for frame in self.parser.drain_remainder() {
+            match frame {
+                SseDataFrame::Json(payload) => self.adapter.on_json_frame(&payload, &mut out),
+                SseDataFrame::Done => self.adapter.on_done_frame(&mut out),
+            }
+        }
+
+        self.adapter.finish(&mut out);
+        out
+    }
+}
+
+trait BridgeAdapter {
+    fn on_json_frame(&mut self, payload: &Value, out: &mut Vec<Bytes>);
+    fn on_done_frame(&mut self, out: &mut Vec<Bytes>);
+    fn finish(&mut self, out: &mut Vec<Bytes>);
+}
+
+#[derive(Default)]
+struct SseDataParser {
+    line_buffer: String,
+}
+
+enum SseDataFrame {
+    Json(Value),
+    Done,
+}
+
+impl SseDataParser {
+    fn consume_chunk(&mut self, chunk: &[u8]) -> Vec<SseDataFrame> {
+        self.line_buffer.push_str(&String::from_utf8_lossy(chunk));
+        let mut out = Vec::new();
+
+        while let Some(newline_idx) = self.line_buffer.find('\n') {
+            let mut line = self.line_buffer[..newline_idx].to_string();
+            if line.ends_with('\r') {
+                let _ = line.pop();
+            }
+            if let Some(frame) = Self::parse_line(&line) {
+                out.push(frame);
+            }
+            self.line_buffer.drain(..=newline_idx);
+        }
+
+        out
+    }
+
+    fn drain_remainder(&mut self) -> Vec<SseDataFrame> {
+        if self.line_buffer.is_empty() {
+            return Vec::new();
+        }
+
+        let mut line = std::mem::take(&mut self.line_buffer);
+        if line.ends_with('\r') {
+            let _ = line.pop();
+        }
+
+        match Self::parse_line(&line) {
+            Some(frame) => vec![frame],
+            None => Vec::new(),
         }
     }
+
+    fn parse_line(line: &str) -> Option<SseDataFrame> {
+        let rest = line.strip_prefix("data:")?;
+        let payload = rest.trim_start();
+
+        if payload.is_empty() {
+            return None;
+        }
+        if payload == "[DONE]" {
+            return Some(SseDataFrame::Done);
+        }
+
+        serde_json::from_str::<Value>(payload)
+            .ok()
+            .map(SseDataFrame::Json)
+    }
+}
+
+fn build_openai_chat_to_anthropic_bridge(request_model: &str) -> Box<DynBridgeAdapter> {
+    Box::new(OpenaiChatToAnthropicBridge::new(request_model))
 }
 
 #[derive(Clone)]
@@ -56,8 +155,7 @@ struct ToolState {
     started: bool,
 }
 
-pub(super) struct OpenaiChatToAnthropicBridge {
-    line_buffer: String,
+struct OpenaiChatToAnthropicBridge {
     request_model: String,
     upstream_model: Option<String>,
     upstream_id: Option<String>,
@@ -73,7 +171,6 @@ pub(super) struct OpenaiChatToAnthropicBridge {
 impl OpenaiChatToAnthropicBridge {
     fn new(request_model: &str) -> Self {
         Self {
-            line_buffer: String::new(),
             request_model: request_model.to_string(),
             upstream_model: None,
             upstream_id: None,
@@ -87,51 +184,7 @@ impl OpenaiChatToAnthropicBridge {
         }
     }
 
-    fn consume_chunk(&mut self, chunk: &[u8]) -> Vec<Bytes> {
-        self.line_buffer.push_str(&String::from_utf8_lossy(chunk));
-        let mut out = Vec::new();
-
-        while let Some(newline_idx) = self.line_buffer.find('\n') {
-            let mut line = self.line_buffer[..newline_idx].to_string();
-            if line.ends_with('\r') {
-                let _ = line.pop();
-            }
-            out.extend(self.consume_line(&line));
-            self.line_buffer.drain(..=newline_idx);
-        }
-
-        out
-    }
-
-    fn finish(&mut self) -> Vec<Bytes> {
-        let mut out = Vec::new();
-        self.emit_final_events(&mut out);
-        out
-    }
-
-    fn consume_line(&mut self, line: &str) -> Vec<Bytes> {
-        let Some(rest) = line.strip_prefix("data:") else {
-            return Vec::new();
-        };
-
-        let payload = rest.trim_start();
-        if payload.is_empty() {
-            return Vec::new();
-        }
-
-        if payload == "[DONE]" {
-            let mut out = Vec::new();
-            self.emit_final_events(&mut out);
-            return out;
-        }
-
-        let parsed = match serde_json::from_str::<Value>(payload) {
-            Ok(v) => v,
-            Err(_) => return Vec::new(),
-        };
-
-        let mut out = Vec::new();
-
+    fn handle_json_payload(&mut self, parsed: &Value, out: &mut Vec<Bytes>) {
         if let Some(id) = parsed.get("id").and_then(|v| v.as_str()) {
             self.upstream_id = Some(id.to_string());
         }
@@ -156,7 +209,7 @@ impl OpenaiChatToAnthropicBridge {
 
                 if let Some(delta) = choice.get("delta").and_then(|v| v.as_object()) {
                     if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
-                        self.emit_text_delta(content, &mut out);
+                        self.emit_text_delta(content, out);
                     }
                     if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
                         for (tc_i, tc) in tool_calls.iter().enumerate() {
@@ -165,7 +218,7 @@ impl OpenaiChatToAnthropicBridge {
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(tc_i as u64)
                                 as usize;
-                            self.emit_tool_delta(tool_index, tc, &mut out);
+                            self.emit_tool_delta(tool_index, tc, out);
                         }
                     }
                 }
@@ -175,13 +228,11 @@ impl OpenaiChatToAnthropicBridge {
                         self.final_stop_reason = Some(
                             map_openai_finish_reason_to_anthropic_stop(finish_reason).to_string(),
                         );
-                        self.close_active_block(&mut out);
+                        self.close_active_block(out);
                     }
                 }
             }
         }
-
-        out
     }
 
     fn emit_text_delta(&mut self, content: &str, out: &mut Vec<Bytes>) {
@@ -200,7 +251,7 @@ impl OpenaiChatToAnthropicBridge {
             _ => {
                 let index = self.next_block_index;
                 self.next_block_index += 1;
-                self.push_event(
+                push_sse_event(
                     out,
                     "content_block_start",
                     &json!({
@@ -217,7 +268,7 @@ impl OpenaiChatToAnthropicBridge {
             }
         };
 
-        self.push_event(
+        push_sse_event(
             out,
             "content_block_delta",
             &json!({
@@ -297,7 +348,7 @@ impl OpenaiChatToAnthropicBridge {
                 self.close_active_block(out);
             }
 
-            self.push_event(
+            push_sse_event(
                 out,
                 "content_block_start",
                 &json!({
@@ -327,7 +378,7 @@ impl OpenaiChatToAnthropicBridge {
             .and_then(|v| v.as_str())
         {
             if !arguments.is_empty() {
-                self.push_event(
+                push_sse_event(
                     out,
                     "content_block_delta",
                     &json!({
@@ -360,7 +411,7 @@ impl OpenaiChatToAnthropicBridge {
             .clone()
             .unwrap_or_else(|| format!("msg_{}", Uuid::new_v4().simple()));
 
-        self.push_event(
+        push_sse_event(
             out,
             "message_start",
             &json!({
@@ -392,7 +443,7 @@ impl OpenaiChatToAnthropicBridge {
             ActiveBlock::Tool { block_index, .. } => block_index,
         };
 
-        self.push_event(
+        push_sse_event(
             out,
             "content_block_stop",
             &json!({
@@ -424,7 +475,7 @@ impl OpenaiChatToAnthropicBridge {
             })
         });
 
-        self.push_event(
+        push_sse_event(
             out,
             "message_delta",
             &json!({
@@ -436,14 +487,31 @@ impl OpenaiChatToAnthropicBridge {
                 "usage": usage,
             }),
         );
-        self.push_event(out, "message_stop", &json!({ "type": "message_stop" }));
+        push_sse_event(out, "message_stop", &json!({ "type": "message_stop" }));
         self.message_stopped = true;
     }
+}
 
-    fn push_event(&self, out: &mut Vec<Bytes>, event: &str, payload: &Value) {
-        let chunk = format!("event: {event}\ndata: {}\n\n", payload);
-        out.push(Bytes::from(chunk));
+impl BridgeAdapter for OpenaiChatToAnthropicBridge {
+    fn on_json_frame(&mut self, payload: &Value, out: &mut Vec<Bytes>) {
+        self.handle_json_payload(payload, out);
     }
+
+    fn on_done_frame(&mut self, out: &mut Vec<Bytes>) {
+        self.emit_final_events(out);
+    }
+
+    fn finish(&mut self, out: &mut Vec<Bytes>) {
+        self.emit_final_events(out);
+    }
+}
+
+fn push_sse_event(out: &mut Vec<Bytes>, event: &str, payload: &Value) {
+    out.push(encode_sse_json_event(event, payload));
+}
+
+fn encode_sse_json_event(event: &str, payload: &Value) -> Bytes {
+    Bytes::from(format!("event: {event}\ndata: {}\n\n", payload))
 }
 
 fn normalize_openai_usage_to_anthropic(usage: &Value) -> Option<Value> {
@@ -458,11 +526,17 @@ fn normalize_openai_usage_to_anthropic(usage: &Value) -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::OpenaiChatToAnthropicBridge;
+    use super::create_stream_bridge;
+    use crate::mappers::MapperSurface;
 
     #[test]
     fn bridge_openai_chat_stream_to_anthropic_events() {
-        let mut bridge = OpenaiChatToAnthropicBridge::new("claude-target");
+        let mut bridge = create_stream_bridge(
+            MapperSurface::OpenaiChatCompletions,
+            MapperSurface::AnthropicMessages,
+            "claude-target",
+        )
+        .expect("bridge should exist");
         let input = concat!(
             "data: {\"id\":\"chatcmpl_1\",\"model\":\"gpt-x\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hel\"},\"finish_reason\":null}],\"usage\":null}\n\n",
             "data: {\"id\":\"chatcmpl_1\",\"model\":\"gpt-x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}\n\n",
@@ -490,7 +564,12 @@ mod tests {
 
     #[test]
     fn bridge_openai_tool_calls_to_anthropic_tool_use_events() {
-        let mut bridge = OpenaiChatToAnthropicBridge::new("claude-target");
+        let mut bridge = create_stream_bridge(
+            MapperSurface::OpenaiChatCompletions,
+            MapperSurface::AnthropicMessages,
+            "claude-target",
+        )
+        .expect("bridge should exist");
         let input = concat!(
             "data: {\"id\":\"chatcmpl_2\",\"model\":\"gpt-x\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"city\\\":\"}}]},\"finish_reason\":null}],\"usage\":null}\n\n",
             "data: {\"id\":\"chatcmpl_2\",\"model\":\"gpt-x\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"sf\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}\n\n",
@@ -509,5 +588,33 @@ mod tests {
         assert!(combined.contains("\"name\":\"lookup\""));
         assert!(combined.contains("\"type\":\"input_json_delta\""));
         assert!(combined.contains("\"stop_reason\":\"tool_use\""));
+    }
+
+    #[test]
+    fn bridge_parser_handles_split_lines_without_newline() {
+        let mut bridge = create_stream_bridge(
+            MapperSurface::OpenaiChatCompletions,
+            MapperSurface::AnthropicMessages,
+            "claude-target",
+        )
+        .expect("bridge should exist");
+
+        let part1 = "data: {\"id\":\"chatcmpl_split\",\"model\":\"gpt-x\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"he";
+        let part2 = "llo\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}";
+
+        let out1 = bridge.consume_chunk(part1.as_bytes());
+        assert!(out1.is_empty());
+        let out2 = bridge.consume_chunk(part2.as_bytes());
+        assert!(out2.is_empty());
+
+        let out3 = bridge.finish();
+        let combined = out3
+            .iter()
+            .map(|b| String::from_utf8_lossy(b.as_ref()).to_string())
+            .collect::<Vec<_>>()
+            .join("");
+
+        assert!(combined.contains("hello"), "{combined}");
+        assert!(combined.contains("event: message_stop"), "{combined}");
     }
 }
