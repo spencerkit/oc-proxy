@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::Value;
 
 pub(crate) fn as_array<'a>(v: &'a Value, key: &str) -> Vec<&'a Value> {
     v.get(key)
@@ -9,44 +9,6 @@ pub(crate) fn as_array<'a>(v: &'a Value, key: &str) -> Vec<&'a Value> {
 
 pub(crate) fn str_or_empty(v: Option<&Value>) -> String {
     v.and_then(|x| x.as_str()).unwrap_or_default().to_string()
-}
-
-pub(crate) fn to_text_content(content: &Value) -> Vec<Value> {
-    if let Some(arr) = content.as_array() {
-        let mut out = vec![];
-        for item in arr {
-            if let Some(s) = item.as_str() {
-                if !s.is_empty() {
-                    out.push(json!({"type": "text", "text": s}));
-                }
-                continue;
-            }
-            if let Some(obj) = item.as_object() {
-                if obj.get("type").and_then(|v| v.as_str()) == Some("text") {
-                    out.push(item.clone());
-                    continue;
-                }
-                if let Some(text) = obj.get("text").and_then(|v| v.as_str()) {
-                    out.push(json!({"type": "text", "text": text}));
-                    continue;
-                }
-                out.push(json!({"type": "text", "text": item.to_string()}));
-                continue;
-            }
-            out.push(json!({"type": "text", "text": item.to_string()}));
-        }
-        return out;
-    }
-
-    if let Some(s) = content.as_str() {
-        return vec![json!({"type": "text", "text": s})];
-    }
-
-    if content.is_null() {
-        return vec![];
-    }
-
-    vec![json!({"type": "text", "text": content.to_string()})]
 }
 
 pub(crate) fn to_tool_result_content(content: &Value) -> String {

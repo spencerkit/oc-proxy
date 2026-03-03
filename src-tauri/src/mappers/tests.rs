@@ -1,7 +1,7 @@
 use super::{
     map_anthropic_to_openai_request, map_anthropic_to_openai_response,
-    map_openai_chat_to_responses, map_openai_to_anthropic_request,
-    map_openai_to_anthropic_response, normalize_openai_request,
+    map_anthropic_to_openai_responses_request, map_openai_chat_to_responses,
+    map_openai_to_anthropic_request, map_openai_to_anthropic_response, normalize_openai_request,
 };
 use serde_json::{json, Value};
 
@@ -39,6 +39,26 @@ fn anthropic_request_maps_to_openai_request() {
     assert_eq!(out["model"], "gpt-target");
     assert_eq!(out["messages"][0]["role"], "system");
     assert_eq!(out["messages"][1]["content"], "hello");
+}
+
+#[test]
+fn anthropic_request_maps_to_openai_responses_request() {
+    let input = json!({
+        "model": "claude-x",
+        "system": "helpful",
+        "max_tokens": 512,
+        "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }],
+        "stream": false
+    });
+
+    let out = map_anthropic_to_openai_responses_request(&input, true, "gpt-target")
+        .expect("mapping should succeed");
+    assert_eq!(out["model"], "gpt-target");
+    assert_eq!(out["instructions"], "helpful");
+    assert_eq!(out["max_output_tokens"], 512);
+    assert_eq!(out["input"][0]["type"], "message");
+    assert_eq!(out["input"][0]["role"], "user");
+    assert_eq!(out["input"][0]["content"][0]["text"], "hello");
 }
 
 #[test]
