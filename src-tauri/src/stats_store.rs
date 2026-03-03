@@ -65,8 +65,8 @@ impl StatsStore {
             return Ok(());
         }
 
-        let raw =
-            std::fs::read_to_string(&self.file_path).map_err(|e| format!("read stats file failed: {e}"))?;
+        let raw = std::fs::read_to_string(&self.file_path)
+            .map_err(|e| format!("read stats file failed: {e}"))?;
         let parsed = serde_json::from_str::<PersistedStats>(&raw).unwrap_or(PersistedStats {
             version: 1,
             buckets: vec![],
@@ -87,7 +87,10 @@ impl StatsStore {
 
         prune_old_locked(&mut next);
         {
-            let mut guard = self.inner.lock().map_err(|_| "stats lock poisoned".to_string())?;
+            let mut guard = self
+                .inner
+                .lock()
+                .map_err(|_| "stats lock poisoned".to_string())?;
             *guard = next.clone();
         }
         self.persist_locked(&next)?;
@@ -185,12 +188,14 @@ impl StatsStore {
                 let group_label = bucket.group_name.clone().unwrap_or_else(|| group.clone());
                 let rule_label = bucket.rule_name.clone().unwrap_or_else(|| rule.clone());
                 let label = format!("{group_label}-{rule_label}");
-                options_map.entry(option_key.clone()).or_insert(StatsRuleOption {
-                    key: option_key,
-                    label,
-                    group_id: group.clone(),
-                    rule_id: rule.clone(),
-                });
+                options_map
+                    .entry(option_key.clone())
+                    .or_insert(StatsRuleOption {
+                        key: option_key,
+                        label,
+                        group_id: group.clone(),
+                        rule_id: rule.clone(),
+                    });
             }
 
             if bucket_time < cutoff {
@@ -247,7 +252,10 @@ impl StatsStore {
 
     pub fn clear(&self) -> Result<(), String> {
         {
-            let mut guard = self.inner.lock().map_err(|_| "stats lock poisoned".to_string())?;
+            let mut guard = self
+                .inner
+                .lock()
+                .map_err(|_| "stats lock poisoned".to_string())?;
             guard.clear();
         }
         self.flush_now()
@@ -255,7 +263,10 @@ impl StatsStore {
 
     pub fn flush_now(&self) -> Result<(), String> {
         let snapshot = {
-            let guard = self.inner.lock().map_err(|_| "stats lock poisoned".to_string())?;
+            let guard = self
+                .inner
+                .lock()
+                .map_err(|_| "stats lock poisoned".to_string())?;
             guard.clone()
         };
         self.persist_locked(&snapshot)?;
@@ -281,11 +292,9 @@ impl StatsStore {
         let store = self.clone();
         let _ = thread::Builder::new()
             .name("stats-flush-worker".to_string())
-            .spawn(move || {
-                loop {
-                    thread::sleep(StdDuration::from_millis(FLUSH_INTERVAL_MS));
-                    store.flush_if_dirty();
-                }
+            .spawn(move || loop {
+                thread::sleep(StdDuration::from_millis(FLUSH_INTERVAL_MS));
+                store.flush_if_dirty();
             });
     }
 
@@ -294,8 +303,8 @@ impl StatsStore {
             version: 1,
             buckets: data.values().cloned().collect(),
         };
-        let text =
-            serde_json::to_string_pretty(&payload).map_err(|e| format!("serialize stats failed: {e}"))?;
+        let text = serde_json::to_string_pretty(&payload)
+            .map_err(|e| format!("serialize stats failed: {e}"))?;
         std::fs::write(&self.file_path, text).map_err(|e| format!("write stats file failed: {e}"))
     }
 }
@@ -315,10 +324,7 @@ fn parse_rule_key(rule_key: Option<&str>) -> (Option<String>, Option<String>) {
 
 fn normalize_hour(ts: &str) -> Option<String> {
     let mut dt = parse_ts(ts)?;
-    dt = dt
-        .with_minute(0)?
-        .with_second(0)?
-        .with_nanosecond(0)?;
+    dt = dt.with_minute(0)?.with_second(0)?.with_nanosecond(0)?;
     Some(dt.to_rfc3339())
 }
 
@@ -334,7 +340,11 @@ fn retention_cutoff() -> DateTime<Utc> {
 
 fn prune_old_locked(data: &mut HashMap<String, StatsBucket>) {
     let cutoff = retention_cutoff();
-    data.retain(|_, bucket| parse_ts(&bucket.hour).map(|dt| dt >= cutoff).unwrap_or(false));
+    data.retain(|_, bucket| {
+        parse_ts(&bucket.hour)
+            .map(|dt| dt >= cutoff)
+            .unwrap_or(false)
+    });
 }
 
 fn bucket_key(hour: &str, group_id: Option<&str>, rule_id: Option<&str>) -> String {
