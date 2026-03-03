@@ -1,12 +1,14 @@
 use crate::models::{default_config, validate_config, ProxyConfig};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 #[derive(Clone)]
 pub struct ConfigStore {
     file_path: PathBuf,
     config: Arc<RwLock<ProxyConfig>>,
+    revision: Arc<AtomicU64>,
 }
 
 impl ConfigStore {
@@ -14,6 +16,7 @@ impl ConfigStore {
         Self {
             file_path,
             config: Arc::new(RwLock::new(default_config())),
+            revision: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -76,6 +79,7 @@ impl ConfigStore {
     fn set_in_memory(&self, cfg: ProxyConfig) {
         if let Ok(mut guard) = self.config.write() {
             *guard = cfg;
+            let _ = self.revision.fetch_add(1, Ordering::Release);
         }
     }
 
@@ -85,6 +89,10 @@ impl ConfigStore {
 
     pub fn shared_config(&self) -> Arc<RwLock<ProxyConfig>> {
         self.config.clone()
+    }
+
+    pub fn shared_revision(&self) -> Arc<AtomicU64> {
+        self.revision.clone()
     }
 }
 

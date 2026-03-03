@@ -19,6 +19,7 @@ import type {
   ProxyStatus,
   RemoteRulesPullResult,
   RemoteRulesUploadResult,
+  RuleQuotaSnapshot,
   StatsSummaryResult,
 } from "@/types"
 import { ipc } from "@/utils/ipc"
@@ -32,6 +33,8 @@ interface ProxyState {
   status: ProxyStatus | null
   logs: LogEntry[]
   logsStats: StatsSummaryResult | null
+  ruleQuotas: Record<string, RuleQuotaSnapshot>
+  quotaLoadingRuleKeys: Record<string, boolean>
   activeGroupId: string | null
   loading: boolean
   error: string | null
@@ -57,6 +60,8 @@ interface ProxyState {
   setActiveGroupId: (groupId: string | null) => void
   clearLogs: () => Promise<void>
   clearLogsStats: () => Promise<void>
+  fetchGroupQuotas: (groupId: string) => Promise<void>
+  fetchRuleQuota: (groupId: string, ruleId: string) => Promise<void>
   startPolling: () => void
   stopPolling: () => void
   startServer: () => Promise<void>
@@ -69,6 +74,7 @@ interface ProxyState {
 const STATUS_POLL_INTERVAL = 3000
 const LOGS_POLL_INTERVAL = 3000
 const MAX_LOGS = 100
+const quotaKey = (groupId: string, ruleId: string) => `${groupId}:${ruleId}`
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -95,6 +101,8 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   status: null,
   logs: [],
   logsStats: null,
+  ruleQuotas: {},
+  quotaLoadingRuleKeys: {},
   activeGroupId: null,
   loading: false,
   error: null,
@@ -382,6 +390,59 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to clear logs stats"
       set({ error: errorMessage })
+      throw error
+    }
+  },
+
+  fetchGroupQuotas: async (groupId: string) => {
+    try {
+      if (!groupId.trim()) return
+      set({ error: null })
+      const snapshots = await ipc.getGroupQuotas(groupId)
+      set(state => {
+        const next = { ...state.ruleQuotas }
+        for (const snapshot of snapshots) {
+          next[quotaKey(snapshot.groupId, snapshot.ruleId)] = snapshot
+        }
+        return { ruleQuotas: next }
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to fetch group quotas"
+      set({ error: errorMessage })
+      throw error
+    }
+  },
+
+  fetchRuleQuota: async (groupId: string, ruleId: string) => {
+    const key = quotaKey(groupId, ruleId)
+    try {
+      set(state => ({
+        error: null,
+        quotaLoadingRuleKeys: {
+          ...state.quotaLoadingRuleKeys,
+          [key]: true,
+        },
+      }))
+      const snapshot = await ipc.getRuleQuota(groupId, ruleId)
+      set(state => ({
+        ruleQuotas: {
+          ...state.ruleQuotas,
+          [key]: snapshot,
+        },
+        quotaLoadingRuleKeys: {
+          ...state.quotaLoadingRuleKeys,
+          [key]: false,
+        },
+      }))
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to fetch rule quota"
+      set(state => ({
+        error: errorMessage,
+        quotaLoadingRuleKeys: {
+          ...state.quotaLoadingRuleKeys,
+          [key]: false,
+        },
+      }))
       throw error
     }
   },

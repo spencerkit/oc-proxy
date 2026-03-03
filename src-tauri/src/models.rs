@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +54,94 @@ pub enum RuleProtocol {
     Anthropic,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleQuotaResponseMapping {
+    #[serde(default)]
+    pub remaining: Value,
+    #[serde(default)]
+    pub unit: Value,
+    #[serde(default)]
+    pub total: Value,
+    #[serde(default)]
+    pub reset_at: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QuotaUnitType {
+    Percentage,
+    Amount,
+    Tokens,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleQuotaConfig {
+    pub enabled: bool,
+    pub provider: String,
+    pub endpoint: String,
+    #[serde(default = "default_quota_method")]
+    pub method: String,
+    #[serde(default = "default_quota_use_rule_token")]
+    pub use_rule_token: bool,
+    #[serde(default)]
+    pub custom_token: String,
+    #[serde(default = "default_quota_auth_header")]
+    pub auth_header: String,
+    #[serde(default = "default_quota_auth_scheme")]
+    pub auth_scheme: String,
+    #[serde(default)]
+    pub custom_headers: HashMap<String, String>,
+    #[serde(default = "default_quota_unit_type")]
+    pub unit_type: QuotaUnitType,
+    #[serde(default = "default_quota_low_threshold_percent")]
+    pub low_threshold_percent: f64,
+    #[serde(default)]
+    pub response: RuleQuotaResponseMapping,
+}
+
+pub fn default_quota_method() -> String {
+    "GET".to_string()
+}
+
+pub fn default_quota_use_rule_token() -> bool {
+    true
+}
+
+pub fn default_quota_auth_header() -> String {
+    "Authorization".to_string()
+}
+
+pub fn default_quota_auth_scheme() -> String {
+    "Bearer".to_string()
+}
+
+pub fn default_quota_unit_type() -> QuotaUnitType {
+    QuotaUnitType::Percentage
+}
+
+pub fn default_quota_low_threshold_percent() -> f64 {
+    10.0
+}
+
+pub fn default_rule_quota_config() -> RuleQuotaConfig {
+    RuleQuotaConfig {
+        enabled: false,
+        provider: "custom".to_string(),
+        endpoint: String::new(),
+        method: default_quota_method(),
+        use_rule_token: default_quota_use_rule_token(),
+        custom_token: String::new(),
+        auth_header: default_quota_auth_header(),
+        auth_scheme: default_quota_auth_scheme(),
+        custom_headers: HashMap::new(),
+        unit_type: default_quota_unit_type(),
+        low_threshold_percent: default_quota_low_threshold_percent(),
+        response: RuleQuotaResponseMapping::default(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rule {
@@ -64,6 +153,8 @@ pub struct Rule {
     pub default_model: String,
     #[serde(default)]
     pub model_mappings: HashMap<String, String>,
+    #[serde(default = "default_rule_quota_config")]
+    pub quota: RuleQuotaConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,6 +315,42 @@ pub struct RemoteRulesPullResult {
     pub warning: Option<String>,
     pub local_updated_at: Option<String>,
     pub remote_updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QuotaStatus {
+    Ok,
+    Low,
+    Empty,
+    Unknown,
+    Unsupported,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleQuotaSnapshot {
+    pub group_id: String,
+    pub rule_id: String,
+    pub provider: String,
+    pub status: QuotaStatus,
+    pub remaining: Option<f64>,
+    pub total: Option<f64>,
+    pub percent: Option<f64>,
+    pub unit: Option<String>,
+    pub reset_at: Option<String>,
+    pub fetched_at: String,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleQuotaTestResult {
+    pub ok: bool,
+    pub snapshot: Option<RuleQuotaSnapshot>,
+    pub raw_response: Option<Value>,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -398,7 +525,9 @@ pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_config, validate_config, Group, Rule, RuleProtocol};
+    use super::{
+        default_config, default_rule_quota_config, validate_config, Group, Rule, RuleProtocol,
+    };
     use std::collections::HashMap;
 
     #[test]
@@ -434,6 +563,7 @@ mod tests {
                 api_address: "https://api.example.com".to_string(),
                 default_model: "m1".to_string(),
                 model_mappings: HashMap::new(),
+                quota: default_rule_quota_config(),
             }],
         }];
 

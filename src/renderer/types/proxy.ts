@@ -10,6 +10,60 @@ export type RuleDirection = "oc" | "co"
  */
 export type RuleProtocol = "openai" | "openai_completion" | "anthropic"
 
+export type QuotaStatus = "ok" | "low" | "empty" | "unknown" | "unsupported" | "error"
+export type QuotaUnitType = "percentage" | "amount" | "tokens"
+
+export interface QuotaMappingObject {
+  path?: string
+  expr?: string
+  value?: string | number | boolean
+}
+
+export type QuotaMappingValue = string | QuotaMappingObject
+
+export interface RuleQuotaResponseMapping {
+  remaining?: QuotaMappingValue | null
+  unit?: QuotaMappingValue | null
+  total?: QuotaMappingValue | null
+  resetAt?: QuotaMappingValue | null
+}
+
+export interface RuleQuotaConfig {
+  enabled: boolean
+  provider: string
+  endpoint: string
+  method: string
+  useRuleToken: boolean
+  customToken: string
+  authHeader: string
+  authScheme: string
+  customHeaders: Record<string, string>
+  unitType: QuotaUnitType
+  lowThresholdPercent: number
+  response: RuleQuotaResponseMapping
+}
+
+export interface RuleQuotaSnapshot {
+  groupId: string
+  ruleId: string
+  provider: string
+  status: QuotaStatus
+  remaining?: number | null
+  total?: number | null
+  percent?: number | null
+  unit?: string | null
+  resetAt?: string | null
+  fetchedAt: string
+  message?: string | null
+}
+
+export interface RuleQuotaTestResult {
+  ok: boolean
+  snapshot?: RuleQuotaSnapshot | null
+  rawResponse?: unknown | null
+  message?: string | null
+}
+
 /**
  * Proxy rule interface
  * Defines a single translation rule between API formats
@@ -22,6 +76,7 @@ export interface Rule {
   apiAddress: string
   defaultModel: string
   modelMappings: Record<string, string>
+  quota: RuleQuotaConfig
 }
 
 /**

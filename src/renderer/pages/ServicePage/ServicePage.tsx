@@ -16,7 +16,15 @@ import styles from "./ServicePage.module.css"
 export const ServicePage: React.FC = () => {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { config, saveConfig, status } = useProxyStore()
+  const {
+    config,
+    saveConfig,
+    status,
+    ruleQuotas,
+    quotaLoadingRuleKeys,
+    fetchGroupQuotas,
+    fetchRuleQuota,
+  } = useProxyStore()
   const { showToast } = useLogs()
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null)
@@ -40,6 +48,22 @@ export const ServicePage: React.FC = () => {
       setActiveGroupId(groups[0].id)
     }
   }, [groups, activeGroupId])
+
+  React.useEffect(() => {
+    if (!activeGroupId) return
+    void fetchGroupQuotas(activeGroupId)
+  }, [activeGroupId, fetchGroupQuotas])
+
+  React.useEffect(() => {
+    if (!activeGroupId) return
+    const timer = window.setInterval(
+      () => {
+        void fetchGroupQuotas(activeGroupId)
+      },
+      5 * 60 * 1000
+    )
+    return () => window.clearInterval(timer)
+  }, [activeGroupId, fetchGroupQuotas])
 
   const handleSelectGroup = (groupId: string) => {
     setActiveGroupId(groupId)
@@ -170,6 +194,15 @@ export const ServicePage: React.FC = () => {
     }
   }
 
+  const handleRefreshRuleQuota = async (ruleId: string) => {
+    if (!activeGroupId) return
+    try {
+      await fetchRuleQuota(activeGroupId, ruleId)
+    } catch (error) {
+      showToast(t("errors.operationFailed", { message: String(error) }), "error")
+    }
+  }
+
   const handleCopyEntryUrl = async (url: string) => {
     if (!url) return
 
@@ -194,6 +227,24 @@ export const ServicePage: React.FC = () => {
     if (!activeGroup) return []
     return serverBaseUrls.map(baseUrl => `${baseUrl}/oc/${activeGroup.id}`)
   }, [activeGroup, serverBaseUrls])
+
+  const activeGroupQuotaByRuleId = React.useMemo(() => {
+    const map: Record<string, (typeof ruleQuotas)[string] | undefined> = {}
+    if (!activeGroup) return map
+    for (const rule of activeGroup.rules) {
+      map[rule.id] = ruleQuotas[`${activeGroup.id}:${rule.id}`]
+    }
+    return map
+  }, [activeGroup, ruleQuotas])
+
+  const activeGroupQuotaLoadingByRuleId = React.useMemo(() => {
+    const map: Record<string, boolean> = {}
+    if (!activeGroup) return map
+    for (const rule of activeGroup.rules) {
+      map[rule.id] = !!quotaLoadingRuleKeys[`${activeGroup.id}:${rule.id}`]
+    }
+    return map
+  }, [activeGroup, quotaLoadingRuleKeys])
 
   return (
     <div className={styles.servicePage}>
@@ -310,6 +361,9 @@ export const ServicePage: React.FC = () => {
               onSelect={setSelectedRuleId}
               onActivate={handleActivateRule}
               activatingRuleId={activatingRuleId}
+              quotaByRuleId={activeGroupQuotaByRuleId}
+              quotaLoadingByRuleId={activeGroupQuotaLoadingByRuleId}
+              onRefreshQuota={handleRefreshRuleQuota}
               onDelete={handleRequestDeleteRule}
               groupName={activeGroup.name}
               groupId={activeGroup.id}

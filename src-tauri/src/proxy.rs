@@ -1,7 +1,7 @@
 use crate::log_store::LogStore;
 use crate::models::{
-    default_metrics, Group, LogEntry, LogEntryError, ProxyConfig, ProxyMetrics, ProxyStatus,
-    Rule, RuleProtocol, TokenUsage,
+    default_metrics, LogEntry, LogEntryError, ProxyConfig, ProxyMetrics, ProxyStatus, Rule,
+    RuleProtocol, TokenUsage,
 };
 use crate::stats_store::StatsStore;
 use axum::body::{to_bytes, Body, Bytes};
@@ -16,6 +16,7 @@ use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::{IpAddr, UdpSocket};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
@@ -25,7 +26,9 @@ use uuid::Uuid;
 
 const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
 const MAX_STREAM_LOG_BODY_BYTES: usize = 256 * 1024;
-const REQUEST_TIMEOUT_MS: u64 = 60_000;
+const NON_STREAM_REQUEST_TIMEOUT_MS: u64 = 60_000;
+const STREAM_REQUEST_TIMEOUT_MS: u64 = 600_000;
+const UPSTREAM_CONNECT_TIMEOUT_MS: u64 = 10_000;
 
 #[derive(Clone)]
 pub struct ProxyRuntime {
@@ -34,9 +37,12 @@ pub struct ProxyRuntime {
 
 struct ProxyRuntimeInner {
     config: Arc<RwLock<ProxyConfig>>,
+    config_revision: Arc<AtomicU64>,
+    route_index: Arc<RwLock<RouteIndex>>,
+    route_index_revision: Arc<AtomicU64>,
     log_store: LogStore,
     stats_store: StatsStore,
-    metrics: Arc<RwLock<ProxyMetrics>>,
+    metrics: Arc<MetricsState>,
     server: Mutex<Option<RunningServer>>,
     client: Client,
 }
@@ -51,9 +57,12 @@ struct RunningServer {
 #[derive(Clone)]
 struct ServiceState {
     config: Arc<RwLock<ProxyConfig>>,
+    config_revision: Arc<AtomicU64>,
+    route_index: Arc<RwLock<RouteIndex>>,
+    route_index_revision: Arc<AtomicU64>,
     log_store: LogStore,
     stats_store: StatsStore,
-    metrics: Arc<RwLock<ProxyMetrics>>,
+    metrics: Arc<MetricsState>,
     client: Client,
 }
 
@@ -78,6 +87,118 @@ struct ParsedPath {
 struct PathEntry {
     protocol: EntryProtocol,
     endpoint: EntryEndpoint,
+}
+
+#[derive(Clone)]
+struct ActiveRoute {
+    group_name: String,
+    group_models: Vec<String>,
+    rule: Rule,
+}
+
+#[derive(Clone)]
+enum RouteResolution {
+    Ready(ActiveRoute),
+    NoActiveRule {
+        group_name: String,
+    },
+    MissingActiveRule {
+        group_name: String,
+        active_rule_id: String,
+    },
+}
+
+type RouteIndex = HashMap<String, RouteResolution>;
+
+struct MetricsState {
+    requests: AtomicU64,
+    stream_requests: AtomicU64,
+    errors: AtomicU64,
+    total_latency_ms: AtomicU64,
+    input_tokens: AtomicU64,
+    output_tokens: AtomicU64,
+    cache_read_tokens: AtomicU64,
+    cache_write_tokens: AtomicU64,
+    uptime_started_at: RwLock<Option<String>>,
+}
+
+impl MetricsState {
+    fn new() -> Self {
+        Self {
+            requests: AtomicU64::new(0),
+            stream_requests: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+            total_latency_ms: AtomicU64::new(0),
+            input_tokens: AtomicU64::new(0),
+            output_tokens: AtomicU64::new(0),
+            cache_read_tokens: AtomicU64::new(0),
+            cache_write_tokens: AtomicU64::new(0),
+            uptime_started_at: RwLock::new(None),
+        }
+    }
+
+    fn snapshot(&self) -> ProxyMetrics {
+        let requests = self.requests.load(Ordering::Relaxed);
+        let total_latency_ms = self.total_latency_ms.load(Ordering::Relaxed);
+        let avg_latency_ms = if requests == 0 { 0 } else { total_latency_ms / requests };
+        let mut metrics = default_metrics();
+        metrics.requests = requests;
+        metrics.stream_requests = self.stream_requests.load(Ordering::Relaxed);
+        metrics.errors = self.errors.load(Ordering::Relaxed);
+        metrics.avg_latency_ms = avg_latency_ms;
+        metrics.input_tokens = self.input_tokens.load(Ordering::Relaxed);
+        metrics.output_tokens = self.output_tokens.load(Ordering::Relaxed);
+        metrics.cache_read_tokens = self.cache_read_tokens.load(Ordering::Relaxed);
+        metrics.cache_write_tokens = self.cache_write_tokens.load(Ordering::Relaxed);
+        metrics.uptime_started_at = self
+            .uptime_started_at
+            .read()
+            .map(|v| v.clone())
+            .unwrap_or(None);
+        metrics
+    }
+
+    fn mark_started(&self) {
+        if let Ok(mut guard) = self.uptime_started_at.write() {
+            *guard = Some(Utc::now().to_rfc3339());
+        }
+    }
+
+    fn mark_stopped(&self) {
+        if let Ok(mut guard) = self.uptime_started_at.write() {
+            *guard = None;
+        }
+    }
+
+    fn increment_request(&self, stream: bool) {
+        let _ = self.requests.fetch_add(1, Ordering::Relaxed);
+        if stream {
+            let _ = self.stream_requests.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn increment_error(&self) {
+        let _ = self.errors.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn add_latency(&self, elapsed_ms: u64) {
+        let _ = self.total_latency_ms.fetch_add(elapsed_ms, Ordering::Relaxed);
+    }
+
+    fn add_token_usage(&self, usage: &TokenUsage) {
+        let _ = self
+            .input_tokens
+            .fetch_add(usage.input_tokens, Ordering::Relaxed);
+        let _ = self
+            .output_tokens
+            .fetch_add(usage.output_tokens, Ordering::Relaxed);
+        let _ = self
+            .cache_read_tokens
+            .fetch_add(usage.cache_read_tokens, Ordering::Relaxed);
+        let _ = self
+            .cache_write_tokens
+            .fetch_add(usage.cache_write_tokens, Ordering::Relaxed);
+    }
 }
 
 #[derive(Default)]
@@ -199,20 +320,30 @@ async fn bind_proxy_listener(host: &str, port: u16) -> Result<(TcpListener, Stri
 impl ProxyRuntime {
     pub fn new(
         config: Arc<RwLock<ProxyConfig>>,
+        config_revision: Arc<AtomicU64>,
         log_store: LogStore,
         stats_store: StatsStore,
     ) -> Result<Self, String> {
+        let initial_route_index = config
+            .read()
+            .map_err(|_| "config lock poisoned".to_string())
+            .map(|cfg| build_route_index(&cfg))?;
         let client = Client::builder()
-            .timeout(std::time::Duration::from_millis(REQUEST_TIMEOUT_MS))
+            .connect_timeout(std::time::Duration::from_millis(UPSTREAM_CONNECT_TIMEOUT_MS))
             .build()
             .map_err(|e| format!("create http client failed: {e}"))?;
 
         Ok(Self {
             inner: Arc::new(ProxyRuntimeInner {
                 config,
+                config_revision: config_revision.clone(),
+                route_index: Arc::new(RwLock::new(initial_route_index)),
+                route_index_revision: Arc::new(AtomicU64::new(
+                    config_revision.load(Ordering::Acquire),
+                )),
                 log_store,
                 stats_store,
-                metrics: Arc::new(RwLock::new(default_metrics())),
+                metrics: Arc::new(MetricsState::new()),
                 server: Mutex::new(None),
                 client,
             }),
@@ -236,6 +367,9 @@ impl ProxyRuntime {
         let (tx, rx) = oneshot::channel();
         let service_state = ServiceState {
             config: self.inner.config.clone(),
+            config_revision: self.inner.config_revision.clone(),
+            route_index: self.inner.route_index.clone(),
+            route_index_revision: self.inner.route_index_revision.clone(),
             log_store: self.inner.log_store.clone(),
             stats_store: self.inner.stats_store.clone(),
             metrics: self.inner.metrics.clone(),
@@ -249,9 +383,7 @@ impl ProxyRuntime {
             .route("/oc/:group_id/*suffix", post(handle_proxy_suffix))
             .with_state(service_state);
 
-        if let Ok(mut metrics) = self.inner.metrics.write() {
-            metrics.uptime_started_at = Some(Utc::now().to_rfc3339());
-        }
+        self.inner.metrics.mark_started();
 
         let handle = tokio::spawn(async move {
             let server = axum::serve(listener, app);
@@ -301,9 +433,7 @@ impl ProxyRuntime {
             let _ = tokio::time::timeout(std::time::Duration::from_millis(2500), &mut srv.handle).await;
         }
 
-        if let Ok(mut metrics) = self.inner.metrics.write() {
-            metrics.uptime_started_at = None;
-        }
+        self.inner.metrics.mark_stopped();
 
         Ok(self.get_status())
     }
@@ -320,12 +450,7 @@ impl ProxyRuntime {
             (false, None, None)
         };
 
-        let metrics = self
-            .inner
-            .metrics
-            .read()
-            .map(|m| m.clone())
-            .unwrap_or_else(|_| default_metrics());
+        let metrics = self.inner.metrics.snapshot();
 
         ProxyStatus {
             running,
@@ -388,11 +513,7 @@ async fn healthz(State(state): State<ServiceState>) -> Response {
 
 async fn metrics_lite(State(state): State<ServiceState>) -> Response {
     let trace_id = Uuid::new_v4().to_string();
-    let metrics = state
-        .metrics
-        .read()
-        .map(|m| m.clone())
-        .unwrap_or_else(|_| default_metrics());
+    let metrics = state.metrics.snapshot();
 
     let payload = serde_json::to_value(metrics.clone()).unwrap_or_else(|_| json!({}));
     let mut resp = (StatusCode::OK, Json(payload.clone())).into_response();
@@ -461,9 +582,18 @@ async fn handle_proxy_request(
         return reject_and_log(&state, trace_id, method, &parsed_path, 404, payload).await;
     }
 
-    let config = match state.config.read() {
-        Ok(v) => v.clone(),
+    if let Err(msg) = refresh_route_index_if_needed(&state) {
+        state.metrics.increment_error();
+        return proxy_error_response(500, "proxy_error", &msg, None, "proxy", &trace_id);
+    }
+
+    let (auth_enabled, expected_auth, capture_body) = match state.config.read() {
+        Ok(cfg) => {
+            let expected = format!("Bearer {}", cfg.server.local_bearer_token);
+            (cfg.server.auth_enabled, expected, cfg.logging.capture_body)
+        }
         Err(_) => {
+            state.metrics.increment_error();
             return proxy_error_response(
                 500,
                 "proxy_error",
@@ -471,18 +601,17 @@ async fn handle_proxy_request(
                 None,
                 "proxy",
                 &trace_id,
-            )
+            );
         }
     };
 
-    if config.server.auth_enabled {
+    if auth_enabled {
         let auth = headers
             .get("authorization")
             .and_then(|v| v.to_str().ok())
             .unwrap_or_default()
             .to_string();
-        let expected = format!("Bearer {}", config.server.local_bearer_token);
-        if auth != expected {
+        if auth != expected_auth {
             return reject_and_log(
                 &state,
                 trace_id,
@@ -510,14 +639,65 @@ async fn handle_proxy_request(
         }
     };
 
-    let (group, rule) = match find_group_and_rule(&config, &parsed_path.group_id) {
-        Ok(v) => v,
-        Err((status, msg)) => {
-            return proxy_error_response(status, "proxy_error", &msg, None, "proxy", &trace_id);
+    let active_route = match state.route_index.read() {
+        Ok(index) => index.get(&parsed_path.group_id).cloned(),
+        Err(_) => {
+            state.metrics.increment_error();
+            return proxy_error_response(
+                500,
+                "proxy_error",
+                "Failed to acquire route index lock",
+                None,
+                "proxy",
+                &trace_id,
+            );
+        }
+    };
+    let active_route = match active_route {
+        Some(RouteResolution::Ready(route)) => route,
+        Some(RouteResolution::NoActiveRule { group_name }) => {
+            state.metrics.increment_error();
+            return proxy_error_response(
+                409,
+                "proxy_error",
+                &format!("Group {} has no active rule", group_name),
+                None,
+                "proxy",
+                &trace_id,
+            );
+        }
+        Some(RouteResolution::MissingActiveRule {
+            group_name,
+            active_rule_id,
+        }) => {
+            state.metrics.increment_error();
+            return proxy_error_response(
+                409,
+                "proxy_error",
+                &format!(
+                    "Active rule {} is missing in group {}",
+                    active_rule_id, group_name
+                ),
+                None,
+                "proxy",
+                &trace_id,
+            );
+        }
+        None => {
+            state.metrics.increment_error();
+            return proxy_error_response(
+                404,
+                "proxy_error",
+                &format!("Group not found for id: {}", parsed_path.group_id),
+                None,
+                "proxy",
+                &trace_id,
+            );
         }
     };
 
-    if let Err((status, msg)) = assert_rule_ready(rule) {
+    if let Err((status, msg)) = assert_rule_ready(&active_route.rule) {
+        state.metrics.increment_error();
         return proxy_error_response(status, "proxy_error", &msg, None, "proxy", &trace_id);
     }
 
@@ -540,6 +720,7 @@ async fn handle_proxy_request(
         match serde_json::from_slice::<Value>(&body_bytes) {
             Ok(v) => v,
             Err(_) => {
+                state.metrics.increment_error();
                 return proxy_error_response(
                     400,
                     "proxy_error",
@@ -552,17 +733,18 @@ async fn handle_proxy_request(
         }
     };
 
-    let target_model = resolve_target_model(rule, group, &request_body);
+    let target_model = resolve_target_model(&active_route.rule, &active_route.group_models, &request_body);
     let requested_model = request_body
         .get("model")
         .and_then(|v| v.as_str())
-        .unwrap_or(&rule.default_model)
+        .unwrap_or(&active_route.rule.default_model)
         .to_string();
     let downstream_protocol = protocol_from_entry(&entry);
     let upstream_path = resolve_upstream_path(&downstream_protocol);
-    let upstream_url = match resolve_upstream_url(&rule.api_address, upstream_path) {
+    let upstream_url = match resolve_upstream_url(&active_route.rule.api_address, upstream_path) {
         Ok(v) => v,
         Err(msg) => {
+            state.metrics.increment_error();
             return proxy_error_response(400, "proxy_error", &msg, None, "proxy", &trace_id);
         }
     };
@@ -570,6 +752,7 @@ async fn handle_proxy_request(
     let upstream_body = match build_upstream_body(&request_body, &target_model) {
         Ok(v) => v,
         Err(msg) => {
+            state.metrics.increment_error();
             return proxy_error_response(422, "proxy_error", &msg, None, "proxy", &trace_id);
         }
     };
@@ -578,15 +761,19 @@ async fn handle_proxy_request(
         .get("stream")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let capture_body = config.logging.capture_body;
+    state.metrics.increment_request(stream);
 
-    increment_requests(&state.metrics, stream);
-
-    let upstream_headers = build_rule_headers(&downstream_protocol, rule);
+    let upstream_headers = build_rule_headers(&downstream_protocol, &active_route.rule);
+    let request_timeout_ms = if stream {
+        STREAM_REQUEST_TIMEOUT_MS
+    } else {
+        NON_STREAM_REQUEST_TIMEOUT_MS
+    };
 
     let upstream_resp = match state
         .client
         .post(upstream_url.clone())
+        .timeout(std::time::Duration::from_millis(request_timeout_ms))
         .headers(reqwest::header::HeaderMap::from_iter(upstream_headers.iter().filter_map(
             |(k, v)| {
                 let name = reqwest::header::HeaderName::from_bytes(k.as_bytes()).ok()?;
@@ -600,6 +787,7 @@ async fn handle_proxy_request(
     {
         Ok(r) => r,
         Err(err) => {
+            state.metrics.increment_error();
             return proxy_error_response(
                 502,
                 "upstream_error",
@@ -629,8 +817,8 @@ async fn handle_proxy_request(
             group_id: parsed_path.group_id.clone(),
             suffix: parsed_path.suffix.clone(),
         };
-        let stream_group = group.clone();
-        let stream_rule = rule.clone();
+        let stream_group_name = active_route.group_name.clone();
+        let stream_rule = active_route.rule.clone();
         let stream_entry = PathEntry {
             protocol: entry.protocol,
             endpoint: entry.endpoint,
@@ -687,12 +875,14 @@ async fn handle_proxy_request(
 
             let token_usage = usage_acc.into_token_usage();
             if let Some(ref usage) = token_usage {
-                update_token_metrics(&stream_state.metrics, usage);
+                stream_state.metrics.add_token_usage(usage);
             }
-            update_latency(
-                &stream_state.metrics,
-                stream_started.elapsed().as_millis() as u64,
-            );
+            stream_state
+                .metrics
+                .add_latency(stream_started.elapsed().as_millis() as u64);
+            if stream_failed {
+                stream_state.metrics.increment_error();
+            }
 
             let stream_response_body = if stream_capture_body {
                 Some(json!({
@@ -709,7 +899,7 @@ async fn handle_proxy_request(
                 &stream_trace_id,
                 &stream_method,
                 &stream_parsed_path,
-                &stream_group,
+                &stream_group_name,
                 &stream_rule,
                 &stream_entry,
                 Some(&stream_requested_model),
@@ -748,6 +938,7 @@ async fn handle_proxy_request(
     let upstream_text = match upstream_resp.text().await {
         Ok(v) => v,
         Err(err) => {
+            state.metrics.increment_error();
             return proxy_error_response(
                 502,
                 "upstream_error",
@@ -762,6 +953,7 @@ async fn handle_proxy_request(
     let upstream_json = match serde_json::from_str::<Value>(&upstream_text) {
         Ok(v) => v,
         Err(_) => {
+            state.metrics.increment_error();
             return proxy_error_response(
                 502,
                 "upstream_error",
@@ -783,6 +975,7 @@ async fn handle_proxy_request(
             .and_then(|v| v.as_str())
             .map(|v| v.to_string())
             .unwrap_or_else(|| format!("Upstream returned HTTP {upstream_status}"));
+        state.metrics.increment_error();
         return proxy_error_response(
             upstream_status,
             "upstream_error",
@@ -802,10 +995,12 @@ async fn handle_proxy_request(
 
     let token_usage = extract_token_usage(&upstream_json).or_else(|| extract_token_usage(&output_body));
     if let Some(ref usage) = token_usage {
-        update_token_metrics(&state.metrics, usage);
+        state.metrics.add_token_usage(usage);
     }
 
-    update_latency(&state.metrics, started.elapsed().as_millis() as u64);
+    state
+        .metrics
+        .add_latency(started.elapsed().as_millis() as u64);
 
     let mut resp = (StatusCode::OK, Json(output_body.clone())).into_response();
     apply_headers(&mut resp, &response_headers_json(&trace_id));
@@ -815,8 +1010,8 @@ async fn handle_proxy_request(
         &trace_id,
         &method,
         &parsed_path,
-        &group,
-        &rule,
+        &active_route.group_name,
+        &active_route.rule,
         &entry,
         Some(&requested_model),
         Some(&target_model),
@@ -835,35 +1030,6 @@ async fn handle_proxy_request(
     );
 
     resp
-}
-
-fn increment_requests(metrics: &Arc<RwLock<ProxyMetrics>>, stream: bool) {
-    if let Ok(mut m) = metrics.write() {
-        m.requests += 1;
-        if stream {
-            m.stream_requests += 1;
-        }
-    }
-}
-
-fn update_latency(metrics: &Arc<RwLock<ProxyMetrics>>, elapsed_ms: u64) {
-    if let Ok(mut m) = metrics.write() {
-        let n = m.requests;
-        if n <= 1 {
-            m.avg_latency_ms = elapsed_ms;
-        } else {
-            m.avg_latency_ms = ((m.avg_latency_ms * (n - 1) + elapsed_ms) as f64 / n as f64).round() as u64;
-        }
-    }
-}
-
-fn update_token_metrics(metrics: &Arc<RwLock<ProxyMetrics>>, usage: &TokenUsage) {
-    if let Ok(mut m) = metrics.write() {
-        m.input_tokens += usage.input_tokens;
-        m.output_tokens += usage.output_tokens;
-        m.cache_read_tokens += usage.cache_read_tokens;
-        m.cache_write_tokens += usage.cache_write_tokens;
-    }
 }
 
 fn detect_entry_protocol(suffix: &str) -> Option<PathEntry> {
@@ -952,30 +1118,55 @@ fn build_rule_headers(protocol: &RuleProtocol, rule: &Rule) -> HashMap<String, S
     headers
 }
 
-fn find_group_and_rule<'a>(config: &'a ProxyConfig, group_id: &str) -> Result<(&'a Group, &'a Rule), (u16, String)> {
-    let group = config
-        .groups
-        .iter()
-        .find(|g| g.id == group_id)
-        .ok_or_else(|| (404, format!("Group not found for id: {group_id}")))?;
+fn refresh_route_index_if_needed(state: &ServiceState) -> Result<(), String> {
+    let observed_revision = state.config_revision.load(Ordering::Acquire);
+    let cached_revision = state.route_index_revision.load(Ordering::Acquire);
+    if observed_revision == cached_revision {
+        return Ok(());
+    }
 
-    let active_rule_id = group
-        .active_rule_id
-        .as_ref()
-        .ok_or_else(|| (409, format!("Group {} has no active rule", group.name)))?;
+    let next_index = state
+        .config
+        .read()
+        .map_err(|_| "config lock poisoned".to_string())
+        .map(|cfg| build_route_index(&cfg))?;
 
-    let rule = group
-        .rules
-        .iter()
-        .find(|r| r.id == *active_rule_id)
-        .ok_or_else(|| {
-            (
-                409,
-                format!("Active rule {} is missing in group {}", active_rule_id, group.name),
-            )
-        })?;
+    let mut guard = state
+        .route_index
+        .write()
+        .map_err(|_| "route index lock poisoned".to_string())?;
+    *guard = next_index;
+    state
+        .route_index_revision
+        .store(observed_revision, Ordering::Release);
 
-    Ok((group, rule))
+    Ok(())
+}
+
+fn build_route_index(config: &ProxyConfig) -> RouteIndex {
+    let mut index = HashMap::with_capacity(config.groups.len());
+    for group in &config.groups {
+        let resolution = match group.active_rule_id.as_ref() {
+            Some(active_rule_id) => {
+                match group.rules.iter().find(|rule| rule.id == *active_rule_id) {
+                    Some(rule) => RouteResolution::Ready(ActiveRoute {
+                        group_name: group.name.clone(),
+                        group_models: group.models.clone(),
+                        rule: rule.clone(),
+                    }),
+                    None => RouteResolution::MissingActiveRule {
+                        group_name: group.name.clone(),
+                        active_rule_id: active_rule_id.clone(),
+                    },
+                }
+            }
+            None => RouteResolution::NoActiveRule {
+                group_name: group.name.clone(),
+            },
+        };
+        index.insert(group.id.clone(), resolution);
+    }
+    index
 }
 
 fn assert_rule_ready(rule: &Rule) -> Result<(), (u16, String)> {
@@ -994,7 +1185,7 @@ fn assert_rule_ready(rule: &Rule) -> Result<(), (u16, String)> {
     Ok(())
 }
 
-fn resolve_target_model(rule: &Rule, group: &Group, request_body: &Value) -> String {
+fn resolve_target_model(rule: &Rule, group_models: &[String], request_body: &Value) -> String {
     let requested = request_body
         .get("model")
         .and_then(|v| v.as_str())
@@ -1002,7 +1193,7 @@ fn resolve_target_model(rule: &Rule, group: &Group, request_body: &Value) -> Str
         .filter(|s| !s.is_empty());
 
     if let Some(model) = requested {
-        if let Some(matched_model) = find_group_model_match(group, &model) {
+        if let Some(matched_model) = find_group_model_match(group_models, &model) {
             return rule
                 .model_mappings
                 .get(&model)
@@ -1015,9 +1206,9 @@ fn resolve_target_model(rule: &Rule, group: &Group, request_body: &Value) -> Str
     rule.default_model.clone()
 }
 
-fn find_group_model_match<'a>(group: &'a Group, requested: &str) -> Option<&'a str> {
+fn find_group_model_match<'a>(group_models: &'a [String], requested: &str) -> Option<&'a str> {
     let mut best: Option<&str> = None;
-    for model in &group.models {
+    for model in group_models {
         let candidate = model.trim();
         if candidate.is_empty() {
             continue;
@@ -1188,6 +1379,9 @@ async fn reject_and_log(
     status: u16,
     payload: Value,
 ) -> Response {
+    if status >= 400 {
+        state.metrics.increment_error();
+    }
     let mut resp = (StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST), Json(payload.clone())).into_response();
     apply_headers(&mut resp, &response_headers_json(&trace_id));
 
@@ -1287,7 +1481,7 @@ fn finalize_log(
     trace_id: &str,
     method: &Method,
     parsed_path: &ParsedPath,
-    group: &Group,
+    group_name: &str,
     rule: &Rule,
     entry: &PathEntry,
     model: Option<&str>,
@@ -1315,7 +1509,7 @@ fn finalize_log(
         request_address: format!("{} /oc/{}{}", method.as_str(), parsed_path.group_id, parsed_path.suffix),
         client_address: None,
         group_path: Some(parsed_path.group_id.clone()),
-        group_name: Some(group.name.clone()),
+        group_name: Some(group_name.to_string()),
         rule_id: Some(rule.id.clone()),
         direction: None,
         entry_protocol: Some(match entry.protocol {
@@ -1361,7 +1555,7 @@ mod tests {
         build_upstream_body, extract_token_usage, resolve_target_model, resolve_upstream_path,
         StreamTokenAccumulator,
     };
-    use crate::models::{Group, Rule, RuleProtocol};
+    use crate::models::{default_rule_quota_config, Group, Rule, RuleProtocol};
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -1473,6 +1667,7 @@ mod tests {
             api_address: "https://api.example.com".to_string(),
             default_model: "fallback".to_string(),
             model_mappings: mappings,
+            quota: default_rule_quota_config(),
         };
         let group = Group {
             id: "g1".to_string(),
@@ -1482,7 +1677,7 @@ mod tests {
             rules: vec![rule.clone()],
         };
 
-        let model = resolve_target_model(&rule, &group, &json!({ "model": "m1" }));
+        let model = resolve_target_model(&rule, &group.models, &json!({ "model": "m1" }));
         assert_eq!(model, "gpt-x");
     }
 
@@ -1496,6 +1691,7 @@ mod tests {
             api_address: "https://api.example.com".to_string(),
             default_model: "fallback".to_string(),
             model_mappings: HashMap::new(),
+            quota: default_rule_quota_config(),
         };
         let group = Group {
             id: "g1".to_string(),
@@ -1505,7 +1701,7 @@ mod tests {
             rules: vec![rule.clone()],
         };
 
-        let model = resolve_target_model(&rule, &group, &json!({ "model": "unknown" }));
+        let model = resolve_target_model(&rule, &group.models, &json!({ "model": "unknown" }));
         assert_eq!(model, "fallback");
     }
 

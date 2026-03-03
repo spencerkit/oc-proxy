@@ -3,16 +3,22 @@ use chrono::{DateTime, Duration, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration as StdDuration;
 
 const RETENTION_DAYS: i64 = 90;
 const DEFAULT_HOURS: u32 = 24;
 const MAX_HOURS: u32 = 24 * 90;
+const FLUSH_INTERVAL_MS: u64 = 1000;
 
 #[derive(Clone)]
 pub struct StatsStore {
     file_path: PathBuf,
     inner: Arc<Mutex<HashMap<String, StatsBucket>>>,
+    dirty: Arc<AtomicBool>,
+    worker_started: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +49,8 @@ impl StatsStore {
         Self {
             file_path,
             inner: Arc::new(Mutex::new(HashMap::new())),
+            dirty: Arc::new(AtomicBool::new(false)),
+            worker_started: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -53,6 +61,7 @@ impl StatsStore {
 
         if !self.file_path.exists() {
             self.persist_locked(&HashMap::new())?;
+            self.start_flush_worker();
             return Ok(());
         }
 
@@ -82,6 +91,7 @@ impl StatsStore {
             *guard = next.clone();
         }
         self.persist_locked(&next)?;
+        self.start_flush_worker();
         Ok(())
     }
 
@@ -93,7 +103,7 @@ impl StatsStore {
             return;
         };
 
-        let next_snapshot = {
+        {
             let mut guard = match self.inner.lock() {
                 Ok(v) => v,
                 Err(_) => return,
@@ -125,10 +135,9 @@ impl StatsStore {
                 bucket.cache_read_tokens += usage.cache_read_tokens;
                 bucket.cache_write_tokens += usage.cache_write_tokens;
             }
-            guard.clone()
-        };
+        }
 
-        let _ = self.persist_locked(&next_snapshot);
+        self.dirty.store(true, Ordering::Release);
     }
 
     pub fn summarize(&self, hours: Option<u32>, rule_key: Option<String>) -> StatsSummaryResult {
@@ -237,12 +246,47 @@ impl StatsStore {
     }
 
     pub fn clear(&self) -> Result<(), String> {
-        let snapshot = {
+        {
             let mut guard = self.inner.lock().map_err(|_| "stats lock poisoned".to_string())?;
             guard.clear();
+        }
+        self.flush_now()
+    }
+
+    pub fn flush_now(&self) -> Result<(), String> {
+        let snapshot = {
+            let guard = self.inner.lock().map_err(|_| "stats lock poisoned".to_string())?;
             guard.clone()
         };
-        self.persist_locked(&snapshot)
+        self.persist_locked(&snapshot)?;
+        self.dirty.store(false, Ordering::Release);
+        Ok(())
+    }
+
+    fn flush_if_dirty(&self) {
+        if !self.dirty.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        let snapshot = match self.inner.lock() {
+            Ok(v) => v.clone(),
+            Err(_) => return,
+        };
+        let _ = self.persist_locked(&snapshot);
+    }
+
+    fn start_flush_worker(&self) {
+        if self.worker_started.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let store = self.clone();
+        let _ = thread::Builder::new()
+            .name("stats-flush-worker".to_string())
+            .spawn(move || {
+                loop {
+                    thread::sleep(StdDuration::from_millis(FLUSH_INTERVAL_MS));
+                    store.flush_if_dirty();
+                }
+            });
     }
 
     fn persist_locked(&self, data: &HashMap<String, StatsBucket>) -> Result<(), String> {

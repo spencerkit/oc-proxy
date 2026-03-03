@@ -36,7 +36,11 @@ It routes requests by group, forwards with the group active rule, and translates
    - Real-time request logs with status, group/rule context, protocol direction, upstream target, and token usage.
    - Detailed log view for request/response headers and payloads (when capture is enabled).
    - Aggregated stats by time range and rule filter; persisted locally with retention policy.
-7. Desktop runtime behavior
+7. Rule quota visibility
+   - Each rule can configure a dedicated quota endpoint and mapping fields for remaining quota.
+   - Remaining quota status is shown directly on the rule card (`ok`, `low`, `empty`, etc.).
+   - Supports heterogeneous provider payloads via JSON path and expression mapping.
+8. Desktop runtime behavior
    - Launch on startup and close-to-tray behavior toggles.
    - Theme and language switching.
    - About panel showing app name/version.
@@ -75,6 +79,44 @@ It routes requests by group, forwards with the group active rule, and translates
 - Rule-level `modelMappings` are applied on matched models
 - Falls back to rule `defaultModel` when no mapping/match applies
 
+### Rule Quota Query
+
+- Per-rule quota config fields:
+  - `enabled`, `provider`, `endpoint`, `method`
+  - `useRuleToken` / `customToken`
+  - `authHeader`, `authScheme`, `customHeaders`
+  - `response.remaining`, `response.unit`, `response.total`, `response.resetAt`
+  - `lowThresholdPercent`
+- Rule cards show current remaining quota and status badge.
+- Quota can be refreshed per rule from the Service page.
+
+Mapping examples:
+
+```json
+{
+  "response": {
+    "remaining": "$.data.remaining_balance",
+    "unit": "$.data.currency",
+    "total": "$.data.total_balance",
+    "resetAt": "$.data.reset_at"
+  }
+}
+```
+
+```json
+{
+  "response": {
+    "remaining": "$.data.remaining_balance/$.data.remaining_total",
+    "unit": "$.data.unit"
+  }
+}
+```
+
+Expression support and safety:
+- Allowed: numeric literals, `+ - * /`, parentheses, and `path('$.x.y')`
+- Inline path expressions like `$.a/$.b` are supported
+- No script execution (`eval`, JS runtime, external process) is used
+
 ### Desktop UI
 
 - Service page:
@@ -91,6 +133,7 @@ It routes requests by group, forwards with the group active rule, and translates
 - Rule editor/creator:
   - Protocol, token, API address, default model
   - Per-model mapping
+  - Quota endpoint + response mapping for remaining quota
   - Token visibility toggle
 - Logs:
   - Request list, status filter, refresh, clear

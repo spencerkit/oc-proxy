@@ -35,7 +35,11 @@ AI Open Router 是基于 Tauri 的桌面应用，内置本地代理运行时。
    - 实时请求日志，包含状态、分组/规则信息、协议方向、上游目标、Token 用量等。
    - 日志详情可查看请求/响应头与请求/响应体（开启记录时）。
    - 支持按时间窗口和规则筛选统计，并在本地持久化保留。
-7. 桌面端运行行为
+7. 规则额度可视化
+   - 每条规则可单独配置额度查询接口与映射规则。
+   - 规则卡片直接显示剩余额度状态（`ok`、`low`、`empty` 等）。
+   - 通过 JSONPath/表达式适配不同 provider 的响应结构。
+8. 桌面端运行行为
    - 支持开机启动、关闭最小化到托盘。
    - 支持主题与语言切换。
    - 支持关于面板查看应用名称和版本。
@@ -74,6 +78,43 @@ AI Open Router 是基于 Tauri 的桌面应用，内置本地代理运行时。
 - 规则 `modelMappings` 会在匹配后生效
 - 未命中映射时回落到规则 `defaultModel`
 
+### 规则额度查询
+
+- 每条规则支持配置：
+  - `enabled`、`provider`、`endpoint`、`method`
+  - `useRuleToken` / `customToken`
+  - `authHeader`、`authScheme`、`customHeaders`
+  - `response.remaining`、`response.unit`、`response.total`、`response.resetAt`
+  - `lowThresholdPercent`
+- 服务页可在规则卡片查看剩余额度，并支持单条刷新。
+
+映射示例：
+
+```json
+{
+  "response": {
+    "remaining": "$.data.remaining_balance",
+    "unit": "$.data.currency",
+    "total": "$.data.total_balance",
+    "resetAt": "$.data.reset_at"
+  }
+}
+```
+
+```json
+{
+  "response": {
+    "remaining": "$.data.remaining_balance/$.data.remaining_total",
+    "unit": "$.data.unit"
+  }
+}
+```
+
+表达式支持与安全约束：
+- 仅支持数字字面量、`+ - * /`、括号、`path('$.x.y')`
+- 支持内联写法（如 `$.a/$.b`）
+- 不执行脚本，不依赖 `eval` 或外部进程
+
 ### 桌面界面
 
 - 服务页：
@@ -90,6 +131,7 @@ AI Open Router 是基于 Tauri 的桌面应用，内置本地代理运行时。
 - 规则创建/编辑页：
   - 协议、Token、API 地址、默认模型
   - 模型映射
+  - 额度查询接口与剩余额度映射配置
   - Token 明文/隐藏切换
 - 日志页：
   - 请求列表、状态筛选、刷新、清空

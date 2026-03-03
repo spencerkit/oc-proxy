@@ -42,7 +42,7 @@ mod tests {
     use super::{
         backup_default_file_name, create_groups_backup_payload, extract_groups_from_import_payload,
     };
-    use crate::models::{Group, Rule, RuleProtocol};
+    use crate::models::{default_rule_quota_config, Group, Rule, RuleProtocol};
     use chrono::DateTime;
     use serde_json::json;
     use std::collections::HashMap;
@@ -61,6 +61,7 @@ mod tests {
                 api_address: "https://api.example.com".to_string(),
                 default_model: "claude-3-7-sonnet".to_string(),
                 model_mappings: HashMap::new(),
+                quota: default_rule_quota_config(),
             }],
         }
     }
