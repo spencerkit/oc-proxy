@@ -32,6 +32,7 @@ export type {
   RuleProtocol,
   RuleQuotaConfig,
   RuleQuotaSnapshot,
+  RuleQuotaTestResult,
   TokenUsage,
 } from "./proxy"
 

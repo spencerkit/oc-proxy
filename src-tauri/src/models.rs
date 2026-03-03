@@ -331,6 +331,15 @@ pub struct RuleQuotaSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuleQuotaTestResult {
+    pub ok: bool,
+    pub snapshot: Option<RuleQuotaSnapshot>,
+    pub raw_response: Option<Value>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StatsRuleOption {
     pub key: String,
     pub label: String,

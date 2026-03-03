@@ -203,6 +203,98 @@
   color: var(--danger);
 }
 
+.quotaTestActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.quotaTestResult {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+  display: grid;
+  gap: var(--sp-3);
+  background: color-mix(in srgb, var(--surface) 90%, #0f172a 10%);
+}
+
+.quotaTestResultSuccess {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--border) 45%);
+}
+
+.quotaTestResultError {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border) 40%);
+}
+
+.quotaTestHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-primary);
+}
+
+.quotaTestIconSuccess {
+  color: var(--success);
+}
+
+.quotaTestIconError {
+  color: var(--danger);
+}
+
+.quotaTestDirty {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.quotaTestMessage {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.quotaTestGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.quotaTestGrid > div {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2);
+  display: grid;
+  gap: 2px;
+  background: color-mix(in srgb, var(--surface) 95%, #020617 5%);
+}
+
+.quotaTestGrid span {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.quotaTestGrid strong {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+.quotaRawSection {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.quotaRawTitle {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
 .tokenVisibilityButton {
   width: 28px;
   height: 28px;
@@ -263,6 +355,10 @@
   }
 
   .dualColumnRow {
+    grid-template-columns: 1fr;
+  }
+
+  .quotaTestGrid {
     grid-template-columns: 1fr;
   }
 

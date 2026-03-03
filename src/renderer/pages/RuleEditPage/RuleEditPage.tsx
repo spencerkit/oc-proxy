@@ -1,11 +1,12 @@
-import { Eye, EyeOff } from "lucide-react"
+import { AlertCircle, CheckCircle, Eye, EyeOff, TestTube2 } from "lucide-react"
 import type React from "react"
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { Button, Input, Switch } from "@/components"
+import { Button, Input, JsonTreeView, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { useProxyStore } from "@/store"
-import type { ProxyConfig, Rule } from "@/types"
+import type { ProxyConfig, Rule, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
+import { ipc } from "@/utils/ipc"
 import styles from "./RuleEditPage.module.css"
 
 const parseQuotaHeaders = (raw: string): Record<string, string> => {
@@ -62,6 +63,75 @@ const buildRemainingMapping = (path: string, expr: string) => {
   return null
 }
 
+const buildQuotaConfig = ({
+  enabled,
+  provider,
+  endpoint,
+  method,
+  useRuleToken,
+  customToken,
+  authHeader,
+  authScheme,
+  customHeaders,
+  lowThresholdPercent,
+  remainingPath,
+  remainingExpr,
+  unitPath,
+  totalPath,
+  resetAtPath,
+}: {
+  enabled: boolean
+  provider: string
+  endpoint: string
+  method: string
+  useRuleToken: boolean
+  customToken: string
+  authHeader: string
+  authScheme: string
+  customHeaders: Record<string, string>
+  lowThresholdPercent: number
+  remainingPath: string
+  remainingExpr: string
+  unitPath: string
+  totalPath: string
+  resetAtPath: string
+}): Rule["quota"] => ({
+  enabled,
+  provider: provider.trim() || "custom",
+  endpoint: endpoint.trim(),
+  method,
+  useRuleToken,
+  customToken: useRuleToken ? "" : customToken.trim(),
+  authHeader: authHeader.trim(),
+  authScheme: authScheme.trim(),
+  customHeaders,
+  lowThresholdPercent:
+    Number.isFinite(lowThresholdPercent) && lowThresholdPercent > 0 ? lowThresholdPercent : 10,
+  response: {
+    remaining: buildRemainingMapping(remainingPath, remainingExpr),
+    unit: unitPath.trim() || null,
+    total: totalPath.trim() || null,
+    resetAt: resetAtPath.trim() || null,
+  },
+})
+
+const formatQuotaValue = (value?: number | null): string => {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-"
+  }
+  const abs = Math.abs(value)
+  if (abs >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(2).replace(/\\.00$/, "")}M`
+  }
+  if (abs >= 1_000) {
+    return `${(value / 1_000).toFixed(1).replace(/\\.0$/, "")}k`
+  }
+  if (abs >= 1) {
+    return value.toFixed(2).replace(/\\.00$/, "")
+  }
+  return value.toFixed(4).replace(/0+$/, "").replace(/\\.$/, "")
+}
+
 /**
  * RuleEditPage Component
  * Page for editing an existing rule
@@ -96,6 +166,9 @@ export const RuleEditPage: React.FC = () => {
   const [quotaTotalPath, setQuotaTotalPath] = useState("")
   const [quotaResetAtPath, setQuotaResetAtPath] = useState("")
   const [quotaLowThresholdPercent, setQuotaLowThresholdPercent] = useState("10")
+  const [quotaTestLoading, setQuotaTestLoading] = useState(false)
+  const [quotaTestResult, setQuotaTestResult] = useState<RuleQuotaTestResult | null>(null)
+  const [quotaTestFingerprint, setQuotaTestFingerprint] = useState<string | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [errors, setErrors] = useState<{
@@ -112,6 +185,27 @@ export const RuleEditPage: React.FC = () => {
   // Find the group and rule
   const group = config?.groups.find(g => g.id === groupId)
   const rule = group?.rules.find(r => r.id === ruleId)
+  const quotaDraftFingerprint = JSON.stringify({
+    token,
+    name,
+    quotaEnabled,
+    quotaProvider,
+    quotaEndpoint,
+    quotaMethod,
+    quotaUseRuleToken,
+    quotaCustomToken,
+    quotaAuthHeader,
+    quotaAuthScheme,
+    quotaHeadersText,
+    quotaRemainingPath,
+    quotaRemainingExpr,
+    quotaUnitPath,
+    quotaTotalPath,
+    quotaResetAtPath,
+    quotaLowThresholdPercent,
+  })
+  const quotaTestDirty =
+    !!quotaTestResult && !!quotaTestFingerprint && quotaTestFingerprint !== quotaDraftFingerprint
 
   useEffect(() => {
     if (rule) {
@@ -146,6 +240,13 @@ export const RuleEditPage: React.FC = () => {
       navigate("/")
     }
   }, [rule, config, t, showToast, navigate])
+
+  useEffect(() => {
+    if (quotaEnabled) return
+    setQuotaTestLoading(false)
+    setQuotaTestResult(null)
+    setQuotaTestFingerprint(null)
+  }, [quotaEnabled])
 
   const focusField = (id: string) => {
     const input = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | null
@@ -235,6 +336,90 @@ export const RuleEditPage: React.FC = () => {
     return true
   }
 
+  const resolveQuotaTestStatusText = (snapshot?: RuleQuotaSnapshot | null): string => {
+    if (!snapshot) return "-"
+    return t(`ruleQuota.${snapshot.status}`)
+  }
+
+  const handleTestQuota = async () => {
+    if (!groupId) return
+
+    if (!quotaEndpoint.trim()) {
+      setQuotaTestResult({
+        ok: false,
+        message: t("validation.required", { field: t("ruleForm.quotaEndpoint") }),
+      })
+      return
+    }
+    if (!quotaRemainingPath.trim() && !quotaRemainingExpr.trim()) {
+      setQuotaTestResult({
+        ok: false,
+        message: t("validation.required", { field: t("ruleForm.quotaRemainingMapping") }),
+      })
+      return
+    }
+
+    let quotaHeaders: Record<string, string>
+    try {
+      quotaHeaders = parseQuotaHeaders(quotaHeadersText)
+    } catch {
+      setQuotaTestResult({
+        ok: false,
+        message: t("ruleForm.quotaHeadersError"),
+      })
+      return
+    }
+
+    const threshold = Number(quotaLowThresholdPercent)
+    if (!Number.isFinite(threshold) || threshold <= 0) {
+      setQuotaTestResult({
+        ok: false,
+        message: t("ruleForm.quotaThresholdError"),
+      })
+      return
+    }
+
+    const quotaConfig = buildQuotaConfig({
+      enabled: true,
+      provider: quotaProvider,
+      endpoint: quotaEndpoint,
+      method: quotaMethod,
+      useRuleToken: quotaUseRuleToken,
+      customToken: quotaCustomToken,
+      authHeader: quotaAuthHeader,
+      authScheme: quotaAuthScheme,
+      customHeaders: quotaHeaders,
+      lowThresholdPercent: threshold,
+      remainingPath: quotaRemainingPath,
+      remainingExpr: quotaRemainingExpr,
+      unitPath: quotaUnitPath,
+      totalPath: quotaTotalPath,
+      resetAtPath: quotaResetAtPath,
+    })
+
+    setQuotaTestLoading(true)
+    try {
+      const result = await ipc.testRuleQuotaDraft(
+        groupId,
+        name.trim() || "Draft Rule",
+        token,
+        apiAddress,
+        defaultModel,
+        quotaConfig
+      )
+      setQuotaTestResult(result)
+      setQuotaTestFingerprint(quotaDraftFingerprint)
+    } catch (error) {
+      setQuotaTestResult({
+        ok: false,
+        message: String(error),
+      })
+      setQuotaTestFingerprint(quotaDraftFingerprint)
+    } finally {
+      setQuotaTestLoading(false)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!config || !groupId || !ruleId) return
@@ -242,6 +427,23 @@ export const RuleEditPage: React.FC = () => {
 
     const quotaHeaders = parseQuotaHeaders(quotaHeadersText)
     const threshold = Number(quotaLowThresholdPercent)
+    const quotaConfig = buildQuotaConfig({
+      enabled: quotaEnabled,
+      provider: quotaProvider,
+      endpoint: quotaEndpoint,
+      method: quotaMethod,
+      useRuleToken: quotaUseRuleToken,
+      customToken: quotaCustomToken,
+      authHeader: quotaAuthHeader,
+      authScheme: quotaAuthScheme,
+      customHeaders: quotaHeaders,
+      lowThresholdPercent: threshold,
+      remainingPath: quotaRemainingPath,
+      remainingExpr: quotaRemainingExpr,
+      unitPath: quotaUnitPath,
+      totalPath: quotaTotalPath,
+      resetAtPath: quotaResetAtPath,
+    })
 
     const newConfig: ProxyConfig = {
       ...config,
@@ -263,25 +465,7 @@ export const RuleEditPage: React.FC = () => {
                         .map(([key, value]) => [key.trim(), value.trim()])
                         .filter(([key, value]) => key && value)
                     ),
-                    quota: {
-                      enabled: quotaEnabled,
-                      provider: quotaProvider.trim() || "custom",
-                      endpoint: quotaEndpoint.trim(),
-                      method: quotaMethod,
-                      useRuleToken: quotaUseRuleToken,
-                      customToken: quotaUseRuleToken ? "" : quotaCustomToken.trim(),
-                      authHeader: quotaAuthHeader.trim(),
-                      authScheme: quotaAuthScheme.trim(),
-                      customHeaders: quotaHeaders,
-                      lowThresholdPercent:
-                        Number.isFinite(threshold) && threshold > 0 ? threshold : 10,
-                      response: {
-                        remaining: buildRemainingMapping(quotaRemainingPath, quotaRemainingExpr),
-                        unit: quotaUnitPath.trim() || null,
-                        total: quotaTotalPath.trim() || null,
-                        resetAt: quotaResetAtPath.trim() || null,
-                      },
-                    },
+                    quota: quotaConfig,
                   }
                 : r
             ),
@@ -709,6 +893,90 @@ export const RuleEditPage: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  <div className={styles.quotaTestActions}>
+                    <Button
+                      type="button"
+                      size="small"
+                      variant="primary"
+                      icon={TestTube2}
+                      loading={quotaTestLoading}
+                      onClick={() => void handleTestQuota()}
+                    >
+                      {quotaTestLoading ? t("ruleForm.quotaTesting") : t("ruleForm.quotaTest")}
+                    </Button>
+                    <p className={styles.fieldHint}>{t("ruleForm.quotaTestHint")}</p>
+                  </div>
+
+                  {quotaTestResult && (
+                    <div
+                      className={`${styles.quotaTestResult} ${quotaTestResult.ok ? styles.quotaTestResultSuccess : styles.quotaTestResultError}`}
+                    >
+                      <div className={styles.quotaTestHeader}>
+                        {quotaTestResult.ok ? (
+                          <CheckCircle size={16} className={styles.quotaTestIconSuccess} />
+                        ) : (
+                          <AlertCircle size={16} className={styles.quotaTestIconError} />
+                        )}
+                        <strong>
+                          {quotaTestResult.ok
+                            ? t("ruleForm.quotaTestSuccess")
+                            : t("ruleForm.quotaTestFailed")}
+                        </strong>
+                      </div>
+
+                      {quotaTestDirty && (
+                        <p className={styles.quotaTestDirty}>{t("ruleForm.quotaTestDirty")}</p>
+                      )}
+
+                      {quotaTestResult.message && (
+                        <p className={styles.quotaTestMessage}>{quotaTestResult.message}</p>
+                      )}
+
+                      {quotaTestResult.snapshot && (
+                        <div className={styles.quotaTestGrid}>
+                          <div>
+                            <span>{t("ruleForm.quotaTestStatus")}</span>
+                            <strong>{resolveQuotaTestStatusText(quotaTestResult.snapshot)}</strong>
+                          </div>
+                          <div>
+                            <span>{t("ruleForm.quotaRemainingPath")}</span>
+                            <strong>{formatQuotaValue(quotaTestResult.snapshot.remaining)}</strong>
+                          </div>
+                          <div>
+                            <span>{t("ruleForm.quotaTotalPath")}</span>
+                            <strong>{formatQuotaValue(quotaTestResult.snapshot.total)}</strong>
+                          </div>
+                          <div>
+                            <span>{t("ruleForm.quotaUnitPath")}</span>
+                            <strong>{quotaTestResult.snapshot.unit || "-"}</strong>
+                          </div>
+                          <div>
+                            <span>{t("ruleForm.quotaTestPercent")}</span>
+                            <strong>
+                              {quotaTestResult.snapshot.percent === null ||
+                              quotaTestResult.snapshot.percent === undefined
+                                ? "-"
+                                : `${quotaTestResult.snapshot.percent.toFixed(2)}%`}
+                            </strong>
+                          </div>
+                          <div>
+                            <span>{t("ruleForm.quotaResetAtPath")}</span>
+                            <strong>{quotaTestResult.snapshot.resetAt || "-"}</strong>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className={styles.quotaRawSection}>
+                        <p className={styles.quotaRawTitle}>{t("ruleForm.quotaTestRawResponse")}</p>
+                        <JsonTreeView
+                          value={quotaTestResult.rawResponse}
+                          emptyText={t("logs.emptyValue")}
+                          resetKey={`${quotaTestFingerprint ?? ""}-${quotaTestResult.snapshot?.fetchedAt ?? ""}`}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </section>

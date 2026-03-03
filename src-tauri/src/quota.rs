@@ -1,11 +1,76 @@
-use crate::models::{Group, ProxyConfig, QuotaStatus, Rule, RuleQuotaSnapshot};
+use crate::models::{Group, ProxyConfig, QuotaStatus, Rule, RuleQuotaSnapshot, RuleQuotaTestResult};
 use chrono::Utc;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, Method};
-use serde_json::Value;
-use std::time::Duration;
+use serde_json::{json, Value};
+use std::time::{Duration, Instant};
 
 const QUOTA_TIMEOUT_SECONDS: u64 = 12;
+const QUOTA_LOG_BODY_MAX_CHARS: usize = 12 * 1024;
+
+struct FetchRuleQuotaResult {
+    snapshot: RuleQuotaSnapshot,
+    raw_response: Option<Value>,
+}
+
+fn quota_dev_log_enabled() -> bool {
+    cfg!(debug_assertions)
+}
+
+fn clip_for_log(raw: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (idx, ch) in raw.chars().enumerate() {
+        if idx >= max_chars {
+            out.push_str("...(truncated)");
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn headers_for_log(headers: &HeaderMap) -> Value {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for (key, value) in headers {
+        let key_text = key.as_str().to_string();
+        let value_text = value
+            .to_str()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|_| "<non-utf8>".to_string());
+        pairs.push((key_text, value_text));
+    }
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut map = serde_json::Map::new();
+    for (k, v) in pairs {
+        map.insert(k, Value::String(v));
+    }
+    Value::Object(map)
+}
+
+fn log_quota_event(group: &Group, rule: &Rule, stage: &str, details: Value) {
+    if !quota_dev_log_enabled() {
+        return;
+    }
+    let pretty = serde_json::to_string_pretty(&details).unwrap_or_else(|_| details.to_string());
+    eprintln!(
+        "[quota][{stage}] group_id={} group_name={} rule_id={} rule_name={} provider={}\n{}",
+        group.id,
+        group.name,
+        rule.id,
+        rule.name,
+        rule.quota.provider,
+        pretty
+    );
+}
+
+fn body_to_value_for_debug(raw: &str) -> Value {
+    if raw.trim().is_empty() {
+        Value::String("<empty>".to_string())
+    } else {
+        serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.to_string()))
+    }
+}
 
 pub async fn fetch_rule_quota(
     config: &ProxyConfig,
@@ -23,7 +88,7 @@ pub async fn fetch_rule_quota(
         .find(|r| r.id == rule_id)
         .ok_or_else(|| format!("rule not found: {rule_id}"))?;
 
-    Ok(fetch_single_rule_quota(group, rule).await)
+    Ok(fetch_single_rule_quota(group, rule, false).await.snapshot)
 }
 
 pub async fn fetch_group_quotas(
@@ -38,24 +103,85 @@ pub async fn fetch_group_quotas(
 
     let mut out = Vec::with_capacity(group.rules.len());
     for rule in &group.rules {
-        out.push(fetch_single_rule_quota(group, rule).await);
+        out.push(fetch_single_rule_quota(group, rule, false).await.snapshot);
     }
     Ok(out)
 }
 
-async fn fetch_single_rule_quota(group: &Group, rule: &Rule) -> RuleQuotaSnapshot {
+pub async fn test_rule_quota_draft(group: &Group, rule: &Rule) -> RuleQuotaTestResult {
+    let result = fetch_single_rule_quota(group, rule, true).await;
+    let snapshot = result.snapshot;
+    let ok = matches!(
+        snapshot.status,
+        QuotaStatus::Ok | QuotaStatus::Low | QuotaStatus::Empty
+    );
+    let message = if ok {
+        None
+    } else {
+        snapshot
+            .message
+            .clone()
+            .or_else(|| Some(default_test_failure_message(&snapshot.status)))
+    };
+
+    RuleQuotaTestResult {
+        ok,
+        snapshot: Some(snapshot),
+        raw_response: result.raw_response,
+        message,
+    }
+}
+
+fn default_test_failure_message(status: &QuotaStatus) -> String {
+    match status {
+        QuotaStatus::Unknown => "remaining quota mapping returned empty result".to_string(),
+        QuotaStatus::Unsupported => "quota query disabled".to_string(),
+        QuotaStatus::Error => "quota query failed".to_string(),
+        _ => "quota query failed".to_string(),
+    }
+}
+
+async fn fetch_single_rule_quota(
+    group: &Group,
+    rule: &Rule,
+    include_raw_response: bool,
+) -> FetchRuleQuotaResult {
+    let started_at = Instant::now();
     let mut snapshot = new_snapshot(group, rule);
     if !rule.quota.enabled {
         snapshot.status = QuotaStatus::Unsupported;
         snapshot.message = Some("quota query disabled".to_string());
-        return snapshot;
+        log_quota_event(
+            group,
+            rule,
+            "skip",
+            json!({
+                "message": "quota query disabled",
+                "enabled": false
+            }),
+        );
+        return FetchRuleQuotaResult {
+            snapshot,
+            raw_response: None,
+        };
     }
 
     let endpoint = render_template(group, rule, &rule.quota.endpoint);
     if endpoint.trim().is_empty() {
         snapshot.status = QuotaStatus::Error;
         snapshot.message = Some("quota endpoint is empty".to_string());
-        return snapshot;
+        log_quota_event(
+            group,
+            rule,
+            "error",
+            json!({
+                "message": "quota endpoint is empty"
+            }),
+        );
+        return FetchRuleQuotaResult {
+            snapshot,
+            raw_response: None,
+        };
     }
 
     let client = match Client::builder()
@@ -66,7 +192,19 @@ async fn fetch_single_rule_quota(group: &Group, rule: &Rule) -> RuleQuotaSnapsho
         Err(error) => {
             snapshot.status = QuotaStatus::Error;
             snapshot.message = Some(format!("create quota http client failed: {error}"));
-            return snapshot;
+            log_quota_event(
+                group,
+                rule,
+                "error",
+                json!({
+                    "message": "create quota http client failed",
+                    "error": error.to_string()
+                }),
+            );
+            return FetchRuleQuotaResult {
+                snapshot,
+                raw_response: None,
+            };
         }
     };
 
@@ -76,7 +214,19 @@ async fn fetch_single_rule_quota(group: &Group, rule: &Rule) -> RuleQuotaSnapsho
         Err(_) => {
             snapshot.status = QuotaStatus::Error;
             snapshot.message = Some(format!("invalid quota method: {method_name}"));
-            return snapshot;
+            log_quota_event(
+                group,
+                rule,
+                "error",
+                json!({
+                    "message": "invalid quota method",
+                    "method": method_name
+                }),
+            );
+            return FetchRuleQuotaResult {
+                snapshot,
+                raw_response: None,
+            };
         }
     };
 
@@ -85,11 +235,36 @@ async fn fetch_single_rule_quota(group: &Group, rule: &Rule) -> RuleQuotaSnapsho
         Err(error) => {
             snapshot.status = QuotaStatus::Error;
             snapshot.message = Some(error);
-            return snapshot;
+            log_quota_event(
+                group,
+                rule,
+                "error",
+                json!({
+                    "message": "build quota headers failed",
+                    "error": snapshot.message.clone()
+                }),
+            );
+            return FetchRuleQuotaResult {
+                snapshot,
+                raw_response: None,
+            };
         }
     };
 
-    let mut request = client.request(method, endpoint);
+    log_quota_event(
+        group,
+        rule,
+        "start",
+        json!({
+            "message": "quota query start",
+            "requestAddress": endpoint,
+            "requestMethod": method_name,
+            "requestHeaders": headers_for_log(&headers),
+            "requestBody": "<empty>"
+        }),
+    );
+
+    let mut request = client.request(method, endpoint.clone());
     if !headers.is_empty() {
         request = request.headers(headers);
     }
@@ -99,37 +274,120 @@ async fn fetch_single_rule_quota(group: &Group, rule: &Rule) -> RuleQuotaSnapsho
         Err(error) => {
             snapshot.status = QuotaStatus::Error;
             snapshot.message = Some(format!("quota request failed: {error}"));
-            return snapshot;
+            log_quota_event(
+                group,
+                rule,
+                "error",
+                json!({
+                    "message": "quota request failed",
+                    "requestAddress": endpoint,
+                    "requestMethod": method_name,
+                    "elapsedMs": started_at.elapsed().as_millis(),
+                    "error": error.to_string()
+                }),
+            );
+            return FetchRuleQuotaResult {
+                snapshot,
+                raw_response: None,
+            };
         }
     };
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+    let status = response.status();
+    let response_headers = response.headers().clone();
+    let response_body = response.text().await.unwrap_or_default();
+
+    log_quota_event(
+        group,
+        rule,
+        "response",
+        json!({
+            "requestAddress": endpoint,
+            "requestMethod": method_name,
+            "httpStatus": status.as_u16(),
+            "elapsedMs": started_at.elapsed().as_millis(),
+            "responseHeaders": headers_for_log(&response_headers),
+            "responseBody": body_to_value_for_debug(&clip_for_log(&response_body, QUOTA_LOG_BODY_MAX_CHARS))
+        }),
+    );
+
+    let raw_response = if include_raw_response {
+        Some(body_to_value_for_debug(&response_body))
+    } else {
+        None
+    };
+
+    if !status.is_success() {
         snapshot.status = QuotaStatus::Error;
         snapshot.message = Some(format!(
             "quota endpoint returned HTTP {}{}",
             status.as_u16(),
-            render_body_suffix(&body)
+            render_body_suffix(&response_body)
         ));
-        return snapshot;
+        return FetchRuleQuotaResult {
+            snapshot,
+            raw_response,
+        };
     }
 
-    let payload = match response.json::<Value>().await {
+    let payload = match serde_json::from_str::<Value>(&response_body) {
         Ok(payload) => payload,
         Err(error) => {
             snapshot.status = QuotaStatus::Error;
             snapshot.message = Some(format!("invalid quota response JSON: {error}"));
-            return snapshot;
+            log_quota_event(
+                group,
+                rule,
+                "error",
+                json!({
+                    "message": "invalid quota response JSON",
+                    "requestAddress": endpoint,
+                    "requestMethod": method_name,
+                    "error": error.to_string(),
+                    "responseBody": clip_for_log(&response_body, QUOTA_LOG_BODY_MAX_CHARS)
+                }),
+            );
+            return FetchRuleQuotaResult {
+                snapshot,
+                raw_response,
+            };
         }
     };
 
     match map_payload_to_snapshot(&mut snapshot, rule, &payload) {
-        Ok(()) => snapshot,
+        Ok(()) => {
+            log_quota_event(
+                group,
+                rule,
+                "finish",
+                json!({
+                    "status": "ok",
+                    "snapshot": snapshot.clone(),
+                    "elapsedMs": started_at.elapsed().as_millis()
+                }),
+            );
+            FetchRuleQuotaResult {
+                snapshot,
+                raw_response,
+            }
+        }
         Err(error) => {
             snapshot.status = QuotaStatus::Error;
             snapshot.message = Some(error);
-            snapshot
+            log_quota_event(
+                group,
+                rule,
+                "error",
+                json!({
+                    "message": "map payload to snapshot failed",
+                    "snapshot": snapshot.clone(),
+                    "elapsedMs": started_at.elapsed().as_millis()
+                }),
+            );
+            FetchRuleQuotaResult {
+                snapshot,
+                raw_response,
+            }
         }
     }
 }

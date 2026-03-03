@@ -1,0 +1,79 @@
+.treeContainer {
+  background: color-mix(in srgb, var(--surface) 92%, #0f172a 8%);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, #4b5563 25%);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  overflow: auto;
+}
+
+.jsonRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 18px;
+}
+
+.toggleButton {
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+}
+
+.toggleButton:hover {
+  color: var(--text-primary);
+}
+
+.toggleSpacer {
+  width: 14px;
+  display: inline-block;
+}
+
+.nodeKey {
+  color: color-mix(in srgb, var(--accent) 70%, #22d3ee 30%);
+}
+
+.nodeColon {
+  color: var(--text-tertiary);
+}
+
+.nodeSummary {
+  color: var(--text-secondary);
+}
+
+.nodeChildren {
+  margin-top: 2px;
+}
+
+.emptyNode {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.valueString {
+  color: #22c55e;
+}
+
+.valueNumber {
+  color: #f59e0b;
+}
+
+.valueBoolean {
+  color: #38bdf8;
+}
+
+.valueNull {
+  color: #94a3b8;
+}
+
+.valueFallback {
+  color: var(--text-primary);
+}

@@ -55,6 +55,13 @@ export interface RuleQuotaSnapshot {
   message?: string | null
 }
 
+export interface RuleQuotaTestResult {
+  ok: boolean
+  snapshot?: RuleQuotaSnapshot | null
+  rawResponse?: unknown | null
+  message?: string | null
+}
+
 /**
  * Proxy rule interface
  * Defines a single translation rule between API formats

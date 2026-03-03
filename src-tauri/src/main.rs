@@ -458,6 +458,41 @@ async fn quota_get_group(
     quota::fetch_group_quotas(&config, &group_id).await
 }
 
+#[tauri::command]
+async fn quota_test_draft(
+    state: State<'_, SharedState>,
+    group_id: String,
+    rule_name: String,
+    rule_token: String,
+    rule_api_address: String,
+    rule_default_model: String,
+    quota: models::RuleQuotaConfig,
+) -> Result<models::RuleQuotaTestResult, String> {
+    let config = state.config_store.get();
+    let group = config
+        .groups
+        .iter()
+        .find(|g| g.id == group_id)
+        .ok_or_else(|| format!("group not found: {group_id}"))?;
+
+    let draft_rule = models::Rule {
+        id: "draft-rule".to_string(),
+        name: if rule_name.trim().is_empty() {
+            "Draft Rule".to_string()
+        } else {
+            rule_name
+        },
+        protocol: models::RuleProtocol::Openai,
+        token: rule_token,
+        api_address: rule_api_address,
+        default_model: rule_default_model,
+        model_mappings: std::collections::HashMap::new(),
+        quota,
+    };
+
+    Ok(quota::test_rule_quota_draft(group, &draft_rule).await)
+}
+
 fn create_tray(app: &AppHandle) -> Result<(), String> {
     let show_hide = MenuItem::with_id(app, "toggle-window", "Show/Hide AI Open Router", true, None::<&str>)
         .map_err(|e| format!("create tray menu failed: {e}"))?;
@@ -571,6 +606,7 @@ async fn main() {
             let _ = stats_store.initialize();
             let runtime = ProxyRuntime::new(
                 config_store.shared_config(),
+                config_store.shared_revision(),
                 log_store.clone(),
                 stats_store.clone(),
             )?;
@@ -634,6 +670,7 @@ async fn main() {
             logs_stats_clear,
             quota_get_rule,
             quota_get_group,
+            quota_test_draft,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
