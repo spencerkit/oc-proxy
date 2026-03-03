@@ -3,14 +3,16 @@ use super::observability::{
     proxy_error_response, response_headers_json, response_headers_sse, StreamTokenAccumulator,
 };
 use super::routing::{
-    assert_rule_ready, build_rule_headers, detect_entry_protocol, protocol_from_entry,
-    refresh_route_index_if_needed, resolve_target_model, resolve_upstream_path,
-    resolve_upstream_url, ParsedPath, PathEntry, RouteResolution,
+    assert_rule_ready, build_rule_headers, detect_entry_protocol, refresh_route_index_if_needed,
+    resolve_target_model, resolve_upstream_path, resolve_upstream_url, EntryEndpoint, ParsedPath,
+    PathEntry, RouteResolution,
 };
 use super::{
     ServiceState, MAX_REQUEST_BODY_BYTES, MAX_STREAM_LOG_BODY_BYTES, NON_STREAM_REQUEST_TIMEOUT_MS,
     STREAM_REQUEST_TIMEOUT_MS,
 };
+use crate::mappers::{map_request_by_surface, map_response_by_surface, MapperSurface};
+use crate::models::RuleProtocol;
 use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode};
@@ -125,10 +127,15 @@ pub(super) async fn handle_proxy_request(
         return proxy_error_response(500, "proxy_error", &msg, None, "proxy", &trace_id);
     }
 
-    let (auth_enabled, expected_auth, capture_body) = match state.config.read() {
+    let (auth_enabled, expected_auth, capture_body, strict_mode) = match state.config.read() {
         Ok(cfg) => {
             let expected = format!("Bearer {}", cfg.server.local_bearer_token);
-            (cfg.server.auth_enabled, expected, cfg.logging.capture_body)
+            (
+                cfg.server.auth_enabled,
+                expected,
+                cfg.logging.capture_body,
+                cfg.compat.strict_mode,
+            )
         }
         Err(_) => {
             state.metrics.increment_error();
@@ -281,8 +288,8 @@ pub(super) async fn handle_proxy_request(
         .and_then(|v| v.as_str())
         .unwrap_or(&active_route.rule.default_model)
         .to_string();
-    let downstream_protocol = protocol_from_entry(&entry);
-    let upstream_path = resolve_upstream_path(&downstream_protocol);
+    let target_protocol = active_route.rule.protocol.clone();
+    let upstream_path = resolve_upstream_path(&target_protocol);
     let upstream_url = match resolve_upstream_url(&active_route.rule.api_address, upstream_path) {
         Ok(v) => v,
         Err(msg) => {
@@ -291,7 +298,13 @@ pub(super) async fn handle_proxy_request(
         }
     };
 
-    let upstream_body = match build_upstream_body(&request_body, &target_model) {
+    let upstream_body = match build_upstream_body(
+        &entry,
+        &target_protocol,
+        &request_body,
+        strict_mode,
+        &target_model,
+    ) {
         Ok(v) => v,
         Err(msg) => {
             state.metrics.increment_error();
@@ -305,7 +318,7 @@ pub(super) async fn handle_proxy_request(
         .unwrap_or(false);
     state.metrics.increment_request(stream);
 
-    let upstream_headers = build_rule_headers(&downstream_protocol, &active_route.rule);
+    let upstream_headers = build_rule_headers(&target_protocol, &active_route.rule);
     let request_timeout_ms = if stream {
         STREAM_REQUEST_TIMEOUT_MS
     } else {
@@ -530,12 +543,7 @@ pub(super) async fn handle_proxy_request(
         );
     }
 
-    let output_body = map_response_body(
-        &entry,
-        &downstream_protocol,
-        &upstream_json,
-        &requested_model,
-    );
+    let output_body = map_response_body(&entry, &target_protocol, &upstream_json, &requested_model);
 
     let token_usage =
         extract_token_usage(&upstream_json).or_else(|| extract_token_usage(&output_body));
@@ -578,25 +586,74 @@ pub(super) async fn handle_proxy_request(
 }
 
 pub(super) fn build_upstream_body(
+    entry: &PathEntry,
+    target_protocol: &RuleProtocol,
     request_body: &Value,
+    strict_mode: bool,
     target_model: &str,
 ) -> Result<Value, String> {
+    let source_surface = surface_from_entry(entry);
+    let target_surface = surface_from_rule_protocol(target_protocol);
+
+    if source_surface == target_surface {
+        return Ok(passthrough_with_model(request_body, target_model));
+    }
+
+    let mut mapped = map_request_by_surface(
+        source_surface,
+        target_surface,
+        request_body,
+        strict_mode,
+        target_model,
+    )?;
+    if mapped.is_object() {
+        mapped["model"] = json!(target_model);
+        // Keep cross-protocol behavior stable until stream bridge is implemented.
+        mapped["stream"] = json!(false);
+    }
+    Ok(mapped)
+}
+
+fn map_response_body(
+    entry: &PathEntry,
+    target_protocol: &RuleProtocol,
+    upstream_json: &Value,
+    request_model: &str,
+) -> Value {
+    let source_surface = surface_from_rule_protocol(target_protocol);
+    let target_surface = surface_from_entry(entry);
+
+    if source_surface == target_surface {
+        return upstream_json.clone();
+    }
+
+    map_response_by_surface(source_surface, target_surface, upstream_json, request_model)
+}
+
+fn surface_from_entry(entry: &PathEntry) -> MapperSurface {
+    match entry.endpoint {
+        EntryEndpoint::Messages => MapperSurface::AnthropicMessages,
+        EntryEndpoint::ChatCompletions => MapperSurface::OpenaiChatCompletions,
+        EntryEndpoint::Responses => MapperSurface::OpenaiResponses,
+    }
+}
+
+fn surface_from_rule_protocol(protocol: &RuleProtocol) -> MapperSurface {
+    match protocol {
+        RuleProtocol::Anthropic => MapperSurface::AnthropicMessages,
+        RuleProtocol::Openai => MapperSurface::OpenaiResponses,
+        RuleProtocol::OpenaiCompletion => MapperSurface::OpenaiChatCompletions,
+    }
+}
+
+fn passthrough_with_model(request_body: &Value, target_model: &str) -> Value {
     let mut with_model = if request_body.is_object() {
         request_body.clone()
     } else {
         json!({})
     };
     with_model["model"] = json!(target_model);
-    Ok(with_model)
-}
-
-fn map_response_body(
-    _entry: &PathEntry,
-    _downstream: &crate::models::RuleProtocol,
-    upstream_json: &Value,
-    _request_model: &str,
-) -> Value {
-    upstream_json.clone()
+    with_model
 }
 
 async fn reject_and_log(

@@ -88,14 +88,6 @@ pub(super) fn resolve_upstream_path(target_protocol: &RuleProtocol) -> &'static 
     }
 }
 
-pub(super) fn protocol_from_entry(entry: &PathEntry) -> RuleProtocol {
-    match entry.endpoint {
-        EntryEndpoint::Responses => RuleProtocol::Openai,
-        EntryEndpoint::ChatCompletions => RuleProtocol::OpenaiCompletion,
-        EntryEndpoint::Messages => RuleProtocol::Anthropic,
-    }
-}
-
 pub(super) fn resolve_upstream_url(
     api_address: &str,
     default_path: &str,

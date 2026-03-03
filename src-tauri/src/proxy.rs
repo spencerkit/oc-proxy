@@ -238,7 +238,9 @@ impl ProxyRuntime {
 mod tests {
     use super::observability::{extract_token_usage, StreamTokenAccumulator};
     use super::pipeline::build_upstream_body;
-    use super::routing::{resolve_target_model, resolve_upstream_path};
+    use super::routing::{
+        resolve_target_model, resolve_upstream_path, EntryEndpoint, EntryProtocol, PathEntry,
+    };
     use crate::models::{default_rule_quota_config, Group, Rule, RuleProtocol};
     use serde_json::{json, Value};
     use std::collections::HashMap;
@@ -392,17 +394,48 @@ mod tests {
 
     #[test]
     fn build_upstream_body_passes_through_request_shape_with_target_model() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Openai,
+            endpoint: EntryEndpoint::Responses,
+        };
         let out = build_upstream_body(
+            &entry,
+            &RuleProtocol::Openai,
             &json!({
                 "model": "gpt-4.1",
                 "input": "hello from responses"
             }),
+            false,
             "gpt-4.1",
         )
         .expect("mapping should succeed");
 
         assert_eq!(out["model"], "gpt-4.1");
         assert_eq!(out["input"], "hello from responses");
+    }
+
+    #[test]
+    fn build_upstream_body_forces_non_stream_on_cross_protocol_mapping() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Anthropic,
+            endpoint: EntryEndpoint::Messages,
+        };
+        let out = build_upstream_body(
+            &entry,
+            &RuleProtocol::Openai,
+            &json!({
+                "model": "claude-3-5-sonnet",
+                "stream": true,
+                "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }]
+            }),
+            true,
+            "gpt-4.1",
+        )
+        .expect("mapping should succeed");
+
+        assert_eq!(out["model"], "gpt-4.1");
+        assert_eq!(out["stream"], false);
+        assert_eq!(out["input"][0]["type"], "message");
     }
 
     #[test]
