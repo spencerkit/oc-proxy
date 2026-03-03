@@ -11,11 +11,11 @@ use super::routing::{
     resolve_target_model, resolve_upstream_path, resolve_upstream_url, EntryEndpoint, ParsedPath,
     PathEntry, RouteResolution,
 };
+use super::stream_bridge::{create_stream_bridge, map_non_stream_response_via_bridge};
 use super::{
     ServiceState, MAX_REQUEST_BODY_BYTES, MAX_STREAM_LOG_BODY_BYTES, NON_STREAM_REQUEST_TIMEOUT_MS,
     STREAM_REQUEST_TIMEOUT_MS,
 };
-use super::stream_bridge::create_stream_bridge;
 use crate::mappers::{map_request_by_surface, map_response_by_surface, MapperSurface};
 use crate::models::RuleProtocol;
 use axum::body::{to_bytes, Body, Bytes};
@@ -849,6 +849,15 @@ fn map_response_body(
 
     if source_surface == target_surface {
         return upstream_json.clone();
+    }
+
+    if let Some(mapped) = map_non_stream_response_via_bridge(
+        source_surface,
+        target_surface,
+        upstream_json,
+        request_model,
+    ) {
+        return mapped;
     }
 
     map_response_by_surface(source_surface, target_surface, upstream_json, request_model)
