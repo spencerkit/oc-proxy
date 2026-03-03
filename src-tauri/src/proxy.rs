@@ -239,7 +239,8 @@ mod tests {
     use super::observability::{extract_token_usage, StreamTokenAccumulator};
     use super::pipeline::build_upstream_body;
     use super::routing::{
-        resolve_target_model, resolve_upstream_path, EntryEndpoint, EntryProtocol, PathEntry,
+        detect_entry_protocol, resolve_target_model, resolve_upstream_path, EntryEndpoint,
+        EntryProtocol, PathEntry,
     };
     use crate::models::{default_rule_quota_config, Group, Rule, RuleProtocol};
     use serde_json::{json, Value};
@@ -439,6 +440,16 @@ mod tests {
     }
 
     #[test]
+    fn detect_entry_protocol_supports_v1_and_non_v1_downstream_paths() {
+        assert!(detect_entry_protocol("/chat/completions").is_some());
+        assert!(detect_entry_protocol("/responses").is_some());
+        assert!(detect_entry_protocol("/messages").is_some());
+        assert!(detect_entry_protocol("/v1/chat/completions").is_some());
+        assert!(detect_entry_protocol("/v1/responses").is_some());
+        assert!(detect_entry_protocol("/v1/messages").is_some());
+    }
+
+    #[test]
     fn resolve_upstream_path_uses_rule_protocol_enum_directly() {
         assert_eq!(
             resolve_upstream_path(&RuleProtocol::Anthropic),
@@ -446,11 +457,11 @@ mod tests {
         );
         assert_eq!(
             resolve_upstream_path(&RuleProtocol::Openai),
-            "/v1/responses"
+            "/responses"
         );
         assert_eq!(
             resolve_upstream_path(&RuleProtocol::OpenaiCompletion),
-            "/v1/chat/completions"
+            "/chat/completions"
         );
     }
 

@@ -294,6 +294,34 @@ pub(super) async fn handle_proxy_request(
         Ok(v) => v,
         Err(msg) => {
             state.metrics.increment_error();
+            finalize_log(
+                &state,
+                &trace_id,
+                &method,
+                &parsed_path,
+                &active_route.group_name,
+                &active_route.rule,
+                &entry,
+                Some(&requested_model),
+                Some(&target_model),
+                None,
+                Some(request_body.clone()),
+                None,
+                Some(json!({
+                    "error": {
+                        "code": "proxy_error",
+                        "message": msg.clone(),
+                    }
+                })),
+                Some(400),
+                None,
+                None,
+                Some(response_headers_json(&trace_id)),
+                None,
+                started.elapsed().as_millis() as u64,
+                "error",
+                capture_body,
+            );
             return proxy_error_response(400, "proxy_error", &msg, None, "proxy", &trace_id);
         }
     };
@@ -308,6 +336,34 @@ pub(super) async fn handle_proxy_request(
         Ok(v) => v,
         Err(msg) => {
             state.metrics.increment_error();
+            finalize_log(
+                &state,
+                &trace_id,
+                &method,
+                &parsed_path,
+                &active_route.group_name,
+                &active_route.rule,
+                &entry,
+                Some(&requested_model),
+                Some(&target_model),
+                Some(&upstream_url),
+                Some(request_body.clone()),
+                None,
+                Some(json!({
+                    "error": {
+                        "code": "proxy_error",
+                        "message": msg.clone(),
+                    }
+                })),
+                Some(422),
+                None,
+                None,
+                Some(response_headers_json(&trace_id)),
+                None,
+                started.elapsed().as_millis() as u64,
+                "error",
+                capture_body,
+            );
             return proxy_error_response(422, "proxy_error", &msg, None, "proxy", &trace_id);
         }
     };
@@ -342,15 +398,37 @@ pub(super) async fn handle_proxy_request(
     {
         Ok(r) => r,
         Err(err) => {
+            let err_msg = format!("Upstream request failed: {err}");
             state.metrics.increment_error();
-            return proxy_error_response(
-                502,
-                "upstream_error",
-                &format!("Upstream request failed: {err}"),
-                None,
-                "proxy",
+            finalize_log(
+                &state,
                 &trace_id,
+                &method,
+                &parsed_path,
+                &active_route.group_name,
+                &active_route.rule,
+                &entry,
+                Some(&requested_model),
+                Some(&target_model),
+                Some(&upstream_url),
+                Some(request_body.clone()),
+                Some(upstream_body.clone()),
+                Some(json!({
+                    "error": {
+                        "code": "upstream_error",
+                        "message": err_msg.clone(),
+                    }
+                })),
+                Some(502),
+                None,
+                None,
+                Some(response_headers_json(&trace_id)),
+                None,
+                started.elapsed().as_millis() as u64,
+                "error",
+                capture_body,
             );
+            return proxy_error_response(502, "upstream_error", &err_msg, None, "proxy", &trace_id);
         }
     };
 
@@ -495,11 +573,40 @@ pub(super) async fn handle_proxy_request(
     let upstream_text = match upstream_resp.text().await {
         Ok(v) => v,
         Err(err) => {
+            let err_msg = format!("Failed to read upstream response: {err}");
             state.metrics.increment_error();
+            finalize_log(
+                &state,
+                &trace_id,
+                &method,
+                &parsed_path,
+                &active_route.group_name,
+                &active_route.rule,
+                &entry,
+                Some(&requested_model),
+                Some(&target_model),
+                Some(&upstream_url),
+                Some(request_body.clone()),
+                Some(upstream_body.clone()),
+                Some(json!({
+                    "error": {
+                        "code": "upstream_error",
+                        "message": err_msg.clone(),
+                    }
+                })),
+                Some(502),
+                Some(upstream_status),
+                Some(upstream_headers_plain.clone()),
+                Some(response_headers_json(&trace_id)),
+                None,
+                started.elapsed().as_millis() as u64,
+                "error",
+                capture_body,
+            );
             return proxy_error_response(
                 502,
                 "upstream_error",
-                &format!("Failed to read upstream response: {err}"),
+                &err_msg,
                 Some(upstream_status),
                 "proxy",
                 &trace_id,
@@ -510,14 +617,44 @@ pub(super) async fn handle_proxy_request(
     let upstream_json = match serde_json::from_str::<Value>(&upstream_text) {
         Ok(v) => v,
         Err(_) => {
+            let err_msg = format!(
+                "Upstream returned non-JSON response: {}",
+                upstream_text.chars().take(200).collect::<String>()
+            );
             state.metrics.increment_error();
+            finalize_log(
+                &state,
+                &trace_id,
+                &method,
+                &parsed_path,
+                &active_route.group_name,
+                &active_route.rule,
+                &entry,
+                Some(&requested_model),
+                Some(&target_model),
+                Some(&upstream_url),
+                Some(request_body.clone()),
+                Some(upstream_body.clone()),
+                Some(json!({
+                    "error": {
+                        "code": "upstream_error",
+                        "message": err_msg.clone(),
+                    },
+                    "upstream_raw": upstream_text.chars().take(200).collect::<String>(),
+                })),
+                Some(502),
+                Some(upstream_status),
+                Some(upstream_headers_plain.clone()),
+                Some(response_headers_json(&trace_id)),
+                None,
+                started.elapsed().as_millis() as u64,
+                "error",
+                capture_body,
+            );
             return proxy_error_response(
                 502,
                 "upstream_error",
-                &format!(
-                    "Upstream returned non-JSON response: {}",
-                    upstream_text.chars().take(200).collect::<String>()
-                ),
+                &err_msg,
                 Some(upstream_status),
                 "proxy",
                 &trace_id,
@@ -533,6 +670,29 @@ pub(super) async fn handle_proxy_request(
             .map(|v| v.to_string())
             .unwrap_or_else(|| format!("Upstream returned HTTP {upstream_status}"));
         state.metrics.increment_error();
+        finalize_log(
+            &state,
+            &trace_id,
+            &method,
+            &parsed_path,
+            &active_route.group_name,
+            &active_route.rule,
+            &entry,
+            Some(&requested_model),
+            Some(&target_model),
+            Some(&upstream_url),
+            Some(request_body.clone()),
+            Some(upstream_body.clone()),
+            Some(upstream_json.clone()),
+            Some(upstream_status),
+            Some(upstream_status),
+            Some(upstream_headers_plain.clone()),
+            Some(response_headers_json(&trace_id)),
+            extract_token_usage(&upstream_json),
+            started.elapsed().as_millis() as u64,
+            "error",
+            capture_body,
+        );
         return proxy_error_response(
             upstream_status,
             "upstream_error",

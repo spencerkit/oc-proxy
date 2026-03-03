@@ -83,8 +83,8 @@ pub(super) fn detect_entry_protocol(suffix: &str) -> Option<PathEntry> {
 pub(super) fn resolve_upstream_path(target_protocol: &RuleProtocol) -> &'static str {
     match target_protocol {
         RuleProtocol::Anthropic => "/v1/messages",
-        RuleProtocol::Openai => "/v1/responses",
-        RuleProtocol::OpenaiCompletion => "/v1/chat/completions",
+        RuleProtocol::Openai => "/responses",
+        RuleProtocol::OpenaiCompletion => "/chat/completions",
     }
 }
 
