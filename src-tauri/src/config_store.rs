@@ -1,3 +1,4 @@
+use crate::config::migrator::migrate_config;
 use crate::config::schema::normalize_config;
 use crate::models::{default_config, validate_config, ProxyConfig};
 use std::path::{Path, PathBuf};
@@ -38,7 +39,8 @@ impl ConfigStore {
 
         let parsed = serde_json::from_str::<serde_json::Value>(&raw)
             .unwrap_or_else(|_| serde_json::json!({}));
-        let normalized = normalize_config(parsed)?;
+        let migrated = migrate_config(parsed)?;
+        let normalized = normalize_config(migrated)?;
 
         if let Err(err) = validate_config(&normalized) {
             let defaults = default_config();
@@ -47,6 +49,7 @@ impl ConfigStore {
             return Err(format!("config invalid, reset to default: {err}"));
         }
 
+        self.write_file(&normalized)?;
         self.set_in_memory(normalized);
         Ok(())
     }
@@ -56,7 +59,8 @@ impl ConfigStore {
     }
 
     pub fn save(&self, next_config: serde_json::Value) -> Result<ProxyConfig, String> {
-        let normalized = normalize_config(next_config)?;
+        let migrated = migrate_config(next_config)?;
+        let normalized = normalize_config(migrated)?;
         validate_config(&normalized)?;
         self.write_file(&normalized)?;
         self.set_in_memory(normalized.clone());

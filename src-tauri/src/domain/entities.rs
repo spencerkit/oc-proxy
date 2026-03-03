@@ -176,6 +176,8 @@ pub struct Group {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyConfig {
+    #[serde(default = "crate::config::schema::default_config_version")]
+    pub config_version: u32,
     pub server: ServerConfig,
     pub compat: CompatConfig,
     pub logging: LoggingConfig,

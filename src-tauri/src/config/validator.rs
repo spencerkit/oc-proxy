@@ -1,6 +1,10 @@
+use crate::config::migrator::CURRENT_CONFIG_VERSION;
 use crate::domain::entities::ProxyConfig;
 
 pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
+    if config.config_version != CURRENT_CONFIG_VERSION {
+        return Err(format!("configVersion must be {CURRENT_CONFIG_VERSION}"));
+    }
     if config.server.host.trim().is_empty() {
         return Err("server.host must be non-empty".into());
     }
@@ -113,5 +117,14 @@ mod tests {
 
         let err = validate_config(&cfg).expect_err("validation should fail");
         assert!(err.contains("ui.theme"));
+    }
+
+    #[test]
+    fn config_version_must_match_current() {
+        let mut cfg = default_config();
+        cfg.config_version += 1;
+
+        let err = validate_config(&cfg).expect_err("validation should fail");
+        assert!(err.contains("configVersion"));
     }
 }

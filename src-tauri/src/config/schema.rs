@@ -1,7 +1,12 @@
+use crate::config::migrator::CURRENT_CONFIG_VERSION;
 use crate::domain::entities::{
     CompatConfig, LoggingConfig, ProxyConfig, ProxyMetrics, RemoteGitConfig, ServerConfig, UiConfig,
 };
 use serde::Deserialize;
+
+pub fn default_config_version() -> u32 {
+    CURRENT_CONFIG_VERSION
+}
 
 pub fn default_remote_git_config() -> RemoteGitConfig {
     RemoteGitConfig {
@@ -14,6 +19,7 @@ pub fn default_remote_git_config() -> RemoteGitConfig {
 
 pub fn default_config() -> ProxyConfig {
     ProxyConfig {
+        config_version: default_config_version(),
         server: ServerConfig {
             host: "0.0.0.0".to_string(),
             port: 8899,
@@ -104,6 +110,7 @@ struct PartialRemoteGitConfig {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PartialProxyConfig {
+    config_version: Option<u32>,
     server: Option<PartialServerConfig>,
     compat: Option<PartialCompatConfig>,
     logging: Option<PartialLoggingConfig>,
@@ -171,6 +178,7 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
         .unwrap_or_else(|| !remote_repo_url.trim().is_empty() || !remote_token.trim().is_empty());
 
     Ok(ProxyConfig {
+        config_version: partial.config_version.unwrap_or(default_config_version()),
         server: ServerConfig {
             host: defaults.server.host,
             port: partial
