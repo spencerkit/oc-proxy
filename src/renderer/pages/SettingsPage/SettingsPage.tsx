@@ -11,6 +11,9 @@ import styles from "./SettingsPage.module.css"
 type ImportSource = "file" | "clipboard"
 type ExportTarget = "folder" | "clipboard"
 type RemoteSyncAction = "upload" | "pull" | null
+const QUOTA_REFRESH_MINUTES_MIN = 1
+const QUOTA_REFRESH_MINUTES_MAX = 1440
+const QUOTA_REFRESH_MINUTES_DEFAULT = 5
 
 function buildImmediateConfig(config: ProxyConfig, next: Partial<ProxyConfig>): ProxyConfig {
   return {
@@ -49,6 +52,9 @@ export const SettingsPage: React.FC = () => {
   const [detailedLogs, setDetailedLogs] = useState(false)
   const [launchOnStartup, setLaunchOnStartup] = useState(false)
   const [closeToTray, setCloseToTray] = useState(true)
+  const [quotaAutoRefreshMinutesText, setQuotaAutoRefreshMinutesText] = useState(
+    String(QUOTA_REFRESH_MINUTES_DEFAULT)
+  )
   const [theme, setTheme] = useState<ThemeMode>("light")
   const [locale, setLocale] = useState<LocaleCode>("en-US")
   const [remoteSyncEnabled, setRemoteSyncEnabled] = useState(false)
@@ -56,6 +62,7 @@ export const SettingsPage: React.FC = () => {
   const [remoteToken, setRemoteToken] = useState("")
   const [remoteBranch, setRemoteBranch] = useState("main")
   const [portError, setPortError] = useState("")
+  const [quotaAutoRefreshMinutesError, setQuotaAutoRefreshMinutesError] = useState("")
   const [showImportModal, setShowImportModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [showAboutModal, setShowAboutModal] = useState(false)
@@ -95,6 +102,10 @@ export const SettingsPage: React.FC = () => {
     setDetailedLogs(!!config.logging.captureBody)
     setLaunchOnStartup(config.ui.launchOnStartup)
     setCloseToTray(config.ui.closeToTray ?? true)
+    setQuotaAutoRefreshMinutesText(
+      String(config.ui.quotaAutoRefreshMinutes ?? QUOTA_REFRESH_MINUTES_DEFAULT)
+    )
+    setQuotaAutoRefreshMinutesError("")
     setTheme(config.ui.theme)
     setLocale(
       resolveEffectiveLocale({
@@ -125,14 +136,55 @@ export const SettingsPage: React.FC = () => {
     return true
   }
 
+  const validateQuotaAutoRefreshMinutes = (value: string): boolean => {
+    if (!/^\d+$/.test(value)) {
+      setQuotaAutoRefreshMinutesError(t("settings.quotaAutoRefreshMinutesError"))
+      return false
+    }
+
+    const parsed = Number(value)
+    if (
+      !Number.isInteger(parsed) ||
+      parsed < QUOTA_REFRESH_MINUTES_MIN ||
+      parsed > QUOTA_REFRESH_MINUTES_MAX
+    ) {
+      setQuotaAutoRefreshMinutesError(t("settings.quotaAutoRefreshMinutesError"))
+      return false
+    }
+
+    setQuotaAutoRefreshMinutesError("")
+    return true
+  }
+
   const handlePortChange = (value: string) => {
     setPortText(value)
     validatePort(value)
   }
 
+  const handleQuotaAutoRefreshMinutesChange = (value: string) => {
+    setQuotaAutoRefreshMinutesText(value)
+    validateQuotaAutoRefreshMinutes(value)
+  }
+
   const focusInput = (id: string) => {
     const input = document.getElementById(id) as HTMLInputElement | null
     input?.focus()
+  }
+
+  const handleQuotaAutoRefreshMinutesBlur = async () => {
+    if (!config) return
+    if (!validateQuotaAutoRefreshMinutes(quotaAutoRefreshMinutesText)) return
+    const nextMinutes = Number(quotaAutoRefreshMinutesText)
+    if (nextMinutes === config.ui.quotaAutoRefreshMinutes) return
+
+    await applyImmediateConfig(current =>
+      buildImmediateConfig(current, {
+        ui: {
+          ...current.ui,
+          quotaAutoRefreshMinutes: nextMinutes,
+        },
+      })
+    )
   }
 
   const parsedPort = /^\d+$/.test(portText) ? Number(portText) : NaN
@@ -498,6 +550,29 @@ export const SettingsPage: React.FC = () => {
                     })
                   )
                 }}
+              />
+            </div>
+
+            <div className={styles.formGroup}>
+              <label htmlFor="quota-auto-refresh-minutes">
+                {t("settings.quotaAutoRefreshMinutes")}
+              </label>
+              <Input
+                id="quota-auto-refresh-minutes"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={quotaAutoRefreshMinutesText}
+                onChange={e => handleQuotaAutoRefreshMinutesChange(e.target.value)}
+                onBlur={() => {
+                  void handleQuotaAutoRefreshMinutesBlur()
+                }}
+                hint={
+                  !quotaAutoRefreshMinutesError
+                    ? t("settings.quotaAutoRefreshMinutesHint")
+                    : undefined
+                }
+                error={quotaAutoRefreshMinutesError || undefined}
               />
             </div>
           </div>

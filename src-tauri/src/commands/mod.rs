@@ -1,3 +1,7 @@
+//! Module Overview
+//! Tauri command module exports.
+//! Collects command handlers so main entrypoint can register them declaratively.
+
 mod app;
 mod config;
 mod logs;

@@ -105,6 +105,11 @@ export const enUS = {
     launchOnStartupHint: "Auto-launch AI Open Router (AOR) after system sign-in.",
     closeToTray: "Close to Tray",
     closeToTrayHint: "When closing the window, keep app running in system tray.",
+    quotaAutoRefreshMinutes: "Quota Auto Refresh (minutes)",
+    quotaAutoRefreshMinutesHint:
+      "Auto-refreshes active rule quota on Service page. Allowed range: 1 - 1440 minutes.",
+    quotaAutoRefreshMinutesError:
+      "Quota auto refresh interval must be an integer between 1 and 1440",
     theme: "Theme",
     themeHint: "Controls app appearance in all pages.",
     themeLight: "Light",

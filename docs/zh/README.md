@@ -66,7 +66,9 @@ AI Open Router 是基于 Tauri 的桌面应用，内置本地代理运行时。
 - 基础 tool call 字段映射
 - 流式行为：
   - 同协议转发时支持 SSE 透传
-  - 跨协议场景当前会强制关闭上游流式（`stream=false`）以保证稳定性
+  - OpenAI chat-completions -> Anthropic messages 支持 SSE 事件桥接转换
+  - 其他跨协议流式场景当前仍直通上游 SSE 字节流
+  - Anthropic 入口请求若未显式传 `stream`，默认按 `stream=true` 转发
 
 ### 模型路由
 

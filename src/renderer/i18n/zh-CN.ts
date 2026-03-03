@@ -104,6 +104,10 @@ export const zhCN = {
     launchOnStartupHint: "系统登录后自动启动 AI Open Router（AOR）。",
     closeToTray: "关闭最小化到托盘",
     closeToTrayHint: "关闭窗口时不退出应用，保留在系统托盘运行。",
+    quotaAutoRefreshMinutes: "额度自动刷新间隔（分钟）",
+    quotaAutoRefreshMinutesHint:
+      "服务页按此间隔自动刷新当前生效规则额度，允许范围：1 - 1440 分钟。",
+    quotaAutoRefreshMinutesError: "额度自动刷新间隔必须是 1 到 1440 的整数",
     theme: "主题",
     themeHint: "控制应用所有页面的显示风格。",
     themeLight: "浅色",

@@ -1,3 +1,7 @@
+//! Module Overview
+//! Proxy runtime bootstrap and lifecycle management for the Axum server.
+//! Owns shared state objects and exposes start/stop/status/log access APIs.
+
 use crate::log_store::LogStore;
 use crate::models::{LogEntry, ProxyConfig, ProxyStatus};
 use crate::stats_store::StatsStore;
@@ -13,10 +17,12 @@ mod net;
 mod observability;
 mod pipeline;
 mod routing;
+mod stream_bridge;
 
 const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
 const MAX_STREAM_LOG_BODY_BYTES: usize = 256 * 1024;
 const NON_STREAM_REQUEST_TIMEOUT_MS: u64 = 60_000;
+const MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS: u64 = 300_000;
 const STREAM_REQUEST_TIMEOUT_MS: u64 = 600_000;
 const UPSTREAM_CONNECT_TIMEOUT_MS: u64 = 10_000;
 
@@ -57,6 +63,7 @@ struct ServiceState {
 }
 
 impl ProxyRuntime {
+    /// Construct proxy runtime with shared config/stores and prebuilt route index.
     pub fn new(
         config: Arc<RwLock<ProxyConfig>>,
         config_revision: Arc<AtomicU64>,
@@ -91,6 +98,7 @@ impl ProxyRuntime {
         })
     }
 
+    /// Start Axum proxy server if not already running.
     pub async fn start(&self) -> Result<ProxyStatus, String> {
         if self.is_running() {
             return Ok(self.get_status());
@@ -162,6 +170,7 @@ impl ProxyRuntime {
         Ok(self.get_status())
     }
 
+    /// Stop proxy server and return latest runtime status snapshot.
     pub async fn stop(&self) -> Result<ProxyStatus, String> {
         let running = self
             .inner
@@ -183,6 +192,7 @@ impl ProxyRuntime {
         Ok(self.get_status())
     }
 
+    /// Read lightweight runtime status including metrics and listen addresses.
     pub fn get_status(&self) -> ProxyStatus {
         let running_guard = self.inner.server.lock();
         let (running, address, lan_address) = if let Ok(guard) = running_guard {
@@ -205,14 +215,17 @@ impl ProxyRuntime {
         }
     }
 
+    /// List in-memory request logs.
     pub fn list_logs(&self, max: usize) -> Vec<LogEntry> {
         self.inner.log_store.list(max)
     }
 
+    /// Clear in-memory request logs.
     pub fn clear_logs(&self) {
         self.inner.log_store.clear();
     }
 
+    /// Query aggregated stats from `StatsStore`.
     pub fn stats_summary(
         &self,
         hours: Option<u32>,
@@ -221,6 +234,7 @@ impl ProxyRuntime {
         self.inner.stats_store.summarize(hours, rule_key)
     }
 
+    /// Clear aggregated stats data.
     pub fn clear_stats(&self) -> Result<(), String> {
         self.inner.stats_store.clear()
     }
@@ -237,8 +251,14 @@ impl ProxyRuntime {
 #[cfg(test)]
 mod tests {
     use super::observability::{extract_token_usage, StreamTokenAccumulator};
-    use super::pipeline::build_upstream_body;
-    use super::routing::{resolve_target_model, resolve_upstream_path};
+    use super::pipeline::{build_upstream_body, resolve_request_timeout_ms};
+    use super::routing::{
+        detect_entry_protocol, resolve_target_model, resolve_upstream_path, EntryEndpoint,
+        EntryProtocol, PathEntry,
+    };
+    use super::{
+        MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS, NON_STREAM_REQUEST_TIMEOUT_MS,
+    };
     use crate::models::{default_rule_quota_config, Group, Rule, RuleProtocol};
     use serde_json::{json, Value};
     use std::collections::HashMap;
@@ -392,11 +412,18 @@ mod tests {
 
     #[test]
     fn build_upstream_body_passes_through_request_shape_with_target_model() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Openai,
+            endpoint: EntryEndpoint::Responses,
+        };
         let out = build_upstream_body(
+            &entry,
+            &RuleProtocol::Openai,
             &json!({
                 "model": "gpt-4.1",
                 "input": "hello from responses"
             }),
+            false,
             "gpt-4.1",
         )
         .expect("mapping should succeed");
@@ -406,18 +433,148 @@ mod tests {
     }
 
     #[test]
+    fn build_upstream_body_forces_non_stream_for_messages_to_responses() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Anthropic,
+            endpoint: EntryEndpoint::Messages,
+        };
+        let out = build_upstream_body(
+            &entry,
+            &RuleProtocol::Openai,
+            &json!({
+                "model": "claude-3-5-sonnet",
+                "stream": true,
+                "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }]
+            }),
+            true,
+            "gpt-4.1",
+        )
+        .expect("mapping should succeed");
+
+        assert_eq!(out["model"], "gpt-4.1");
+        assert_eq!(out["stream"], false);
+        assert_eq!(out["input"][0]["type"], "message");
+    }
+
+    #[test]
+    fn build_upstream_body_drops_max_output_tokens_for_messages_to_responses() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Anthropic,
+            endpoint: EntryEndpoint::Messages,
+        };
+        let out = build_upstream_body(
+            &entry,
+            &RuleProtocol::Openai,
+            &json!({
+                "model": "claude-3-5-sonnet",
+                "max_tokens": 1234,
+                "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }]
+            }),
+            true,
+            "gpt-4.1",
+        )
+        .expect("mapping should succeed");
+
+        assert_eq!(out["model"], "gpt-4.1");
+        assert!(out.get("max_output_tokens").is_none());
+    }
+
+    #[test]
+    fn build_upstream_body_sets_auto_tool_choice_for_messages_to_responses_when_tools_exist() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Anthropic,
+            endpoint: EntryEndpoint::Messages,
+        };
+        let out = build_upstream_body(
+            &entry,
+            &RuleProtocol::Openai,
+            &json!({
+                "model": "claude-3-5-sonnet",
+                "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }],
+                "tools": [{
+                    "name": "Read",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": { "type": "string" }
+                        },
+                        "required": ["file_path"]
+                    }
+                }]
+            }),
+            true,
+            "gpt-4.1",
+        )
+        .expect("mapping should succeed");
+
+        assert_eq!(out["tool_choice"], "auto");
+        assert_eq!(out["parallel_tool_calls"], true);
+    }
+
+    #[test]
+    fn build_upstream_body_defaults_stream_true_when_anthropic_stream_missing() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Anthropic,
+            endpoint: EntryEndpoint::Messages,
+        };
+        let out = build_upstream_body(
+            &entry,
+            &RuleProtocol::OpenaiCompletion,
+            &json!({
+                "model": "claude-3-5-sonnet",
+                "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }]
+            }),
+            true,
+            "gpt-4.1",
+        )
+        .expect("mapping should succeed");
+
+        assert_eq!(out["model"], "gpt-4.1");
+        assert_eq!(out["stream"], true);
+    }
+
+    #[test]
+    fn resolve_request_timeout_ms_extends_messages_to_responses_non_stream_requests() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Anthropic,
+            endpoint: EntryEndpoint::Messages,
+        };
+
+        let timeout = resolve_request_timeout_ms(false, &entry, &RuleProtocol::Openai);
+        assert_eq!(timeout, MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn resolve_request_timeout_ms_keeps_default_for_other_non_stream_requests() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Anthropic,
+            endpoint: EntryEndpoint::Messages,
+        };
+
+        let timeout = resolve_request_timeout_ms(false, &entry, &RuleProtocol::OpenaiCompletion);
+        assert_eq!(timeout, NON_STREAM_REQUEST_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn detect_entry_protocol_supports_v1_and_non_v1_downstream_paths() {
+        assert!(detect_entry_protocol("/chat/completions").is_some());
+        assert!(detect_entry_protocol("/responses").is_some());
+        assert!(detect_entry_protocol("/messages").is_some());
+        assert!(detect_entry_protocol("/v1/chat/completions").is_some());
+        assert!(detect_entry_protocol("/v1/responses").is_some());
+        assert!(detect_entry_protocol("/v1/messages").is_some());
+    }
+
+    #[test]
     fn resolve_upstream_path_uses_rule_protocol_enum_directly() {
         assert_eq!(
             resolve_upstream_path(&RuleProtocol::Anthropic),
             "/v1/messages"
         );
-        assert_eq!(
-            resolve_upstream_path(&RuleProtocol::Openai),
-            "/v1/responses"
-        );
+        assert_eq!(resolve_upstream_path(&RuleProtocol::Openai), "/responses");
         assert_eq!(
             resolve_upstream_path(&RuleProtocol::OpenaiCompletion),
-            "/v1/chat/completions"
+            "/chat/completions"
         );
     }
 

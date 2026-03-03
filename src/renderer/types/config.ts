@@ -38,6 +38,7 @@ export interface UIConfig {
   localeMode: LocaleMode
   launchOnStartup: boolean
   closeToTray: boolean
+  quotaAutoRefreshMinutes: number
 }
 
 export interface RemoteGitConfig {

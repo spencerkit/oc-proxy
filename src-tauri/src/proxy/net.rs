@@ -1,3 +1,7 @@
+//! Module Overview
+//! Network binding and host/address utilities for the proxy server.
+//! Encapsulates listen-address fallback behavior and LAN/public host formatting.
+
 use std::net::{IpAddr, UdpSocket};
 use tokio::net::TcpListener;
 

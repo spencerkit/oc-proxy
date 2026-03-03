@@ -1,7 +1,11 @@
+//! Module Overview
+//! Mapper contract and behavior tests.
+//! Covers protocol mapping semantics, strict-mode behavior, and snapshot-based compatibility checks.
+
 use super::{
     map_anthropic_to_openai_request, map_anthropic_to_openai_response,
-    map_openai_chat_to_responses, map_openai_to_anthropic_request,
-    map_openai_to_anthropic_response, normalize_openai_request,
+    map_anthropic_to_openai_responses_request, map_openai_chat_to_responses,
+    map_openai_to_anthropic_request, map_openai_to_anthropic_response, normalize_openai_request,
 };
 use serde_json::{json, Value};
 
@@ -39,6 +43,283 @@ fn anthropic_request_maps_to_openai_request() {
     assert_eq!(out["model"], "gpt-target");
     assert_eq!(out["messages"][0]["role"], "system");
     assert_eq!(out["messages"][1]["content"], "hello");
+}
+
+#[test]
+fn anthropic_request_without_stream_defaults_to_stream_true() {
+    let input = json!({
+        "model": "claude-x",
+        "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }]
+    });
+
+    let out = map_anthropic_to_openai_request(&input, true, "gpt-target")
+        .expect("mapping should succeed");
+    assert_eq!(out["stream"], true);
+}
+
+#[test]
+fn anthropic_stream_request_enables_openai_include_usage_option() {
+    let input = json!({
+        "model": "claude-x",
+        "stream": true,
+        "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }]
+    });
+
+    let out = map_anthropic_to_openai_request(&input, true, "gpt-target")
+        .expect("mapping should succeed");
+    assert_eq!(out["stream"], true);
+    assert_eq!(out["stream_options"]["include_usage"], true);
+}
+
+#[test]
+fn anthropic_request_maps_to_openai_responses_request() {
+    let input = json!({
+        "model": "claude-x",
+        "system": "helpful",
+        "max_tokens": 512,
+        "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }],
+        "stream": false
+    });
+
+    let out = map_anthropic_to_openai_responses_request(&input, true, "gpt-target")
+        .expect("mapping should succeed");
+    assert_eq!(out["model"], "gpt-target");
+    assert_eq!(out["instructions"], "helpful");
+    assert_eq!(out["max_output_tokens"], 512);
+    assert_eq!(out["input"][0]["type"], "message");
+    assert_eq!(out["input"][0]["role"], "user");
+    assert_eq!(out["input"][0]["content"][0]["text"], "hello");
+}
+
+#[test]
+fn anthropic_request_maps_tools_and_tool_choice_to_responses_shape() {
+    let input = json!({
+        "model": "claude-x",
+        "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }],
+        "tools": [{
+            "name": "Read",
+            "description": "Read file content",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string" }
+                },
+                "required": ["file_path"]
+            }
+        }],
+        "tool_choice": {
+            "type": "tool",
+            "name": "Read"
+        }
+    });
+
+    let out = map_anthropic_to_openai_responses_request(&input, true, "gpt-target")
+        .expect("mapping should succeed");
+
+    assert_eq!(out["tools"][0]["type"], "function");
+    assert_eq!(out["tools"][0]["name"], "Read");
+    assert_eq!(out["tools"][0]["description"], "Read file content");
+    assert_eq!(
+        out["tools"][0]["parameters"]["properties"]["file_path"]["type"],
+        "string"
+    );
+    assert!(out["tools"][0].get("function").is_none());
+
+    assert_eq!(out["tool_choice"]["type"], "function");
+    assert_eq!(out["tool_choice"]["name"], "Read");
+    assert!(out["tool_choice"].get("function").is_none());
+}
+
+#[test]
+fn anthropic_tool_ids_are_normalized_for_openai_responses_requests() {
+    let out = map_anthropic_to_openai_responses_request(
+        &json!({
+            "model": "claude-x",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": "call_function_5uh3ccwh4li3_1",
+                        "name": "Glob",
+                        "input": { "pattern": "**/*.md" }
+                    }]
+                },
+                {
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": "call_function_5uh3ccwh4li3_1",
+                        "content": "README.md"
+                    }]
+                }
+            ]
+        }),
+        true,
+        "gpt-target",
+    )
+    .expect("mapping should succeed");
+
+    let input = out["input"].as_array().expect("input should be an array");
+    let call = input
+        .iter()
+        .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("function_call"))
+        .expect("function_call should exist");
+    let call_output = input
+        .iter()
+        .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("function_call_output"))
+        .expect("function_call_output should exist");
+
+    let call_id = call
+        .get("call_id")
+        .and_then(|v| v.as_str())
+        .expect("function_call.call_id should be string");
+    let output_call_id = call_output
+        .get("call_id")
+        .and_then(|v| v.as_str())
+        .expect("function_call_output.call_id should be string");
+
+    assert!(call_id.starts_with("fc"), "call_id={call_id}");
+    assert_eq!(call["id"], call["call_id"]);
+    assert_eq!(call_output["id"], call_output["call_id"]);
+    assert_eq!(call_id, output_call_id);
+    assert!(
+        call["arguments"].is_string(),
+        "function_call.arguments must be string for responses API"
+    );
+    assert_eq!(
+        call["arguments"], "{\"pattern\":\"**/*.md\"}",
+        "function_call.arguments should be serialized json string"
+    );
+}
+
+#[test]
+fn anthropic_tool_arguments_follow_schema_key_aliases_for_responses_requests() {
+    let out = map_anthropic_to_openai_responses_request(
+        &json!({
+            "model": "claude-x",
+            "tools": [{
+                "name": "Read",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "offset": { "type": "integer" }
+                    },
+                    "required": ["file_path"]
+                }
+            }],
+            "messages": [{
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "call_read_1",
+                    "name": "Read",
+                    "input": {
+                        "filePath": "/tmp/a.md",
+                        "offset": 2
+                    }
+                }]
+            }]
+        }),
+        true,
+        "gpt-target",
+    )
+    .expect("mapping should succeed");
+
+    let input = out["input"].as_array().expect("input should be an array");
+    let call = input
+        .iter()
+        .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("function_call"))
+        .expect("function_call should exist");
+    let args_str = call["arguments"]
+        .as_str()
+        .expect("function_call.arguments should be string");
+    let args_json: Value =
+        serde_json::from_str(args_str).expect("function_call.arguments should be valid json");
+
+    assert_eq!(args_json["file_path"], "/tmp/a.md");
+    assert_eq!(args_json["offset"], 2);
+    assert!(
+        args_json.get("filePath").is_none(),
+        "non-schema alias key should be normalized away"
+    );
+}
+
+#[test]
+fn anthropic_tool_argument_alias_with_ambiguous_schema_is_not_rewritten() {
+    let out = map_anthropic_to_openai_responses_request(
+        &json!({
+            "model": "claude-x",
+            "tools": [{
+                "name": "Ambiguous",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "file_path": { "type": "string" },
+                        "filepath": { "type": "string" }
+                    }
+                }
+            }],
+            "messages": [{
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": "call_ambiguous_1",
+                    "name": "Ambiguous",
+                    "input": {
+                        "file-path": "/tmp/a.md"
+                    }
+                }]
+            }]
+        }),
+        true,
+        "gpt-target",
+    )
+    .expect("mapping should succeed");
+
+    let input = out["input"].as_array().expect("input should be an array");
+    let call = input
+        .iter()
+        .find(|item| item.get("type").and_then(|v| v.as_str()) == Some("function_call"))
+        .expect("function_call should exist");
+    let args_str = call["arguments"]
+        .as_str()
+        .expect("function_call.arguments should be string");
+    let args_json: Value =
+        serde_json::from_str(args_str).expect("function_call.arguments should be valid json");
+
+    assert_eq!(args_json["file-path"], "/tmp/a.md");
+    assert!(
+        args_json.get("file_path").is_none(),
+        "ambiguous alias should remain unchanged"
+    );
+    assert!(
+        args_json.get("filepath").is_none(),
+        "ambiguous alias should remain unchanged"
+    );
+}
+
+#[test]
+fn anthropic_system_blocks_map_to_string_instructions() {
+    let input = json!({
+        "model": "claude-x",
+        "system": [
+            { "type": "text", "text": "first instruction" },
+            { "type": "text", "text": "second instruction" }
+        ],
+        "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }],
+        "stream": false
+    });
+
+    let out = map_anthropic_to_openai_responses_request(&input, true, "gpt-target")
+        .expect("mapping should succeed");
+
+    assert!(out["instructions"].is_string());
+    assert_eq!(
+        out["instructions"],
+        "first instruction\n\nsecond instruction"
+    );
 }
 
 #[test]

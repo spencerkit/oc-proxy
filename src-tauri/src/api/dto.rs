@@ -1,3 +1,7 @@
+//! Module Overview
+//! DTO structures returned to or accepted from command/API boundaries.
+//! Separates response payload shape from internal service implementation details.
+
 use crate::domain::entities::{ProxyConfig, ProxyStatus};
 use serde::Serialize;
 

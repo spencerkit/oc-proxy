@@ -1,3 +1,7 @@
+//! Module Overview
+//! Canonical config schema and default values.
+//! Defines persisted config version contract and default initialization behavior.
+
 use crate::config::migrator::CURRENT_CONFIG_VERSION;
 use crate::domain::entities::{
     CompatConfig, LoggingConfig, ProxyConfig, ProxyMetrics, RemoteGitConfig, ServerConfig, UiConfig,
@@ -6,6 +10,10 @@ use serde::Deserialize;
 
 pub fn default_config_version() -> u32 {
     CURRENT_CONFIG_VERSION
+}
+
+pub fn default_quota_auto_refresh_minutes() -> u32 {
+    5
 }
 
 pub fn default_remote_git_config() -> RemoteGitConfig {
@@ -45,6 +53,7 @@ pub fn default_config() -> ProxyConfig {
             locale_mode: "auto".to_string(),
             launch_on_startup: false,
             close_to_tray: true,
+            quota_auto_refresh_minutes: default_quota_auto_refresh_minutes(),
         },
         remote_git: default_remote_git_config(),
         groups: vec![],
@@ -96,6 +105,7 @@ struct PartialUiConfig {
     locale_mode: Option<String>,
     launch_on_startup: Option<bool>,
     close_to_tray: Option<bool>,
+    quota_auto_refresh_minutes: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -241,6 +251,11 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
                 .as_ref()
                 .and_then(|u| u.close_to_tray)
                 .unwrap_or(defaults.ui.close_to_tray),
+            quota_auto_refresh_minutes: partial
+                .ui
+                .as_ref()
+                .and_then(|u| u.quota_auto_refresh_minutes)
+                .unwrap_or(defaults.ui.quota_auto_refresh_minutes),
         },
         remote_git: RemoteGitConfig {
             enabled: remote_enabled,

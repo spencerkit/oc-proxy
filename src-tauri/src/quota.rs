@@ -1,3 +1,7 @@
+//! Module Overview
+//! Quota probing workflow and response normalization.
+//! Executes provider checks, parses payloads, and updates quota snapshot status.
+
 mod parser;
 
 use crate::models::{
@@ -100,11 +104,19 @@ pub async fn fetch_group_quotas(
         .find(|g| g.id == group_id)
         .ok_or_else(|| format!("group not found: {group_id}"))?;
 
-    let mut out = Vec::with_capacity(group.rules.len());
-    for rule in &group.rules {
-        out.push(fetch_single_rule_quota(group, rule, false).await.snapshot);
-    }
-    Ok(out)
+    let Some(active_rule_id) = group.active_rule_id.as_deref() else {
+        return Ok(Vec::new());
+    };
+
+    let Some(active_rule) = group.rules.iter().find(|r| r.id == active_rule_id) else {
+        return Ok(Vec::new());
+    };
+
+    Ok(vec![
+        fetch_single_rule_quota(group, active_rule, false)
+            .await
+            .snapshot,
+    ])
 }
 
 pub async fn test_rule_quota_draft(group: &Group, rule: &Rule) -> RuleQuotaTestResult {

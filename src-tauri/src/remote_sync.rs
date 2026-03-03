@@ -1,3 +1,7 @@
+//! Module Overview
+//! Remote sync workflow for pulling/pushing rule configuration.
+//! Wraps git operations, conflict checks, and sync result assembly.
+
 mod git_client;
 
 use crate::models::{RemoteGitConfig, RemoteRulesUploadResult};

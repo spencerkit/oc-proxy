@@ -1,3 +1,7 @@
+//! Module Overview
+//! Abstracted git command execution layer used by remote sync.
+//! Allows testing sync workflows without shelling out to real git in unit tests.
+
 use std::path::Path;
 use std::process::Command;
 

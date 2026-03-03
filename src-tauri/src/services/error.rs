@@ -1,3 +1,7 @@
+//! Module Overview
+//! Service-layer error type definitions and conversions.
+//! Normalizes error codes/messages crossing service boundaries.
+
 use thiserror::Error;
 
 pub type AppResult<T> = Result<T, AppError>;

@@ -1,3 +1,7 @@
+//! Module Overview
+//! Path and rule resolution helpers for proxy routing.
+//! Normalizes entry endpoints, selects upstream protocol paths, and computes final upstream URL.
+
 use super::ServiceState;
 use crate::models::{ProxyConfig, Rule, RuleProtocol};
 use serde_json::Value;
@@ -49,6 +53,13 @@ pub(super) enum RouteResolution {
 
 pub(super) type RouteIndex = HashMap<String, RouteResolution>;
 
+/// Detect downstream request protocol/endpoint from `/oc/:group/*suffix`.
+///
+/// Compatibility rules:
+/// - Supports both `/messages` and `/v1/messages` for Anthropic clients.
+/// - Supports both `/chat/completions` and `/v1/chat/completions` for OpenAI chat clients.
+/// - Supports both `/responses` and `/v1/responses` for OpenAI responses clients.
+/// - Empty suffix defaults to chat-completions for backward compatibility with `/oc/:group`.
 pub(super) fn detect_entry_protocol(suffix: &str) -> Option<PathEntry> {
     let normalized = if suffix.is_empty() || suffix == "/" {
         "/chat/completions".to_string()
@@ -80,22 +91,25 @@ pub(super) fn detect_entry_protocol(suffix: &str) -> Option<PathEntry> {
     }
 }
 
+/// Resolve default upstream endpoint path from the active rule protocol.
+///
+/// Note that OpenAI paths intentionally omit `/v1` so callers can control versioning
+/// via `rule.apiAddress` (for example `https://host` vs `https://host/v1`).
 pub(super) fn resolve_upstream_path(target_protocol: &RuleProtocol) -> &'static str {
     match target_protocol {
         RuleProtocol::Anthropic => "/v1/messages",
-        RuleProtocol::Openai => "/v1/responses",
-        RuleProtocol::OpenaiCompletion => "/v1/chat/completions",
+        RuleProtocol::Openai => "/responses",
+        RuleProtocol::OpenaiCompletion => "/chat/completions",
     }
 }
 
-pub(super) fn protocol_from_entry(entry: &PathEntry) -> RuleProtocol {
-    match entry.endpoint {
-        EntryEndpoint::Responses => RuleProtocol::Openai,
-        EntryEndpoint::ChatCompletions => RuleProtocol::OpenaiCompletion,
-        EntryEndpoint::Messages => RuleProtocol::Anthropic,
-    }
-}
-
+/// Build the final upstream URL from `rule.apiAddress` and protocol default path.
+///
+/// Behavior summary:
+/// - If `apiAddress` has no path, use `default_path` directly.
+/// - If `apiAddress` already includes a prefix path (for example `/v1`),
+///   append default path under that prefix (`/v1` + `/responses` => `/v1/responses`).
+/// - If `default_path` already starts with the prefix path, do not duplicate it.
 pub(super) fn resolve_upstream_url(
     api_address: &str,
     default_path: &str,
@@ -123,6 +137,10 @@ pub(super) fn resolve_upstream_url(
     Ok(url.to_string())
 }
 
+/// Build outbound request headers for the selected upstream protocol.
+///
+/// - Anthropic uses `x-api-key` + `anthropic-version`.
+/// - OpenAI surfaces use standard `Authorization: Bearer ...`.
 pub(super) fn build_rule_headers(protocol: &RuleProtocol, rule: &Rule) -> HashMap<String, String> {
     let mut headers = HashMap::new();
     headers.insert("content-type".to_string(), "application/json".to_string());
@@ -141,6 +159,10 @@ pub(super) fn build_rule_headers(protocol: &RuleProtocol, rule: &Rule) -> HashMa
     headers
 }
 
+/// Refresh in-memory route index when config revision changes.
+///
+/// This keeps hot-path routing lock-free from full config traversal while still
+/// reacting to runtime config updates.
 pub(super) fn refresh_route_index_if_needed(state: &ServiceState) -> Result<(), String> {
     let observed_revision = state.config_revision.load(Ordering::Acquire);
     let cached_revision = state.route_index_revision.load(Ordering::Acquire);
@@ -166,6 +188,12 @@ pub(super) fn refresh_route_index_if_needed(state: &ServiceState) -> Result<(), 
     Ok(())
 }
 
+/// Build a fast lookup table `group_id -> active route resolution`.
+///
+/// The index carries three states so request handling can distinguish:
+/// - group exists with ready active rule,
+/// - group exists but no active rule configured,
+/// - group exists but active_rule_id points to a missing rule.
 pub(super) fn build_route_index(config: &ProxyConfig) -> RouteIndex {
     let mut index = HashMap::with_capacity(config.groups.len());
     for group in &config.groups {
@@ -192,6 +220,7 @@ pub(super) fn build_route_index(config: &ProxyConfig) -> RouteIndex {
     index
 }
 
+/// Validate required active-rule fields before forwarding traffic.
 pub(super) fn assert_rule_ready(rule: &Rule) -> Result<(), (u16, String)> {
     if rule.name.trim().is_empty() {
         return Err((409, "Active rule name is empty".into()));
@@ -208,6 +237,12 @@ pub(super) fn assert_rule_ready(rule: &Rule) -> Result<(), (u16, String)> {
     Ok(())
 }
 
+/// Resolve forwarded model name using request model, group allow-list, and rule mappings.
+///
+/// Resolution order:
+/// 1. requested model if present and allowed by group model list,
+/// 2. exact/normalized rule model mapping,
+/// 3. rule default model.
 pub(super) fn resolve_target_model(
     rule: &Rule,
     group_models: &[String],

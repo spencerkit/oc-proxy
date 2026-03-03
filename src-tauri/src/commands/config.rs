@@ -1,3 +1,7 @@
+//! Module Overview
+//! Tauri command handlers for renderer IPC invocations.
+//! Performs boundary-level argument handling and delegates business logic to runtime/services.
+
 use crate::app_state::SharedState;
 use crate::models::{
     GroupBackupExportResult, GroupBackupImportResult, ProxyConfig, SaveConfigResult,

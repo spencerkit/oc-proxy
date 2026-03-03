@@ -1,3 +1,7 @@
+//! Module Overview
+//! Shared app state coordination utilities.
+//! Applies config updates and synchronizes proxy runtime lifecycle when settings change.
+
 use crate::config_store::ConfigStore;
 use crate::models::{AppInfo, ProxyConfig, ProxyStatus};
 use crate::proxy::ProxyRuntime;

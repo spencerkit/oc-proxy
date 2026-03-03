@@ -1,3 +1,7 @@
+//! Module Overview
+//! Domain entity definitions reused by multiple modules.
+//! Keeps core data contracts independent from transport-specific concerns.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -33,6 +37,8 @@ pub struct UiConfig {
     pub locale_mode: String,
     pub launch_on_startup: bool,
     pub close_to_tray: bool,
+    #[serde(default = "crate::config::schema::default_quota_auto_refresh_minutes")]
+    pub quota_auto_refresh_minutes: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

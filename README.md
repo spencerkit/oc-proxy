@@ -67,7 +67,9 @@ It routes requests by group, forwards with the group active rule, and translates
 - Basic tool-call field mapping
 - Streaming behavior:
   - Same-protocol streaming uses SSE passthrough
-  - Cross-protocol requests are currently forced to non-stream mode for stability (`stream=false` upstream)
+  - OpenAI chat-completions -> Anthropic messages supports SSE event bridge conversion
+  - Other cross-protocol streaming currently forwards upstream SSE bytes directly
+  - Anthropic-entry requests default to `stream=true` when `stream` is omitted
 
 ### Model Routing
 

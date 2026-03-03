@@ -1,3 +1,7 @@
+//! Module Overview
+//! Group backup/import payload helpers and compatibility handling.
+//! Builds export envelopes and reads historical payload shapes for import.
+
 use chrono::Utc;
 
 use crate::models::{Group, GroupsBackupPayload};

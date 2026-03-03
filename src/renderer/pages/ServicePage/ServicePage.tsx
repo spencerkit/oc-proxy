@@ -41,6 +41,13 @@ export const ServicePage: React.FC = () => {
   const activeGroupModels = Array.isArray(activeGroup?.models) ? activeGroup.models : []
   const activeRule = activeGroup?.rules.find(r => r.id === selectedRuleId) ?? null
   const pendingDeleteRule = activeGroup?.rules.find(r => r.id === pendingDeleteRuleId) ?? null
+  const quotaAutoRefreshIntervalMs = React.useMemo(() => {
+    const minutes = config?.ui?.quotaAutoRefreshMinutes
+    if (!Number.isInteger(minutes) || !minutes || minutes < 1 || minutes > 1440) {
+      return 5 * 60 * 1000
+    }
+    return minutes * 60 * 1000
+  }, [config?.ui?.quotaAutoRefreshMinutes])
 
   // Auto-select first group if none selected
   React.useEffect(() => {
@@ -56,14 +63,11 @@ export const ServicePage: React.FC = () => {
 
   React.useEffect(() => {
     if (!activeGroupId) return
-    const timer = window.setInterval(
-      () => {
-        void fetchGroupQuotas(activeGroupId)
-      },
-      5 * 60 * 1000
-    )
+    const timer = window.setInterval(() => {
+      void fetchGroupQuotas(activeGroupId)
+    }, quotaAutoRefreshIntervalMs)
     return () => window.clearInterval(timer)
-  }, [activeGroupId, fetchGroupQuotas])
+  }, [activeGroupId, fetchGroupQuotas, quotaAutoRefreshIntervalMs])
 
   const handleSelectGroup = (groupId: string) => {
     setActiveGroupId(groupId)
