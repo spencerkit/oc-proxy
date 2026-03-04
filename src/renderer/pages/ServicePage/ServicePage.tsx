@@ -20,6 +20,8 @@ export const ServicePage: React.FC = () => {
     config,
     saveConfig,
     status,
+    activeGroupId,
+    setActiveGroupId,
     ruleQuotas,
     ruleCardStatsByRuleKey,
     quotaLoadingRuleKeys,
@@ -28,7 +30,6 @@ export const ServicePage: React.FC = () => {
     fetchRuleQuota,
   } = useProxyStore()
   const { showToast } = useLogs()
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null)
   const [showAddGroupModal, setShowAddGroupModal] = useState(false)
   const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false)
@@ -53,12 +54,20 @@ export const ServicePage: React.FC = () => {
     return minutes * 60 * 1000
   }, [config?.ui?.quotaAutoRefreshMinutes])
 
-  // Auto-select first group if none selected
+  // Auto-select first valid group if selection is empty/invalid
   React.useEffect(() => {
-    if (!activeGroupId && groups.length > 0) {
+    if (groups.length === 0) {
+      if (activeGroupId !== null) {
+        setActiveGroupId(null)
+      }
+      return
+    }
+
+    const activeGroupExists = !!groups.find(group => group.id === activeGroupId)
+    if (!activeGroupExists) {
       setActiveGroupId(groups[0].id)
     }
-  }, [groups, activeGroupId])
+  }, [groups, activeGroupId, setActiveGroupId])
 
   React.useEffect(() => {
     if (!activeGroupId) return

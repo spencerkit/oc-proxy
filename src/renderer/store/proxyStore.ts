@@ -85,6 +85,29 @@ const STATUS_POLL_INTERVAL = 3000
 const LOGS_POLL_INTERVAL = 3000
 const MAX_LOGS = 100
 const quotaKey = (groupId: string, ruleId: string) => `${groupId}:${ruleId}`
+const ACTIVE_GROUP_STORAGE_KEY = "ai-open-router.activeGroupId"
+
+const readPersistedActiveGroupId = (): string | null => {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_GROUP_STORAGE_KEY)
+    const value = raw?.trim()
+    return value ? value : null
+  } catch {
+    return null
+  }
+}
+
+const persistActiveGroupId = (groupId: string | null) => {
+  if (typeof window === "undefined") return
+  try {
+    if (groupId?.trim()) {
+      window.localStorage.setItem(ACTIVE_GROUP_STORAGE_KEY, groupId)
+      return
+    }
+    window.localStorage.removeItem(ACTIVE_GROUP_STORAGE_KEY)
+  } catch {}
+}
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -114,7 +137,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   ruleQuotas: {},
   ruleCardStatsByRuleKey: {},
   quotaLoadingRuleKeys: {},
-  activeGroupId: null,
+  activeGroupId: readPersistedActiveGroupId(),
   loading: false,
   error: null,
   statusIntervalId: null,
@@ -390,6 +413,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    * Set the active group ID
    */
   setActiveGroupId: (groupId: string | null) => {
+    persistActiveGroupId(groupId)
     set({ activeGroupId: groupId })
   },
 
