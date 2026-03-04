@@ -35,9 +35,9 @@ interface ProxyState {
   status: ProxyStatus | null
   logs: LogEntry[]
   logsStats: StatsSummaryResult | null
-  ruleQuotas: Record<string, RuleQuotaSnapshot>
-  ruleCardStatsByRuleKey: Record<string, RuleCardStatsItem>
-  quotaLoadingRuleKeys: Record<string, boolean>
+  providerQuotas: Record<string, RuleQuotaSnapshot>
+  providerCardStatsByProviderKey: Record<string, RuleCardStatsItem>
+  quotaLoadingProviderKeys: Record<string, boolean>
   activeGroupId: string | null
   loading: boolean
   error: string | null
@@ -70,8 +70,8 @@ interface ProxyState {
   clearLogs: () => Promise<void>
   clearLogsStats: () => Promise<void>
   fetchGroupQuotas: (groupId: string) => Promise<void>
-  fetchGroupRuleCardStats: (groupId: string, hours?: number) => Promise<void>
-  fetchRuleQuota: (groupId: string, ruleId: string) => Promise<void>
+  fetchGroupProviderCardStats: (groupId: string, hours?: number) => Promise<void>
+  fetchProviderQuota: (groupId: string, providerId: string) => Promise<void>
   startPolling: () => void
   stopPolling: () => void
   startServer: () => Promise<void>
@@ -84,7 +84,7 @@ interface ProxyState {
 const STATUS_POLL_INTERVAL = 3000
 const LOGS_POLL_INTERVAL = 3000
 const MAX_LOGS = 100
-const quotaKey = (groupId: string, ruleId: string) => `${groupId}:${ruleId}`
+const quotaKey = (groupId: string, providerId: string) => `${groupId}:${providerId}`
 const ACTIVE_GROUP_STORAGE_KEY = "ai-open-router.activeGroupId"
 
 const readPersistedActiveGroupId = (): string | null => {
@@ -173,9 +173,9 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   status: null,
   logs: [],
   logsStats: null,
-  ruleQuotas: {},
-  ruleCardStatsByRuleKey: {},
-  quotaLoadingRuleKeys: {},
+  providerQuotas: {},
+  providerCardStatsByProviderKey: {},
+  quotaLoadingProviderKeys: {},
   activeGroupId: readPersistedActiveGroupId(),
   loading: false,
   error: null,
@@ -301,7 +301,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   /**
-   * Export all groups (including nested rules) to a JSON backup file
+   * Export all groups (including nested providers) to a JSON backup file
    */
   exportGroupsBackup: async () => {
     try {
@@ -315,7 +315,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   /**
-   * Export all groups/rules to a JSON file under a selected folder
+   * Export all groups/providers to a JSON file under a selected folder
    */
   exportGroupsToFolder: async () => {
     try {
@@ -329,7 +329,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   /**
-   * Export all groups/rules JSON content directly to clipboard
+   * Export all groups/providers JSON content directly to clipboard
    */
   exportGroupsToClipboard: async () => {
     try {
@@ -401,7 +401,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   /**
-   * Upload current groups/rules backup JSON to remote git repository
+   * Upload current groups/providers backup JSON to remote git repository
    */
   remoteRulesUpload: async (force?: boolean) => {
     try {
@@ -415,7 +415,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   },
 
   /**
-   * Pull groups/rules backup JSON from remote git and replace local groups
+   * Pull groups/providers backup JSON from remote git and replace local groups
    */
   remoteRulesPull: async (force?: boolean) => {
     try {
@@ -487,11 +487,11 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
       set({ error: null })
       const snapshots = await ipc.getGroupQuotas(groupId)
       set(state => {
-        const next = { ...state.ruleQuotas }
+        const next = { ...state.providerQuotas }
         for (const snapshot of snapshots) {
           next[quotaKey(snapshot.groupId, snapshot.ruleId)] = snapshot
         }
-        return { ruleQuotas: next }
+        return { providerQuotas: next }
       })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to fetch group quotas"
@@ -500,13 +500,13 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
     }
   },
 
-  fetchGroupRuleCardStats: async (groupId: string, hours?: number) => {
+  fetchGroupProviderCardStats: async (groupId: string, hours?: number) => {
     try {
       if (!groupId.trim()) return
       set({ error: null })
       const items = await ipc.getRuleCardStats(groupId, hours)
       set(state => {
-        const next = { ...state.ruleCardStatsByRuleKey }
+        const next = { ...state.providerCardStatsByProviderKey }
         const groupPrefix = `${groupId}:`
         for (const key of Object.keys(next)) {
           if (key.startsWith(groupPrefix)) {
@@ -516,43 +516,43 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
         for (const item of items) {
           next[quotaKey(item.groupId, item.ruleId)] = item
         }
-        return { ruleCardStatsByRuleKey: next }
+        return { providerCardStatsByProviderKey: next }
       })
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : "Failed to fetch group rule card stats"
+        error instanceof Error ? error.message : "Failed to fetch group provider card stats"
       set({ error: errorMessage })
       throw error
     }
   },
 
-  fetchRuleQuota: async (groupId: string, ruleId: string) => {
-    const key = quotaKey(groupId, ruleId)
+  fetchProviderQuota: async (groupId: string, providerId: string) => {
+    const key = quotaKey(groupId, providerId)
     try {
       set(state => ({
         error: null,
-        quotaLoadingRuleKeys: {
-          ...state.quotaLoadingRuleKeys,
+        quotaLoadingProviderKeys: {
+          ...state.quotaLoadingProviderKeys,
           [key]: true,
         },
       }))
-      const snapshot = await ipc.getRuleQuota(groupId, ruleId)
+      const snapshot = await ipc.getProviderQuota(groupId, providerId)
       set(state => ({
-        ruleQuotas: {
-          ...state.ruleQuotas,
+        providerQuotas: {
+          ...state.providerQuotas,
           [key]: snapshot,
         },
-        quotaLoadingRuleKeys: {
-          ...state.quotaLoadingRuleKeys,
+        quotaLoadingProviderKeys: {
+          ...state.quotaLoadingProviderKeys,
           [key]: false,
         },
       }))
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to fetch rule quota"
+      const errorMessage = error instanceof Error ? error.message : "Failed to fetch provider quota"
       set(state => ({
         error: errorMessage,
-        quotaLoadingRuleKeys: {
-          ...state.quotaLoadingRuleKeys,
+        quotaLoadingProviderKeys: {
+          ...state.quotaLoadingProviderKeys,
           [key]: false,
         },
       }))

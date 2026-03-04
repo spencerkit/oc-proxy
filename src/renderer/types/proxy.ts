@@ -93,7 +93,7 @@ export type Provider = Rule
 
 /**
  * Proxy group interface
- * Organizes rules under a single path endpoint
+ * Organizes providers under a single path endpoint
  */
 export interface Group {
   id: string
@@ -101,8 +101,8 @@ export interface Group {
   models: string[]
   activeProviderId: string | null
   providers: Provider[]
-  activeRuleId: string | null
-  rules: Provider[]
+  activeRuleId?: string | null
+  rules?: Provider[]
 }
 
 /**

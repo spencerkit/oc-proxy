@@ -22,12 +22,12 @@ export const ServicePage: React.FC = () => {
     status,
     activeGroupId,
     setActiveGroupId,
-    ruleQuotas,
-    ruleCardStatsByRuleKey,
-    quotaLoadingRuleKeys,
+    providerQuotas,
+    providerCardStatsByProviderKey,
+    quotaLoadingProviderKeys,
     fetchGroupQuotas,
-    fetchGroupRuleCardStats,
-    fetchRuleQuota,
+    fetchGroupProviderCardStats,
+    fetchProviderQuota,
   } = useProxyStore()
   const { showToast } = useLogs()
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
@@ -77,8 +77,8 @@ export const ServicePage: React.FC = () => {
 
   React.useEffect(() => {
     if (!activeGroupId) return
-    void fetchGroupRuleCardStats(activeGroupId, providerCardStatsHours)
-  }, [activeGroupId, fetchGroupRuleCardStats])
+    void fetchGroupProviderCardStats(activeGroupId, providerCardStatsHours)
+  }, [activeGroupId, fetchGroupProviderCardStats])
 
   React.useEffect(() => {
     if (!activeGroupId) return
@@ -91,10 +91,10 @@ export const ServicePage: React.FC = () => {
   React.useEffect(() => {
     if (!activeGroupId) return
     const timer = window.setInterval(() => {
-      void fetchGroupRuleCardStats(activeGroupId, providerCardStatsHours)
+      void fetchGroupProviderCardStats(activeGroupId, providerCardStatsHours)
     }, providerCardStatsRefreshIntervalMs)
     return () => window.clearInterval(timer)
-  }, [activeGroupId, fetchGroupRuleCardStats])
+  }, [activeGroupId, fetchGroupProviderCardStats])
 
   const handleSelectGroup = (groupId: string) => {
     setActiveGroupId(groupId)
@@ -133,8 +133,6 @@ export const ServicePage: React.FC = () => {
       models: [],
       activeProviderId: null,
       providers: [],
-      activeRuleId: null,
-      rules: [],
     }
 
     const newConfig: ProxyConfig = {
@@ -186,7 +184,6 @@ export const ServicePage: React.FC = () => {
         return {
           ...group,
           activeProviderId: providerId,
-          activeRuleId: providerId,
         }
       })
 
@@ -217,9 +214,7 @@ export const ServicePage: React.FC = () => {
         return {
           ...group,
           providers: newProviders,
-          rules: newProviders,
           activeProviderId: newActiveId,
-          activeRuleId: newActiveId,
         }
       }
       return group
@@ -240,7 +235,7 @@ export const ServicePage: React.FC = () => {
   const handleRefreshProviderQuota = async (providerId: string) => {
     if (!activeGroupId) return
     try {
-      await fetchRuleQuota(activeGroupId, providerId)
+      await fetchProviderQuota(activeGroupId, providerId)
     } catch (error) {
       showToast(t("errors.operationFailed", { message: String(error) }), "error")
     }
@@ -272,31 +267,31 @@ export const ServicePage: React.FC = () => {
   }, [activeGroup, serverBaseUrls])
 
   const activeGroupQuotaByProviderId = React.useMemo(() => {
-    const map: Record<string, (typeof ruleQuotas)[string] | undefined> = {}
+    const map: Record<string, (typeof providerQuotas)[string] | undefined> = {}
     if (!activeGroup) return map
     for (const provider of activeGroup.providers) {
-      map[provider.id] = ruleQuotas[`${activeGroup.id}:${provider.id}`]
+      map[provider.id] = providerQuotas[`${activeGroup.id}:${provider.id}`]
     }
     return map
-  }, [activeGroup, ruleQuotas])
+  }, [activeGroup, providerQuotas])
 
   const activeGroupQuotaLoadingByProviderId = React.useMemo(() => {
     const map: Record<string, boolean> = {}
     if (!activeGroup) return map
     for (const provider of activeGroup.providers) {
-      map[provider.id] = !!quotaLoadingRuleKeys[`${activeGroup.id}:${provider.id}`]
+      map[provider.id] = !!quotaLoadingProviderKeys[`${activeGroup.id}:${provider.id}`]
     }
     return map
-  }, [activeGroup, quotaLoadingRuleKeys])
+  }, [activeGroup, quotaLoadingProviderKeys])
 
-  const activeGroupRuleCardStatsByProviderId = React.useMemo(() => {
-    const map: Record<string, (typeof ruleCardStatsByRuleKey)[string] | undefined> = {}
+  const activeGroupProviderCardStatsByProviderId = React.useMemo(() => {
+    const map: Record<string, (typeof providerCardStatsByProviderKey)[string] | undefined> = {}
     if (!activeGroup) return map
     for (const provider of activeGroup.providers) {
-      map[provider.id] = ruleCardStatsByRuleKey[`${activeGroup.id}:${provider.id}`]
+      map[provider.id] = providerCardStatsByProviderKey[`${activeGroup.id}:${provider.id}`]
     }
     return map
-  }, [activeGroup, ruleCardStatsByRuleKey])
+  }, [activeGroup, providerCardStatsByProviderKey])
 
   return (
     <div className={styles.servicePage}>
@@ -406,7 +401,7 @@ export const ServicePage: React.FC = () => {
               </div>
             </div>
 
-            {/* Rule List */}
+            {/* Provider List */}
             <RuleList
               providers={activeGroup.providers}
               activeProviderId={activeGroup.activeProviderId}
@@ -415,14 +410,14 @@ export const ServicePage: React.FC = () => {
               activatingProviderId={activatingProviderId}
               quotaByRuleId={activeGroupQuotaByProviderId}
               quotaLoadingByRuleId={activeGroupQuotaLoadingByProviderId}
-              cardStatsByRuleId={activeGroupRuleCardStatsByProviderId}
+              cardStatsByRuleId={activeGroupProviderCardStatsByProviderId}
               onRefreshQuota={handleRefreshProviderQuota}
               onDelete={handleRequestDeleteProvider}
               groupName={activeGroup.name}
               groupId={activeGroup.id}
             />
 
-            {/* Rule Detail (when rule is selected) */}
+            {/* Provider Detail (when provider is selected) */}
             {selectedProviderId && activeProvider && (
               <div className={styles.ruleDetail}>
                 <h3>{activeProvider.name}</h3>

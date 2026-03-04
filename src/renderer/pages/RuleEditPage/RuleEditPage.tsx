@@ -186,7 +186,7 @@ const formatQuotaPreviewByUnitType = (
  * Page for editing an existing rule
  */
 export const RuleEditPage: React.FC = () => {
-  const { groupId, ruleId } = useParams<{ groupId: string; ruleId: string }>()
+  const { groupId, providerId } = useParams<{ groupId: string; providerId: string }>()
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { config, saveConfig } = useProxyStore()
@@ -238,7 +238,7 @@ export const RuleEditPage: React.FC = () => {
 
   // Find the group and provider
   const group = config?.groups.find(g => g.id === groupId)
-  const provider = group?.providers.find(item => item.id === ruleId)
+  const provider = group?.providers.find(item => item.id === providerId)
   const quotaDraftFingerprint = JSON.stringify({
     token,
     name,
@@ -479,7 +479,7 @@ export const RuleEditPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!config || !groupId || !ruleId) return
+    if (!config || !groupId || !providerId) return
     if (!validateForm()) return
 
     const quotaHeaders = parseQuotaHeaders(quotaHeadersText)
@@ -508,7 +508,7 @@ export const RuleEditPage: React.FC = () => {
           return {
             ...group,
             providers: group.providers.map(r =>
-              r.id === ruleId
+              r.id === providerId
                 ? {
                     ...r,
                     name: name.trim(),

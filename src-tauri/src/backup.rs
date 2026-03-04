@@ -92,8 +92,8 @@ mod tests {
                     "id": "g1",
                     "name": "Group 1",
                     "models": [],
-                    "activeRuleId": null,
-                    "rules": []
+                    "activeProviderId": null,
+                    "providers": []
                 }
             ]
         }))
@@ -108,8 +108,8 @@ mod tests {
                 "id": "g2",
                 "name": "Group 2",
                 "models": [],
-                "activeRuleId": null,
-                "rules": []
+                "activeProviderId": null,
+                "providers": []
             }
         ]))
         .expect("payload should parse");
@@ -125,14 +125,31 @@ mod tests {
                         "id": "g3",
                         "name": "Group 3",
                         "models": [],
-                        "activeRuleId": null,
-                        "rules": []
+                        "activeProviderId": null,
+                        "providers": []
                     }
                 ]
             }
         }))
         .expect("payload should parse");
         assert_eq!(out[0].id, "g3");
+    }
+
+    #[test]
+    fn extract_groups_from_import_payload_supports_legacy_fields() {
+        let out = extract_groups_from_import_payload(&json!({
+            "groups": [
+                {
+                    "id": "legacy",
+                    "name": "Legacy Group",
+                    "models": [],
+                    "activeRuleId": null,
+                    "rules": []
+                }
+            ]
+        }))
+        .expect("legacy payload should parse");
+        assert_eq!(out[0].id, "legacy");
     }
 
     #[test]
