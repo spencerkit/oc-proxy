@@ -8,14 +8,17 @@ use crate::domain::entities::{
 };
 use serde::Deserialize;
 
+/// Performs default config version.
 pub fn default_config_version() -> u32 {
     CURRENT_CONFIG_VERSION
 }
 
+/// Performs default quota auto refresh minutes.
 pub fn default_quota_auto_refresh_minutes() -> u32 {
     5
 }
 
+/// Performs default remote git config.
 pub fn default_remote_git_config() -> RemoteGitConfig {
     RemoteGitConfig {
         enabled: false,
@@ -25,6 +28,7 @@ pub fn default_remote_git_config() -> RemoteGitConfig {
     }
 }
 
+/// Performs default config.
 pub fn default_config() -> ProxyConfig {
     ProxyConfig {
         config_version: default_config_version(),
@@ -60,6 +64,7 @@ pub fn default_config() -> ProxyConfig {
     }
 }
 
+/// Performs default metrics.
 pub fn default_metrics() -> ProxyMetrics {
     ProxyMetrics {
         requests: 0,
@@ -129,6 +134,7 @@ struct PartialProxyConfig {
     groups: Option<serde_json::Value>,
 }
 
+/// Normalizes config for this module's workflow.
 pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String> {
     let defaults = default_config();
     let partial = serde_json::from_value::<PartialProxyConfig>(input)

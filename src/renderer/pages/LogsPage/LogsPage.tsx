@@ -35,6 +35,7 @@ const MACARON = {
 
 type LogsTab = "stats" | "logs"
 
+/** Resolves display prefix for a currency code. */
 function resolveCurrencyPrefix(currency?: string | null): string {
   const normalized = currency?.trim().toUpperCase()
   if (!normalized) return "$"
@@ -45,6 +46,7 @@ function resolveCurrencyPrefix(currency?: string | null): string {
   return `${normalized} `
 }
 
+/** Formats chart X-axis hour labels according to selected time window. */
 function formatHourLabel(hourIso: string, hoursFilter: number): string {
   const date = new Date(hourIso)
   if (Number.isNaN(date.getTime())) return hourIso
@@ -81,6 +83,7 @@ function getMonthDisplay(date: Date): string {
   return date.toLocaleDateString([], { year: "numeric", month: "long" })
 }
 
+/** Formats large token counts for chart axis labels (k/M). */
 function formatTokenAxisValue(value: number | string): string {
   const numeric = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(numeric)) return String(value)
@@ -97,6 +100,7 @@ function formatTokenAxisValue(value: number | string): string {
   return String(Math.round(numeric))
 }
 
+/** Formats tokens-per-second metric for UI display. */
 function formatTpsMetric(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0"
   const rounded = Math.round(value)
@@ -105,6 +109,7 @@ function formatTpsMetric(value: number): string {
   return String(rounded)
 }
 
+/** Formats accumulated cost metric with currency prefix. */
 function formatCostMetric(value: number, currency?: string | null): string {
   const safe = Number.isFinite(value) ? Math.max(0, value) : 0
   const prefix = resolveCurrencyPrefix(currency)
@@ -114,6 +119,7 @@ function formatCostMetric(value: number, currency?: string | null): string {
   return `${prefix}${safe.toFixed(2)}`
 }
 
+/** Formats comparison delta as signed percentage text. */
 function formatDelta(delta: number): string {
   if (!Number.isFinite(delta) || Math.abs(delta) < 0.01) return "0%"
   const abs = Math.abs(delta)

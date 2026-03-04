@@ -39,6 +39,7 @@ enum StatsDimension {
 }
 
 impl StatsDimension {
+    /// Performs as str.
     fn as_str(&self) -> &'static str {
         match self {
             Self::Rule => "rule",
@@ -68,6 +69,7 @@ struct WindowAggregate {
 }
 
 impl StatsStore {
+    /// Performs new.
     pub fn new(file_path: PathBuf) -> Self {
         let conn = Connection::open(&file_path).unwrap_or_else(|_| {
             Connection::open_in_memory()
@@ -79,6 +81,7 @@ impl StatsStore {
         }
     }
 
+    /// Initializes data for this module's workflow.
     pub fn initialize(&self) -> Result<(), String> {
         if let Some(parent) = self.db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("create stats dir failed: {e}"))?;
@@ -91,6 +94,7 @@ impl StatsStore {
         Ok(())
     }
 
+    /// Performs append log.
     pub fn append_log(&self, entry: &LogEntry) {
         if !entry.request_path.starts_with("/oc/") {
             return;
@@ -171,6 +175,7 @@ impl StatsStore {
         );
     }
 
+    /// Performs summarize.
     pub fn summarize(
         &self,
         hours: Option<u32>,
@@ -268,6 +273,7 @@ impl StatsStore {
         }
     }
 
+    /// Performs summarize rule cards.
     pub fn summarize_rule_cards(
         &self,
         group_id: &str,
@@ -380,6 +386,7 @@ impl StatsStore {
             .collect()
     }
 
+    /// Clears data for this module's workflow.
     pub fn clear(&self) -> Result<(), String> {
         let conn = self
             .conn
@@ -404,6 +411,7 @@ impl StatsStore {
     }
 }
 
+/// Initializes schema for this module's workflow.
 fn initialize_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS app_meta (
@@ -451,6 +459,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+/// Performs query rule options.
 fn query_rule_options(conn: &Connection) -> Result<Vec<StatsRuleOption>, String> {
     let mut stmt = conn
         .prepare(
@@ -481,6 +490,7 @@ fn query_rule_options(conn: &Connection) -> Result<Vec<StatsRuleOption>, String>
     Ok(rows.flatten().collect())
 }
 
+/// Performs aggregate window.
 fn aggregate_window(
     conn: &Connection,
     start: DateTime<Utc>,
@@ -669,6 +679,7 @@ fn aggregate_window(
     Ok(aggregate)
 }
 
+/// Builds rule filter.
 fn build_rule_filter(selection: &RuleSelection) -> (String, Vec<SqlValue>) {
     match selection {
         RuleSelection::All => (String::new(), vec![]),
@@ -693,6 +704,7 @@ fn build_rule_filter(selection: &RuleSelection) -> (String, Vec<SqlValue>) {
     }
 }
 
+/// Performs empty summary.
 fn empty_summary(
     dimension: StatsDimension,
     requested_hours: u32,
@@ -729,6 +741,7 @@ fn empty_summary(
     }
 }
 
+/// Normalizes rule selection for this module's workflow.
 fn normalize_rule_selection(
     rule_keys: Option<Vec<String>>,
     legacy_rule_key: Option<&str>,
@@ -755,6 +768,7 @@ fn normalize_rule_selection(
     }
 }
 
+/// Normalizes rule key for this module's workflow.
 fn normalize_rule_key(rule_key: &str) -> Option<String> {
     let mut parts = rule_key.splitn(2, "::");
     let group = parts.next().unwrap_or_default().trim();
@@ -765,6 +779,7 @@ fn normalize_rule_key(rule_key: &str) -> Option<String> {
     Some(format!("{group}::{rule}"))
 }
 
+/// Performs selection to rule keys.
 fn selection_to_rule_keys(selection: &RuleSelection) -> Option<Vec<String>> {
     match selection {
         RuleSelection::All => None,
@@ -777,6 +792,7 @@ fn selection_to_rule_keys(selection: &RuleSelection) -> Option<Vec<String>> {
     }
 }
 
+/// Normalizes dimension for this module's workflow.
 fn normalize_dimension(dimension: Option<&str>) -> StatsDimension {
     match dimension.unwrap_or_default().trim() {
         "protocol" => StatsDimension::Protocol,
@@ -785,6 +801,7 @@ fn normalize_dimension(dimension: Option<&str>) -> StatsDimension {
     }
 }
 
+/// Performs duration seconds metric.
 fn duration_seconds_metric(total_duration_ms: u64, requests: u64) -> f64 {
     if total_duration_ms > 0 {
         return total_duration_ms as f64 / 1000.0;
@@ -795,6 +812,7 @@ fn duration_seconds_metric(total_duration_ms: u64, requests: u64) -> f64 {
     1.0
 }
 
+/// Performs token speed metric.
 fn token_speed_metric(total_tokens: u64, duration_seconds: f64) -> f64 {
     if duration_seconds <= 0.0 {
         0.0
@@ -803,6 +821,7 @@ fn token_speed_metric(total_tokens: u64, duration_seconds: f64) -> f64 {
     }
 }
 
+/// Performs pct delta.
 fn pct_delta(current: f64, previous: f64) -> f64 {
     if previous.abs() <= f64::EPSILON {
         if current.abs() <= f64::EPSILON {
@@ -815,6 +834,7 @@ fn pct_delta(current: f64, previous: f64) -> f64 {
     }
 }
 
+/// Performs compute peaks.
 fn compute_peaks(hourly: &BTreeMap<String, HourlyStatsPoint>) -> (f64, f64) {
     let mut peak_input_tps: f64 = 0.0;
     let mut peak_output_tps: f64 = 0.0;
@@ -828,6 +848,7 @@ fn compute_peaks(hourly: &BTreeMap<String, HourlyStatsPoint>) -> (f64, f64) {
     (peak_input_tps, peak_output_tps)
 }
 
+/// Builds breakdowns.
 fn build_breakdowns(aggregate: &WindowAggregate) -> StatsBreakdowns {
     StatsBreakdowns {
         errors_by_status: build_count_breakdown(&aggregate.errors_by_status, aggregate.errors),
@@ -850,6 +871,7 @@ fn build_breakdowns(aggregate: &WindowAggregate) -> StatsBreakdowns {
     }
 }
 
+/// Builds count breakdown.
 fn build_count_breakdown(
     values: &HashMap<String, u64>,
     total: u64,
@@ -870,6 +892,7 @@ fn build_count_breakdown(
     items
 }
 
+/// Builds token breakdown.
 fn build_token_breakdown(
     values: &HashMap<String, u64>,
     total: u64,
@@ -890,6 +913,7 @@ fn build_token_breakdown(
     items
 }
 
+/// Builds ranked count breakdown.
 fn build_ranked_count_breakdown(
     values: &HashMap<String, (String, u64)>,
     total: u64,
@@ -911,6 +935,7 @@ fn build_ranked_count_breakdown(
     items
 }
 
+/// Builds ranked token breakdown.
 fn build_ranked_token_breakdown(
     values: &HashMap<String, (String, u64)>,
     total: u64,
@@ -932,6 +957,7 @@ fn build_ranked_token_breakdown(
     items
 }
 
+/// Resolves single currency for this module's workflow.
 fn resolve_single_currency(currencies: &HashSet<String>) -> Option<String> {
     if currencies.is_empty() {
         return None;
@@ -942,12 +968,14 @@ fn resolve_single_currency(currencies: &HashSet<String>) -> Option<String> {
     Some("MIXED".to_string())
 }
 
+/// Normalizes hour for this module's workflow.
 fn normalize_hour(ts: &str) -> Option<String> {
     let mut dt = parse_ts(ts)?;
     dt = dt.with_minute(0)?.with_second(0)?.with_nanosecond(0)?;
     Some(dt.to_rfc3339())
 }
 
+/// Parses ts.
 fn parse_ts(ts: &str) -> Option<DateTime<Utc>> {
     chrono::DateTime::parse_from_rfc3339(ts)
         .ok()

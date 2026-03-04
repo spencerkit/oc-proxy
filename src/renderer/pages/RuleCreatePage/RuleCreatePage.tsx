@@ -34,6 +34,7 @@ const parseQuotaHeaders = (raw: string): Record<string, string> => {
   return next
 }
 
+/** Builds remaining mapping. */
 const buildRemainingMapping = (expr: string) => {
   const nextExpr = expr.trim()
   if (nextExpr) {
@@ -42,6 +43,7 @@ const buildRemainingMapping = (expr: string) => {
   return null
 }
 
+/** Normalizes numeric input. */
 const normalizeNumericInput = (raw: string) => {
   const normalized = raw.replace(/[^0-9.]/g, "")
   const firstDot = normalized.indexOf(".")

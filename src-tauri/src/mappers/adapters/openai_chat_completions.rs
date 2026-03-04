@@ -12,11 +12,15 @@ use super::super::helpers::{
     to_tool_result_content, OpenAIFinishReason,
 };
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use uuid::Uuid;
 
+/// Returns a cloned field only when it exists and is non-null.
 fn non_null(body: &Value, key: &str) -> Option<Value> {
     body.get(key).filter(|v| !v.is_null()).cloned()
 }
 
+/// Normalizes mixed OpenAI content shapes into canonical text blocks.
 fn parse_text_blocks(content: &Value) -> Vec<CanonicalBlock> {
     if let Some(arr) = content.as_array() {
         let mut out = vec![];
@@ -70,6 +74,7 @@ fn parse_text_blocks(content: &Value) -> Vec<CanonicalBlock> {
     vec![CanonicalBlock::Text(content.to_string())]
 }
 
+/// Resolves effective model by prioritizing forced target model option.
 fn resolve_model(body: &Value, options: &MapOptions) -> String {
     if options.target_model.is_empty() {
         str_or_empty(body.get("model"))
@@ -78,6 +83,7 @@ fn resolve_model(body: &Value, options: &MapOptions) -> String {
     }
 }
 
+/// Decodes an OpenAI chat-completions request into canonical request structure.
 pub fn decode_request(body: &Value, options: &MapOptions) -> Result<CanonicalRequest, String> {
     let mut system_chunks: Vec<String> = vec![];
     let mut messages: Vec<CanonicalMessage> = vec![];
@@ -224,6 +230,7 @@ pub fn decode_request(body: &Value, options: &MapOptions) -> Result<CanonicalReq
     })
 }
 
+/// Merges all canonical text blocks into a single plain-text string.
 fn merge_text(blocks: &[CanonicalBlock]) -> String {
     let mut out = String::new();
     for block in blocks {
@@ -234,6 +241,7 @@ fn merge_text(blocks: &[CanonicalBlock]) -> String {
     out
 }
 
+/// Encodes canonical request into OpenAI chat-completions request JSON.
 pub fn encode_request(request: &CanonicalRequest) -> Value {
     let mut messages: Vec<Value> = vec![];
 
@@ -383,6 +391,7 @@ pub fn encode_request(request: &CanonicalRequest) -> Value {
     req
 }
 
+/// Decodes OpenAI chat-completions response JSON into canonical response structure.
 pub fn decode_response(openai_response: &Value, request_model: &str) -> CanonicalResponse {
     let choice = openai_response
         .get("choices")
@@ -469,6 +478,7 @@ pub fn decode_response(openai_response: &Value, request_model: &str) -> Canonica
     }
 }
 
+/// Encodes canonical response into OpenAI chat-completions response JSON.
 pub fn encode_response(response: &CanonicalResponse) -> Value {
     let tool_calls = response
         .tool_calls
@@ -523,4 +533,422 @@ pub fn encode_response(response: &CanonicalResponse) -> Value {
             "total_tokens": total_tokens,
         }
     })
+}
+
+#[derive(Clone)]
+struct ResponsesToolState {
+    index: usize,
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+pub(crate) struct OpenaiResponsesToChatStreamMapper {
+    request_model: String,
+    upstream_id: Option<String>,
+    upstream_model: Option<String>,
+    upstream_created: Option<i64>,
+    final_usage: Option<Value>,
+    final_finish_reason: Option<String>,
+    done_emitted: bool,
+    saw_tool_call: bool,
+    tool_states: HashMap<String, ResponsesToolState>,
+    output_index_to_tool_id: HashMap<usize, String>,
+    next_tool_index: usize,
+}
+
+impl OpenaiResponsesToChatStreamMapper {
+    /// Creates a stream mapper that converts `responses` SSE events into chat chunks.
+    pub(crate) fn new(request_model: &str) -> Self {
+        Self {
+            request_model: request_model.to_string(),
+            upstream_id: None,
+            upstream_model: None,
+            upstream_created: None,
+            final_usage: None,
+            final_finish_reason: None,
+            done_emitted: false,
+            saw_tool_call: false,
+            tool_states: HashMap::new(),
+            output_index_to_tool_id: HashMap::new(),
+            next_tool_index: 0,
+        }
+    }
+
+    /// Consumes one `responses` SSE JSON payload and emits chat-completions chunks.
+    pub(crate) fn on_stream_payload(
+        &mut self,
+        event: Option<&str>,
+        payload: &Value,
+    ) -> Vec<Value> {
+        let mut out = Vec::new();
+        self.update_common_metadata(payload);
+        let event_name = self.resolve_event_name(event, payload);
+
+        if let Some(name) = event_name.as_deref() {
+            match name {
+                "response.output_text.delta" => {
+                    if let Some(text) = payload
+                        .get("delta")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| payload.get("text").and_then(|v| v.as_str()))
+                    {
+                        self.emit_chat_delta(json!({ "content": text }), None, &mut out);
+                    }
+                }
+                "response.output_item.added" => {
+                    let item = Self::response_item(payload);
+                    if item.and_then(|v| v.get("type")).and_then(|v| v.as_str())
+                        == Some("function_call")
+                    {
+                        let output_index = Self::output_index_from_payload(payload, item);
+                        let call_id = Self::call_id_from_payload(payload, item);
+                        let name = item
+                            .and_then(|v| v.get("name"))
+                            .and_then(|v| v.as_str())
+                            .map(|v| v.to_string());
+                        self.ensure_tool_state(call_id, output_index, name);
+                        self.saw_tool_call = true;
+                    }
+                }
+                "response.function_call_arguments.delta" => {
+                    let item = Self::response_item(payload);
+                    let output_index = Self::output_index_from_payload(payload, item);
+                    let call_id = Self::call_id_from_payload(payload, item);
+                    let name = item
+                        .and_then(|v| v.get("name"))
+                        .and_then(|v| v.as_str())
+                        .map(|v| v.to_string());
+                    let key = self.ensure_tool_state(call_id, output_index, name);
+                    if let Some(delta) = payload.get("delta").and_then(|v| v.as_str()) {
+                        self.emit_tool_delta(&key, delta, &mut out);
+                    }
+                }
+                "response.output_item.done" => {
+                    let item = Self::response_item(payload);
+                    if item.and_then(|v| v.get("type")).and_then(|v| v.as_str())
+                        == Some("function_call")
+                    {
+                        let output_index = Self::output_index_from_payload(payload, item);
+                        let call_id = Self::call_id_from_payload(payload, item);
+                        let name = item
+                            .and_then(|v| v.get("name"))
+                            .and_then(|v| v.as_str())
+                            .map(|v| v.to_string());
+                        let key = self.ensure_tool_state(call_id, output_index, name);
+                        if let Some(arguments) = item
+                            .and_then(|v| v.get("arguments"))
+                            .and_then(|v| v.as_str())
+                        {
+                            if let Some(state) = self.tool_states.get(&key) {
+                                if state.arguments.is_empty() {
+                                    self.emit_tool_delta(&key, arguments, &mut out);
+                                }
+                            }
+                        }
+                    }
+                }
+                "response.completed" => {
+                    self.final_finish_reason = self.event_finish_reason_from_completed(payload);
+                    out.extend(self.finish());
+                }
+                _ => {}
+            }
+        }
+
+        out
+    }
+
+    /// Finalizes mapping when upstream emits `[DONE]`.
+    pub(crate) fn on_done(&mut self) -> Vec<Value> {
+        self.finish()
+    }
+
+    /// Flushes exactly one final chat chunk with finish reason/usage.
+    pub(crate) fn finish(&mut self) -> Vec<Value> {
+        if self.done_emitted {
+            return Vec::new();
+        }
+        let finish_reason = self.final_finish_reason.clone().unwrap_or_else(|| {
+            if self.saw_tool_call {
+                "tool_calls".to_string()
+            } else {
+                "stop".to_string()
+            }
+        });
+        let mut out = Vec::new();
+        self.emit_chat_delta(json!({}), Some(&finish_reason), &mut out);
+        self.done_emitted = true;
+        out
+    }
+
+    /// Builds a fallback non-stream chat-completion JSON from accumulated metadata.
+    pub(crate) fn final_chat_response_json(&self) -> Option<Value> {
+        let id = self
+            .upstream_id
+            .clone()
+            .unwrap_or_else(|| format!("chatcmpl_{}", Uuid::new_v4().simple()));
+        let model = if !self.request_model.is_empty() {
+            self.request_model.clone()
+        } else {
+            self.upstream_model
+                .clone()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "unknown".to_string())
+        };
+        let usage = self.final_usage.clone().unwrap_or_else(|| {
+            json!({
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            })
+        });
+        Some(json!({
+            "id": id,
+            "object": "chat.completion",
+            "created": self.upstream_created.unwrap_or_else(|| chrono::Utc::now().timestamp()),
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                },
+                "finish_reason": self.final_finish_reason.clone().unwrap_or_else(|| "stop".to_string()),
+            }],
+            "usage": usage,
+        }))
+    }
+
+    /// Updates shared metadata fields (id/model/created/usage) from incoming payload.
+    fn update_common_metadata(&mut self, payload: &Value) {
+        if let Some(id) = payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .or_else(|| payload.get("response").and_then(|v| v.get("id")).and_then(|v| v.as_str()))
+        {
+            self.upstream_id = Some(id.to_string());
+        }
+        if let Some(model) = payload
+            .get("model")
+            .and_then(|v| v.as_str())
+            .or_else(|| payload.get("response").and_then(|v| v.get("model")).and_then(|v| v.as_str()))
+        {
+            self.upstream_model = Some(model.to_string());
+        }
+        if let Some(created) = payload
+            .get("created")
+            .and_then(|v| v.as_i64())
+            .or_else(|| payload.get("created_at").and_then(|v| v.as_i64()))
+            .or_else(|| payload.get("response").and_then(|v| v.get("created_at")).and_then(|v| v.as_i64()))
+        {
+            self.upstream_created = Some(created);
+        }
+        if let Some(usage) = payload
+            .get("usage")
+            .or_else(|| payload.get("response").and_then(|v| v.get("usage")))
+        {
+            if let Some(summary) = extract_openai_usage_summary(usage) {
+                self.final_usage = Some(json!({
+                    "prompt_tokens": summary.input_tokens,
+                    "completion_tokens": summary.output_tokens,
+                    "total_tokens": summary
+                        .total_tokens
+                        .unwrap_or(summary.input_tokens + summary.output_tokens),
+                }));
+            }
+        }
+    }
+
+    /// Resolves event name from explicit SSE event header or payload `type`.
+    fn resolve_event_name(&self, event: Option<&str>, payload: &Value) -> Option<String> {
+        event
+            .map(|v| v.to_string())
+            .or_else(|| payload.get("type").and_then(|v| v.as_str()).map(|v| v.to_string()))
+    }
+
+    /// Appends one chat-completions chunk object to output.
+    fn emit_chat_delta(
+        &self,
+        delta: Value,
+        finish_reason: Option<&str>,
+        out: &mut Vec<Value>,
+    ) {
+        let mut choice = json!({
+            "index": 0,
+            "delta": delta,
+            "finish_reason": Value::Null,
+        });
+        if let Some(reason) = finish_reason {
+            choice["finish_reason"] = json!(reason);
+        }
+
+        let mut chunk = json!({
+            "id": self
+                .upstream_id
+                .clone()
+                .unwrap_or_else(|| format!("chatcmpl_{}", Uuid::new_v4().simple())),
+            "object": "chat.completion.chunk",
+            "created": self
+                .upstream_created
+                .unwrap_or_else(|| chrono::Utc::now().timestamp()),
+            "model": if !self.request_model.is_empty() {
+                self.request_model.clone()
+            } else {
+                self.upstream_model
+                    .clone()
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or_else(|| "unknown".to_string())
+            },
+            "choices": [choice],
+        });
+        if finish_reason.is_some() {
+            if let Some(usage) = self.final_usage.clone() {
+                chunk["usage"] = usage;
+            }
+        }
+        out.push(chunk);
+    }
+
+    /// Creates or updates tool-call state keyed by call id/output index.
+    fn ensure_tool_state(
+        &mut self,
+        tool_id: Option<String>,
+        output_index: Option<usize>,
+        tool_name: Option<String>,
+    ) -> String {
+        let mut key = tool_id.unwrap_or_else(|| {
+            if let Some(index) = output_index {
+                if let Some(existing) = self.output_index_to_tool_id.get(&index) {
+                    return existing.clone();
+                }
+                format!("call_{index}")
+            } else {
+                format!("call_{}", Uuid::new_v4().simple())
+            }
+        });
+        if key.is_empty() {
+            key = format!("call_{}", Uuid::new_v4().simple());
+        }
+        if let Some(index) = output_index {
+            self.output_index_to_tool_id.insert(index, key.clone());
+        }
+        let index = if let Some(existing) = self.tool_states.get(&key) {
+            existing.index
+        } else {
+            let idx = self.next_tool_index;
+            self.next_tool_index += 1;
+            idx
+        };
+        let entry = self
+            .tool_states
+            .entry(key.clone())
+            .or_insert_with(|| ResponsesToolState {
+                index,
+                id: key.clone(),
+                name: tool_name
+                    .clone()
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or_else(|| "tool".to_string()),
+                arguments: String::new(),
+            });
+        if let Some(name) = tool_name {
+            if !name.is_empty() {
+                entry.name = name;
+            }
+        }
+        key
+    }
+
+    /// Emits incremental tool-call argument delta as chat `tool_calls` chunk.
+    fn emit_tool_delta(&mut self, tool_key: &str, args_delta: &str, out: &mut Vec<Value>) {
+        if args_delta.is_empty() {
+            return;
+        }
+        let Some(state) = self.tool_states.get_mut(tool_key) else {
+            return;
+        };
+        state.arguments.push_str(args_delta);
+        let tool_index = state.index;
+        let tool_id = state.id.clone();
+        let tool_name = state.name.clone();
+        self.saw_tool_call = true;
+        self.emit_chat_delta(
+            json!({
+                "tool_calls": [{
+                    "index": tool_index,
+                    "id": tool_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": args_delta,
+                    }
+                }]
+            }),
+            None,
+            out,
+        );
+    }
+
+    /// Infers chat finish_reason from `response.completed` payload status/output.
+    fn event_finish_reason_from_completed(&self, payload: &Value) -> Option<String> {
+        let status = payload
+            .get("response")
+            .and_then(|v| v.get("status"))
+            .and_then(|v| v.as_str())
+            .or_else(|| payload.get("status").and_then(|v| v.as_str()));
+        if status == Some("incomplete") {
+            return Some("length".to_string());
+        }
+        let has_function_call = payload
+            .get("response")
+            .and_then(|v| v.get("output"))
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter().any(|item| {
+                    item.get("type").and_then(|v| v.as_str()) == Some("function_call")
+                })
+            })
+            .unwrap_or(false);
+        if has_function_call || self.saw_tool_call {
+            return Some("tool_calls".to_string());
+        }
+        Some("stop".to_string())
+    }
+
+    /// Extracts nested `item` object from responses event payload.
+    fn response_item(payload: &Value) -> Option<&Value> {
+        payload.get("item")
+    }
+
+    /// Resolves output index from top-level event or nested item object.
+    fn output_index_from_payload(payload: &Value, item: Option<&Value>) -> Option<usize> {
+        payload
+            .get("output_index")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .or_else(|| {
+                item.and_then(|v| v.get("output_index"))
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+            })
+    }
+
+    /// Resolves call id using top-level field first, then nested item fields.
+    fn call_id_from_payload(payload: &Value, item: Option<&Value>) -> Option<String> {
+        payload
+            .get("call_id")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string())
+            .or_else(|| {
+                item.and_then(|v| v.get("call_id"))
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+            })
+            .or_else(|| {
+                item.and_then(|v| v.get("id"))
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string())
+            })
+    }
 }

@@ -12,6 +12,7 @@ use tauri::AppHandle;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 
+/// Performs export groups to file.
 pub async fn export_groups_to_file(
     state: &SharedState,
     app: &AppHandle,
@@ -48,6 +49,7 @@ pub async fn export_groups_to_file(
     })
 }
 
+/// Performs export groups to folder.
 pub async fn export_groups_to_folder(
     state: &SharedState,
     app: &AppHandle,
@@ -83,6 +85,7 @@ pub async fn export_groups_to_folder(
     })
 }
 
+/// Performs export groups to clipboard.
 pub async fn export_groups_to_clipboard(
     state: &SharedState,
     app: &AppHandle,
@@ -106,6 +109,7 @@ pub async fn export_groups_to_clipboard(
     })
 }
 
+/// Performs import groups from file.
 pub async fn import_groups_from_file(
     state: &SharedState,
     app: &AppHandle,
@@ -147,6 +151,7 @@ pub async fn import_groups_from_file(
     .await
 }
 
+/// Performs import groups from JSON text.
 pub async fn import_groups_from_json_text(
     state: &SharedState,
     json_text: String,

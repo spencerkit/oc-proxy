@@ -260,6 +260,7 @@ impl ProxyRuntime {
         self.inner.stats_store.clear_before(before_epoch_ms)
     }
 
+    /// Returns whether running is true.
     fn is_running(&self) -> bool {
         self.inner
             .server
@@ -287,6 +288,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    /// Extracts token usage reads nested response usage payload for this module's workflow.
     fn extract_token_usage_reads_nested_response_usage_payload() {
         let payload = json!({
             "response": {
@@ -306,6 +308,7 @@ mod tests {
     }
 
     #[test]
+    /// Extracts token usage maps OpenAI prompt and cache fields for this module's workflow.
     fn extract_token_usage_maps_openai_prompt_and_cache_fields() {
         let payload = json!({
             "usage": {
@@ -326,6 +329,7 @@ mod tests {
     }
 
     #[test]
+    /// Extracts token usage reads message and delta usage payloads for this module's workflow.
     fn extract_token_usage_reads_message_and_delta_usage_payloads() {
         let message_payload = json!({
             "message": {
@@ -355,6 +359,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs stream token accumulator aggregates usage from chunked SSE.
     fn stream_token_accumulator_aggregates_usage_from_chunked_sse() {
         let mut acc = StreamTokenAccumulator::default();
         acc.consume_chunk(
@@ -376,6 +381,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs stream token accumulator returns none when usage missing.
     fn stream_token_accumulator_returns_none_when_usage_missing() {
         let mut acc = StreamTokenAccumulator::default();
         acc.consume_chunk(b"event: ping\ndata: hello\n\n");
@@ -384,6 +390,7 @@ mod tests {
     }
 
     #[test]
+    /// Resolves target model uses group and rule mapping for this module's workflow.
     fn resolve_target_model_uses_group_and_rule_mapping() {
         let mut mappings = HashMap::new();
         mappings.insert("m1".to_string(), "gpt-x".to_string());
@@ -411,6 +418,7 @@ mod tests {
     }
 
     #[test]
+    /// Resolves target model falls back to default model when unmatched for this module's workflow.
     fn resolve_target_model_falls_back_to_default_model_when_unmatched() {
         let rule = Rule {
             id: "r1".to_string(),
@@ -436,6 +444,7 @@ mod tests {
     }
 
     #[test]
+    /// Builds upstream body passes through request shape with target model.
     fn build_upstream_body_passes_through_request_shape_with_target_model() {
         let entry = PathEntry {
             protocol: EntryProtocol::Openai,
@@ -458,6 +467,7 @@ mod tests {
     }
 
     #[test]
+    /// Builds upstream body forces non stream for messages to responses.
     fn build_upstream_body_forces_non_stream_for_messages_to_responses() {
         let entry = PathEntry {
             protocol: EntryProtocol::Anthropic,
@@ -482,6 +492,7 @@ mod tests {
     }
 
     #[test]
+    /// Builds upstream body drops max output tokens for messages to responses.
     fn build_upstream_body_drops_max_output_tokens_for_messages_to_responses() {
         let entry = PathEntry {
             protocol: EntryProtocol::Anthropic,
@@ -505,6 +516,7 @@ mod tests {
     }
 
     #[test]
+    /// Builds upstream body sets auto tool choice for messages to responses when tools exist.
     fn build_upstream_body_sets_auto_tool_choice_for_messages_to_responses_when_tools_exist() {
         let entry = PathEntry {
             protocol: EntryProtocol::Anthropic,
@@ -537,6 +549,7 @@ mod tests {
     }
 
     #[test]
+    /// Builds upstream body defaults stream true when Anthropic stream missing.
     fn build_upstream_body_defaults_stream_true_when_anthropic_stream_missing() {
         let entry = PathEntry {
             protocol: EntryProtocol::Anthropic,
@@ -559,6 +572,7 @@ mod tests {
     }
 
     #[test]
+    /// Resolves request timeout ms extends messages to responses non stream requests for this module's workflow.
     fn resolve_request_timeout_ms_extends_messages_to_responses_non_stream_requests() {
         let entry = PathEntry {
             protocol: EntryProtocol::Anthropic,
@@ -570,6 +584,7 @@ mod tests {
     }
 
     #[test]
+    /// Resolves request timeout ms keeps default for other non stream requests for this module's workflow.
     fn resolve_request_timeout_ms_keeps_default_for_other_non_stream_requests() {
         let entry = PathEntry {
             protocol: EntryProtocol::Anthropic,
@@ -581,6 +596,7 @@ mod tests {
     }
 
     #[test]
+    /// Detects entry protocol supports v1 and non v1 downstream paths for this module's workflow.
     fn detect_entry_protocol_supports_v1_and_non_v1_downstream_paths() {
         assert!(detect_entry_protocol("/chat/completions").is_some());
         assert!(detect_entry_protocol("/responses").is_some());
@@ -591,6 +607,7 @@ mod tests {
     }
 
     #[test]
+    /// Resolves upstream path uses rule protocol enum directly for this module's workflow.
     fn resolve_upstream_path_uses_rule_protocol_enum_directly() {
         assert_eq!(
             resolve_upstream_path(&RuleProtocol::Anthropic),
@@ -604,6 +621,7 @@ mod tests {
     }
 
     #[test]
+    /// Runs a unit test for the expected behavior contract.
     fn contract_extract_token_usage_snapshot() {
         let input: Value = serde_json::from_str(include_str!(
             "contract_fixtures/proxy/extract_token_usage.input.json"

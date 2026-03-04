@@ -4,6 +4,8 @@
 
 English documentation: [../../README.md](../../README.md)
 
+开发文档（数据流/逻辑流）：[development-flow.md](./development-flow.md)
+
 ## 概览
 
 AI Open Router 是基于 Tauri 的桌面应用，内置本地代理运行时。

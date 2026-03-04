@@ -5,6 +5,7 @@
 use crate::config::migrator::CURRENT_CONFIG_VERSION;
 use crate::domain::entities::ProxyConfig;
 
+/// Validates config for this module's workflow.
 pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
     if config.config_version != CURRENT_CONFIG_VERSION {
         return Err(format!("configVersion must be {CURRENT_CONFIG_VERSION}"));
@@ -82,6 +83,7 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    /// Performs default config validates.
     fn default_config_validates() {
         let cfg = default_config();
         let result = validate_config(&cfg);
@@ -90,6 +92,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs invalid config returns error.
     fn invalid_config_returns_error() {
         let mut cfg = default_config();
         cfg.server.host = String::new();
@@ -99,6 +102,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs group active provider must exist.
     fn group_active_provider_must_exist() {
         let mut cfg = default_config();
         cfg.groups = vec![Group {
@@ -124,6 +128,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs ui theme must be valid.
     fn ui_theme_must_be_valid() {
         let mut cfg = default_config();
         cfg.ui.theme = "system".to_string();
@@ -133,6 +138,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs config version must match current.
     fn config_version_must_match_current() {
         let mut cfg = default_config();
         cfg.config_version += 1;
@@ -142,6 +148,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs quota auto refresh minutes must be valid.
     fn quota_auto_refresh_minutes_must_be_valid() {
         let mut cfg = default_config();
         cfg.ui.quota_auto_refresh_minutes = 0;

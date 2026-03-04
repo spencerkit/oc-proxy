@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
+/// Performs get local config updated at.
 fn get_local_config_updated_at(state: &SharedState) -> Option<String> {
     let meta = std::fs::metadata(state.config_store.path()).ok()?;
     let modified = meta.modified().ok()?;
@@ -22,12 +23,14 @@ fn get_local_config_updated_at(state: &SharedState) -> Option<String> {
     Some(dt.to_rfc3339())
 }
 
+/// Parses rfc3339 utc.
 fn parse_rfc3339_utc(ts: &str) -> Option<DateTime<Utc>> {
     chrono::DateTime::parse_from_rfc3339(ts)
         .ok()
         .map(|dt| dt.with_timezone(&Utc))
 }
 
+/// Reads exported at from JSON for this module's workflow.
 fn read_exported_at_from_json(parsed: &Value) -> Option<String> {
     parsed
         .get("exportedAt")
@@ -35,6 +38,7 @@ fn read_exported_at_from_json(parsed: &Value) -> Option<String> {
         .map(|v| v.to_string())
 }
 
+/// Performs upload.
 pub async fn upload(
     state: &SharedState,
     app: &AppHandle,
@@ -67,6 +71,7 @@ pub async fn upload(
     .map_err(AppError::external)
 }
 
+/// Performs pull.
 pub async fn pull(
     state: &SharedState,
     app: &AppHandle,

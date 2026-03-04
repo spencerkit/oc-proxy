@@ -10,6 +10,7 @@ use crate::models::{
 use crate::quota;
 use crate::services::{AppError, AppResult};
 
+/// Performs get rule.
 pub async fn get_rule(
     state: &SharedState,
     group_id: String,
@@ -21,6 +22,7 @@ pub async fn get_rule(
         .map_err(AppError::external)
 }
 
+/// Performs get group.
 pub async fn get_group(state: &SharedState, group_id: String) -> AppResult<Vec<RuleQuotaSnapshot>> {
     let config = state.config_store.get();
     quota::fetch_group_quotas(&config, &group_id)
@@ -28,6 +30,7 @@ pub async fn get_group(state: &SharedState, group_id: String) -> AppResult<Vec<R
         .map_err(AppError::external)
 }
 
+/// Runs a unit test for the expected behavior contract.
 pub async fn test_draft(
     state: &SharedState,
     group_id: String,
