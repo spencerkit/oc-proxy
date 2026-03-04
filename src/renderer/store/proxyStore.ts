@@ -68,7 +68,7 @@ interface ProxyState {
   readClipboardText: () => Promise<ClipboardTextResult>
   setActiveGroupId: (groupId: string | null) => void
   clearLogs: () => Promise<void>
-  clearLogsStats: () => Promise<void>
+  clearLogsStats: (beforeEpochMs?: number) => Promise<void>
   fetchGroupQuotas: (groupId: string) => Promise<void>
   fetchGroupProviderCardStats: (groupId: string, hours?: number) => Promise<void>
   fetchProviderQuota: (groupId: string, providerId: string) => Promise<void>
@@ -470,9 +470,9 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
     }
   },
 
-  clearLogsStats: async () => {
+  clearLogsStats: async (beforeEpochMs?: number) => {
     try {
-      await ipc.clearLogsStats()
+      await ipc.clearLogsStats(beforeEpochMs)
       set({ logsStats: null, error: null })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to clear logs stats"

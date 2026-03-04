@@ -1,6 +1,6 @@
 import type { EChartsOption } from "echarts"
 import * as echarts from "echarts"
-import { Check, RotateCcw, Trash2, X } from "lucide-react"
+import { Check, ChevronLeft, ChevronRight, RotateCcw, Trash2, X } from "lucide-react"
 import type React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
@@ -66,6 +66,21 @@ function formatHourLabel(hourIso: string, hoursFilter: number): string {
   return date.toLocaleDateString([], { month: "2-digit", day: "2-digit" })
 }
 
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function getMonthStart(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+}
+
+function getMonthDisplay(date: Date): string {
+  return date.toLocaleDateString([], { year: "numeric", month: "long" })
+}
+
 function formatTokenAxisValue(value: number | string): string {
   const numeric = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(numeric)) return String(value)
@@ -124,6 +139,9 @@ export const LogsPage: React.FC = () => {
   const [hoursFilter, setHoursFilter] = useState<number>(24)
   const [enableComparison, setEnableComparison] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [showResetStatsConfirm, setShowResetStatsConfirm] = useState(false)
+  const [resetBeforeDate, setResetBeforeDate] = useState(() => toDateInputValue(new Date()))
+  const [resetCalendarMonth, setResetCalendarMonth] = useState(() => getMonthStart(new Date()))
   const hasInitializedProviderSelectionRef = useRef(false)
   const providerComboboxRef = useRef<HTMLDivElement | null>(null)
   const usageChartDomRef = useRef<HTMLDivElement | null>(null)
@@ -288,11 +306,24 @@ export const LogsPage: React.FC = () => {
     }
   }
 
-  const handleResetStats = async () => {
+  const handleResetStats = () => {
+    const today = new Date()
+    setResetBeforeDate(toDateInputValue(today))
+    setResetCalendarMonth(getMonthStart(today))
+    setShowResetStatsConfirm(true)
+  }
+
+  const handleConfirmResetStats = async () => {
+    const beforeEpochMs = new Date(`${resetBeforeDate}T00:00:00`).getTime()
+    if (!Number.isFinite(beforeEpochMs)) {
+      showToast(t("logs.resetStatsInvalidDate"), "error")
+      return
+    }
     try {
-      await clearLogsStats()
+      await clearLogsStats(beforeEpochMs)
       await refreshLogsStats(hoursFilter, selectedProviderKeys, undefined, "rule", enableComparison)
       showToast(t("logs.resetStatsSuccess"), "success")
+      setShowResetStatsConfirm(false)
     } catch (error) {
       showToast(t("logs.resetStatsError"), "error")
       console.error(error)
@@ -377,7 +408,11 @@ export const LogsPage: React.FC = () => {
 
     return {
       labels: hourly.map(point => formatHourLabel(point.hour, hoursFilter)),
-      outputTps: hourly.map(point => point.outputTps),
+      outputTps: hourly.map(point => {
+        const value = Number(point.outputTps)
+        if (!Number.isFinite(value)) return 0
+        return Math.max(0, Math.round(value))
+      }),
     }
   }, [hoursFilter, logsStats?.hourly])
 
@@ -440,6 +475,38 @@ export const LogsPage: React.FC = () => {
     }
     return formatCostMetric(logsStats?.totalCost ?? 0, currency || "USD")
   }, [logsStats?.costCurrency, logsStats?.totalCost, t])
+
+  const resetStatsWeekdayLabels = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat(undefined, { weekday: "short" })
+    return Array.from({ length: 7 }, (_, index) => formatter.format(new Date(2024, 0, 7 + index)))
+  }, [])
+
+  const resetStatsCalendarCells = useMemo(() => {
+    const monthStart = getMonthStart(resetCalendarMonth)
+    const monthFirstWeekday = monthStart.getDay()
+    const gridStart = new Date(
+      monthStart.getFullYear(),
+      monthStart.getMonth(),
+      1 - monthFirstWeekday
+    )
+    const todayText = toDateInputValue(new Date())
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(
+        gridStart.getFullYear(),
+        gridStart.getMonth(),
+        gridStart.getDate() + index
+      )
+      const value = toDateInputValue(date)
+      return {
+        value,
+        day: date.getDate(),
+        inCurrentMonth: date.getMonth() === monthStart.getMonth(),
+        disabled: value > todayText,
+        isToday: value === todayText,
+        selected: value === resetBeforeDate,
+      }
+    })
+  }, [resetBeforeDate, resetCalendarMonth])
 
   useEffect(() => {
     if (activeTab !== "stats" || !usageChartDomRef.current) return
@@ -781,27 +848,27 @@ export const LogsPage: React.FC = () => {
       series: [
         {
           name: t("logs.trendRequests"),
-          type: "bar",
-          barMaxWidth: 26,
-          data: contributionSeries.requests,
-          itemStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: "#ffd08f" },
-              { offset: 1, color: "#ffb15f" },
-            ]),
-            borderRadius: [6, 6, 0, 0],
-          },
-        },
-        {
-          name: t("logs.trendTokens"),
           type: "line",
-          yAxisIndex: 1,
+          data: contributionSeries.requests,
           smooth: true,
           symbol: "circle",
           symbolSize: 6,
+          lineStyle: { color: "#ffb15f", width: 2 },
+          itemStyle: { color: "#ffb15f" },
+        },
+        {
+          name: t("logs.trendTokens"),
+          type: "bar",
+          yAxisIndex: 1,
+          barMaxWidth: 26,
           data: contributionSeries.tokens,
-          lineStyle: { color: MACARON.tpsOutputLine, width: 2 },
-          itemStyle: { color: MACARON.tpsOutputLine },
+          itemStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: "#8ab9ff" },
+              { offset: 1, color: MACARON.tpsOutputLine },
+            ]),
+            borderRadius: [6, 6, 0, 0],
+          },
         },
       ],
     }
@@ -1169,17 +1236,6 @@ export const LogsPage: React.FC = () => {
                   <strong className={styles.summaryValue}>
                     {t("logs.costSummaryUnavailable")}
                   </strong>
-                  <span className={styles.summaryNoticeText}>
-                    {t("logs.costSummaryUnavailableHint")}
-                  </span>
-                  <Button
-                    size="small"
-                    variant="ghost"
-                    onClick={() => navigate("/")}
-                    className={styles.summaryNoticeAction}
-                  >
-                    {t("logs.goConfigureBilling")}
-                  </Button>
                 </div>
               )}
             </div>
@@ -1273,6 +1329,80 @@ export const LogsPage: React.FC = () => {
           </div>
         </>
       )}
+
+      <Modal
+        open={showResetStatsConfirm}
+        onClose={() => setShowResetStatsConfirm(false)}
+        title={t("logs.resetStatsModalTitle")}
+      >
+        <div className={styles.modalContent}>
+          <p>{t("logs.resetStatsModalConfirmText", { date: resetBeforeDate })}</p>
+          <div className={styles.resetStatsCalendar}>
+            <div className={styles.resetStatsCalendarHeader}>
+              <button
+                type="button"
+                className={styles.resetStatsCalendarNav}
+                onClick={() =>
+                  setResetCalendarMonth(
+                    prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1)
+                  )
+                }
+                aria-label={t("logs.resetStatsCalendarPrev")}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <strong>{getMonthDisplay(resetCalendarMonth)}</strong>
+              <button
+                type="button"
+                className={styles.resetStatsCalendarNav}
+                onClick={() =>
+                  setResetCalendarMonth(
+                    prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1)
+                  )
+                }
+                aria-label={t("logs.resetStatsCalendarNext")}
+                disabled={
+                  getMonthStart(resetCalendarMonth).getTime() >= getMonthStart(new Date()).getTime()
+                }
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+            <div className={styles.resetStatsCalendarWeekdays}>
+              {resetStatsWeekdayLabels.map(label => (
+                <span key={label}>{label}</span>
+              ))}
+            </div>
+            <div className={styles.resetStatsCalendarGrid}>
+              {resetStatsCalendarCells.map(cell => (
+                <button
+                  key={cell.value}
+                  type="button"
+                  className={`${styles.resetStatsCalendarDay} ${cell.inCurrentMonth ? "" : styles.resetStatsCalendarDayMuted} ${cell.selected ? styles.resetStatsCalendarDaySelected : ""} ${cell.isToday ? styles.resetStatsCalendarDayToday : ""}`}
+                  onClick={() => {
+                    if (cell.disabled) return
+                    setResetBeforeDate(cell.value)
+                  }}
+                  disabled={cell.disabled}
+                >
+                  {cell.day}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className={styles.resetStatsPickedDate}>
+            {t("logs.resetStatsModalDateLabel")}: <strong>{resetBeforeDate}</strong>
+          </div>
+          <div className={styles.modalActions}>
+            <Button variant="default" onClick={() => setShowResetStatsConfirm(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="danger" onClick={handleConfirmResetStats} disabled={!resetBeforeDate}>
+              {t("logs.resetStatsModalConfirmButton")}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={showClearConfirm}

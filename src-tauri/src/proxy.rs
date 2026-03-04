@@ -255,6 +255,11 @@ impl ProxyRuntime {
         self.inner.stats_store.clear()
     }
 
+    /// Clear aggregated stats data before a given timestamp.
+    pub fn clear_stats_before(&self, before_epoch_ms: i64) -> Result<(), String> {
+        self.inner.stats_store.clear_before(before_epoch_ms)
+    }
+
     fn is_running(&self) -> bool {
         self.inner
             .server

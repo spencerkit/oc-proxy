@@ -123,8 +123,10 @@ export const ipc = {
     return getInvoke()<RuleCardStatsItem[]>("logs_stats_rule_cards", args)
   },
 
-  clearLogsStats(): Promise<{ ok: boolean }> {
-    return getInvoke()<{ ok: boolean }>("logs_stats_clear")
+  clearLogsStats(beforeEpochMs?: number): Promise<{ ok: boolean }> {
+    const args: Record<string, unknown> = {}
+    if (typeof beforeEpochMs === "number") args.beforeEpochMs = beforeEpochMs
+    return getInvoke()<{ ok: boolean }>("logs_stats_clear", args)
   },
 
   getProviderQuota(groupId: string, providerId: string): Promise<RuleQuotaSnapshot> {

@@ -45,7 +45,14 @@ pub async fn logs_stats_rule_cards(
 }
 
 #[tauri::command]
-pub async fn logs_stats_clear(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
-    state.runtime.clear_stats()?;
+pub async fn logs_stats_clear(
+    state: State<'_, SharedState>,
+    before_epoch_ms: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    if let Some(value) = before_epoch_ms {
+        state.runtime.clear_stats_before(value)?;
+    } else {
+        state.runtime.clear_stats()?;
+    }
     Ok(json!({ "ok": true }))
 }

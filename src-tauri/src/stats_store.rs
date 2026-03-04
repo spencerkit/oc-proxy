@@ -384,6 +384,19 @@ impl StatsStore {
             .map_err(|e| format!("clear stats events failed: {e}"))?;
         Ok(())
     }
+
+    pub fn clear_before(&self, before_epoch_ms: i64) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "stats sqlite lock poisoned".to_string())?;
+        conn.execute(
+            "DELETE FROM request_events WHERE ts_epoch_ms < ?1",
+            params![before_epoch_ms],
+        )
+        .map_err(|e| format!("clear stats events before date failed: {e}"))?;
+        Ok(())
+    }
 }
 
 fn initialize_schema(conn: &Connection) -> Result<(), String> {
