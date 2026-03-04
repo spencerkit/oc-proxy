@@ -9,7 +9,8 @@ mod quota;
 mod remote;
 
 pub use app::{
-    app_get_info, app_get_status, app_read_clipboard_text, app_start_server, app_stop_server,
+    app_get_info, app_get_status, app_read_clipboard_text, app_renderer_ready,
+    app_report_renderer_error, app_start_server, app_stop_server,
 };
 pub use config::{
     config_export_groups, config_export_groups_clipboard, config_export_groups_folder, config_get,

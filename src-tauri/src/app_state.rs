@@ -5,6 +5,7 @@
 use crate::config_store::ConfigStore;
 use crate::models::{AppInfo, ProxyConfig, ProxyStatus};
 use crate::proxy::ProxyRuntime;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt as _;
@@ -13,9 +14,22 @@ pub struct AppState {
     pub app_info: AppInfo,
     pub config_store: ConfigStore,
     pub runtime: ProxyRuntime,
+    pub renderer_ready: AtomicBool,
 }
 
 pub type SharedState = Arc<AppState>;
+
+impl AppState {
+    /// Marks renderer boot state.
+    pub fn set_renderer_ready(&self, ready: bool) {
+        self.renderer_ready.store(ready, Ordering::SeqCst);
+    }
+
+    /// Returns renderer boot state.
+    pub fn is_renderer_ready(&self) -> bool {
+        self.renderer_ready.load(Ordering::SeqCst)
+    }
+}
 
 /// Returns whether the state has server setting changed.
 fn has_server_setting_changed(prev: &ProxyConfig, next: &ProxyConfig) -> bool {

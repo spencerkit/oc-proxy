@@ -155,3 +155,29 @@ canonical 的意义：
   - `[DONE]` 单次输出；
   - 非流式回退/映射行为。
 - 若需要跨层新增能力，优先保持 “UI -> IPC -> Service -> Mapper/Proxy” 单向依赖。
+
+---
+
+## 10. WebView 启动保护与失败兜底（2026-03）
+
+为降低 release 场景下偶发 “页面加载失败，刷新后恢复” 的不可观测问题，当前加入了以下链路：
+
+1. Renderer 启动上报
+   - 前端 `main.tsx` 在 React 挂载后通过 IPC 调用 `app_renderer_ready`。
+   - Rust 侧记录 ready 状态，供 watchdog 判定。
+2. Renderer 异常上报
+   - 前端全局错误入口（`window.onerror`、`onunhandledrejection`、`init().catch`）通过 `app_report_renderer_error` 上报。
+   - Rust 侧落错误日志（包含 kind / source / stack 摘要）。
+3. 启动超时 watchdog
+   - Rust 在 release 模式下启动后开启 10 秒 watchdog（debug 不启用，避免开发阶段误判）。
+   - 若未收到 ready，上报 `renderer_boot_timeout` 日志并切换到失败兜底页。
+4. 失败兜底页（完整 HTML）
+   - Rust 直接构造完整 HTML 字符串，编码为 `data:text/html` 并调用 `window.navigate(...)` 跳转。
+   - 页面内提供“重新加载”按钮，会回到超时前记录的原始 URL 并重试加载。
+   - 该兜底页自带右键/刷新快捷键限制，与 release 主页面策略保持一致。
+5. Release WebView 交互收敛
+   - 仅 release 模式下注入脚本，禁用右键菜单及常见刷新/开发者快捷键（F5、Ctrl/Cmd+R、F12、Ctrl/Cmd+Shift+I）。
+   - debug 模式不受影响，保持开发调试体验。
+6. Debug 强制演练开关
+   - 仅 debug 下支持环境变量 `AOR_DEBUG_FORCE_LOAD_FAILED_PAGE=1`。
+   - 启动后会主动跳转到失败兜底页，便于快速验收失败 UI 与重试逻辑。
