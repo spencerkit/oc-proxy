@@ -15,10 +15,12 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Returns a cloned field only when it exists and is non-null.
 fn non_null(body: &Value, key: &str) -> Option<Value> {
     body.get(key).filter(|v| !v.is_null()).cloned()
 }
 
+/// Normalizes mixed OpenAI content shapes into canonical text blocks.
 fn parse_text_blocks(content: &Value) -> Vec<CanonicalBlock> {
     if let Some(arr) = content.as_array() {
         let mut out = vec![];
@@ -72,6 +74,7 @@ fn parse_text_blocks(content: &Value) -> Vec<CanonicalBlock> {
     vec![CanonicalBlock::Text(content.to_string())]
 }
 
+/// Resolves effective model by prioritizing forced target model option.
 fn resolve_model(body: &Value, options: &MapOptions) -> String {
     if options.target_model.is_empty() {
         str_or_empty(body.get("model"))
@@ -80,6 +83,7 @@ fn resolve_model(body: &Value, options: &MapOptions) -> String {
     }
 }
 
+/// Decodes an OpenAI chat-completions request into canonical request structure.
 pub fn decode_request(body: &Value, options: &MapOptions) -> Result<CanonicalRequest, String> {
     let mut system_chunks: Vec<String> = vec![];
     let mut messages: Vec<CanonicalMessage> = vec![];
@@ -226,6 +230,7 @@ pub fn decode_request(body: &Value, options: &MapOptions) -> Result<CanonicalReq
     })
 }
 
+/// Merges all canonical text blocks into a single plain-text string.
 fn merge_text(blocks: &[CanonicalBlock]) -> String {
     let mut out = String::new();
     for block in blocks {
@@ -236,6 +241,7 @@ fn merge_text(blocks: &[CanonicalBlock]) -> String {
     out
 }
 
+/// Encodes canonical request into OpenAI chat-completions request JSON.
 pub fn encode_request(request: &CanonicalRequest) -> Value {
     let mut messages: Vec<Value> = vec![];
 
@@ -385,6 +391,7 @@ pub fn encode_request(request: &CanonicalRequest) -> Value {
     req
 }
 
+/// Decodes OpenAI chat-completions response JSON into canonical response structure.
 pub fn decode_response(openai_response: &Value, request_model: &str) -> CanonicalResponse {
     let choice = openai_response
         .get("choices")
@@ -471,6 +478,7 @@ pub fn decode_response(openai_response: &Value, request_model: &str) -> Canonica
     }
 }
 
+/// Encodes canonical response into OpenAI chat-completions response JSON.
 pub fn encode_response(response: &CanonicalResponse) -> Value {
     let tool_calls = response
         .tool_calls
@@ -550,6 +558,7 @@ pub(crate) struct OpenaiResponsesToChatStreamMapper {
 }
 
 impl OpenaiResponsesToChatStreamMapper {
+    /// Creates a stream mapper that converts `responses` SSE events into chat chunks.
     pub(crate) fn new(request_model: &str) -> Self {
         Self {
             request_model: request_model.to_string(),
@@ -566,6 +575,7 @@ impl OpenaiResponsesToChatStreamMapper {
         }
     }
 
+    /// Consumes one `responses` SSE JSON payload and emits chat-completions chunks.
     pub(crate) fn on_stream_payload(
         &mut self,
         event: Option<&str>,
@@ -649,10 +659,12 @@ impl OpenaiResponsesToChatStreamMapper {
         out
     }
 
+    /// Finalizes mapping when upstream emits `[DONE]`.
     pub(crate) fn on_done(&mut self) -> Vec<Value> {
         self.finish()
     }
 
+    /// Flushes exactly one final chat chunk with finish reason/usage.
     pub(crate) fn finish(&mut self) -> Vec<Value> {
         if self.done_emitted {
             return Vec::new();
@@ -670,6 +682,7 @@ impl OpenaiResponsesToChatStreamMapper {
         out
     }
 
+    /// Builds a fallback non-stream chat-completion JSON from accumulated metadata.
     pub(crate) fn final_chat_response_json(&self) -> Option<Value> {
         let id = self
             .upstream_id
@@ -707,6 +720,7 @@ impl OpenaiResponsesToChatStreamMapper {
         }))
     }
 
+    /// Updates shared metadata fields (id/model/created/usage) from incoming payload.
     fn update_common_metadata(&mut self, payload: &Value) {
         if let Some(id) = payload
             .get("id")
@@ -746,12 +760,14 @@ impl OpenaiResponsesToChatStreamMapper {
         }
     }
 
+    /// Resolves event name from explicit SSE event header or payload `type`.
     fn resolve_event_name(&self, event: Option<&str>, payload: &Value) -> Option<String> {
         event
             .map(|v| v.to_string())
             .or_else(|| payload.get("type").and_then(|v| v.as_str()).map(|v| v.to_string()))
     }
 
+    /// Appends one chat-completions chunk object to output.
     fn emit_chat_delta(
         &self,
         delta: Value,
@@ -794,6 +810,7 @@ impl OpenaiResponsesToChatStreamMapper {
         out.push(chunk);
     }
 
+    /// Creates or updates tool-call state keyed by call id/output index.
     fn ensure_tool_state(
         &mut self,
         tool_id: Option<String>,
@@ -843,6 +860,7 @@ impl OpenaiResponsesToChatStreamMapper {
         key
     }
 
+    /// Emits incremental tool-call argument delta as chat `tool_calls` chunk.
     fn emit_tool_delta(&mut self, tool_key: &str, args_delta: &str, out: &mut Vec<Value>) {
         if args_delta.is_empty() {
             return;
@@ -872,6 +890,7 @@ impl OpenaiResponsesToChatStreamMapper {
         );
     }
 
+    /// Infers chat finish_reason from `response.completed` payload status/output.
     fn event_finish_reason_from_completed(&self, payload: &Value) -> Option<String> {
         let status = payload
             .get("response")
@@ -897,10 +916,12 @@ impl OpenaiResponsesToChatStreamMapper {
         Some("stop".to_string())
     }
 
+    /// Extracts nested `item` object from responses event payload.
     fn response_item(payload: &Value) -> Option<&Value> {
         payload.get("item")
     }
 
+    /// Resolves output index from top-level event or nested item object.
     fn output_index_from_payload(payload: &Value, item: Option<&Value>) -> Option<usize> {
         payload
             .get("output_index")
@@ -913,6 +934,7 @@ impl OpenaiResponsesToChatStreamMapper {
             })
     }
 
+    /// Resolves call id using top-level field first, then nested item fields.
     fn call_id_from_payload(payload: &Value, item: Option<&Value>) -> Option<String> {
         payload
             .get("call_id")

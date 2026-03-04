@@ -31,6 +31,7 @@ use commands::{
 use tauri::Manager;
 
 #[tokio::main]
+/// Application entrypoint for the Tauri runtime.
 async fn main() {
     let app_name = "AI Open Router".to_string();
     let app_version = env!("CARGO_PKG_VERSION").to_string();

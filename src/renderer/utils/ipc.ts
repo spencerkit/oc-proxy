@@ -19,6 +19,7 @@ import type {
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
 
+/** Implements invoke behavior. */
 function getInvoke(): InvokeFn {
   const invoke =
     (window.__TAURI__?.core?.invoke as InvokeFn | undefined) ??

@@ -6,6 +6,7 @@ use chrono::Utc;
 
 use crate::models::{Group, GroupsBackupPayload};
 
+/// Creates groups backup payload for this module's workflow.
 pub fn create_groups_backup_payload(groups: &[Group]) -> GroupsBackupPayload {
     GroupsBackupPayload {
         format: "ai-open-router-groups-backup".to_string(),
@@ -15,6 +16,7 @@ pub fn create_groups_backup_payload(groups: &[Group]) -> GroupsBackupPayload {
     }
 }
 
+/// Extracts groups from import payload for this module's workflow.
 pub fn extract_groups_from_import_payload(input: &serde_json::Value) -> Result<Vec<Group>, String> {
     if let Some(arr) = input.as_array() {
         return serde_json::from_value::<Vec<Group>>(serde_json::Value::Array(arr.clone()))
@@ -36,6 +38,7 @@ pub fn extract_groups_from_import_payload(input: &serde_json::Value) -> Result<V
     Err("Invalid import JSON: expected a groups array".to_string())
 }
 
+/// Performs backup default file name.
 pub fn backup_default_file_name() -> String {
     let now = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
     format!("ai-open-router-groups-backup-{now}.json")
@@ -51,6 +54,7 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
 
+    /// Performs sample group.
     fn sample_group(id: &str, name: &str) -> Group {
         Group {
             id: id.to_string(),
@@ -72,6 +76,7 @@ mod tests {
     }
 
     #[test]
+    /// Creates groups backup payload keeps groups and metadata for this module's workflow.
     fn create_groups_backup_payload_keeps_groups_and_metadata() {
         let groups = vec![sample_group("demo", "Demo")];
         let payload = create_groups_backup_payload(&groups);
@@ -85,6 +90,7 @@ mod tests {
     }
 
     #[test]
+    /// Extracts groups from import payload supports root groups object for this module's workflow.
     fn extract_groups_from_import_payload_supports_root_groups_object() {
         let out = extract_groups_from_import_payload(&json!({
             "groups": [
@@ -102,6 +108,7 @@ mod tests {
     }
 
     #[test]
+    /// Extracts groups from import payload supports groups array root for this module's workflow.
     fn extract_groups_from_import_payload_supports_groups_array_root() {
         let out = extract_groups_from_import_payload(&json!([
             {
@@ -117,6 +124,7 @@ mod tests {
     }
 
     #[test]
+    /// Extracts groups from import payload supports full config envelope for this module's workflow.
     fn extract_groups_from_import_payload_supports_full_config_envelope() {
         let out = extract_groups_from_import_payload(&json!({
             "config": {
@@ -136,6 +144,7 @@ mod tests {
     }
 
     #[test]
+    /// Extracts groups from import payload supports legacy fields for this module's workflow.
     fn extract_groups_from_import_payload_supports_legacy_fields() {
         let out = extract_groups_from_import_payload(&json!({
             "groups": [
@@ -153,6 +162,7 @@ mod tests {
     }
 
     #[test]
+    /// Extracts groups from import payload rejects invalid payload for this module's workflow.
     fn extract_groups_from_import_payload_rejects_invalid_payload() {
         let err =
             extract_groups_from_import_payload(&json!({ "invalid": true })).expect_err("must fail");
@@ -160,6 +170,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs backup default file name has expected shape.
     fn backup_default_file_name_has_expected_shape() {
         let file_name = backup_default_file_name();
         assert!(file_name.starts_with("ai-open-router-groups-backup-"));

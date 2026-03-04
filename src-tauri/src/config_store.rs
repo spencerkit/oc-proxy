@@ -22,6 +22,7 @@ pub struct ConfigStore {
 }
 
 impl ConfigStore {
+    /// Performs new.
     pub fn new(file_path: PathBuf) -> Self {
         let groups_db_path = file_path.with_file_name("providers.sqlite");
         let groups_db = Connection::open(&groups_db_path).unwrap_or_else(|_| {
@@ -37,6 +38,7 @@ impl ConfigStore {
         }
     }
 
+    /// Initializes data for this module's workflow.
     pub fn initialize(&self) -> Result<(), String> {
         if let Some(parent) = self.file_path.parent() {
             std::fs::create_dir_all(parent)
@@ -84,10 +86,12 @@ impl ConfigStore {
         Ok(())
     }
 
+    /// Performs get.
     pub fn get(&self) -> ProxyConfig {
         self.config.read().expect("config rwlock poisoned").clone()
     }
 
+    /// Saves data for this module's workflow.
     pub fn save(&self, next_config: serde_json::Value) -> Result<ProxyConfig, String> {
         let migrated = migrate_config(next_config)?;
         let normalized = normalize_config(migrated)?;
@@ -98,6 +102,7 @@ impl ConfigStore {
         Ok(normalized)
     }
 
+    /// Saves config for this module's workflow.
     pub fn save_config(&self, next_config: ProxyConfig) -> Result<ProxyConfig, String> {
         validate_config(&next_config)?;
         self.save_groups_to_db(&next_config.groups)?;
@@ -106,6 +111,7 @@ impl ConfigStore {
         Ok(next_config)
     }
 
+    /// Writes file for this module's workflow.
     fn write_file(&self, cfg: &ProxyConfig) -> Result<(), String> {
         let mut storage_cfg = cfg.clone();
         storage_cfg.groups = vec![];
@@ -114,6 +120,7 @@ impl ConfigStore {
         std::fs::write(&self.file_path, text).map_err(|e| format!("write config failed: {e}"))
     }
 
+    /// Initializes groups db for this module's workflow.
     fn initialize_groups_db(&self) -> Result<(), String> {
         let conn = self
             .groups_db
@@ -141,6 +148,7 @@ impl ConfigStore {
         Ok(())
     }
 
+    /// Performs reopen groups db.
     fn reopen_groups_db(&self) -> Result<(), String> {
         let next_conn = Connection::open(&self.groups_db_path)
             .map_err(|e| format!("open groups db failed: {e}"))?;
@@ -152,6 +160,7 @@ impl ConfigStore {
         Ok(())
     }
 
+    /// Loads groups from db for this module's workflow.
     fn load_groups_from_db(&self) -> Result<Vec<Group>, String> {
         let conn = self
             .groups_db
@@ -160,6 +169,7 @@ impl ConfigStore {
         load_groups_from_relational_tables(&conn)
     }
 
+    /// Saves groups to db for this module's workflow.
     fn save_groups_to_db(&self, groups: &[Group]) -> Result<(), String> {
         let mut conn = self
             .groups_db
@@ -210,6 +220,7 @@ impl ConfigStore {
         Ok(())
     }
 
+    /// Performs set in memory.
     fn set_in_memory(&self, cfg: ProxyConfig) {
         if let Ok(mut guard) = self.config.write() {
             *guard = cfg;
@@ -217,19 +228,23 @@ impl ConfigStore {
         }
     }
 
+    /// Performs path.
     pub fn path(&self) -> &Path {
         &self.file_path
     }
 
+    /// Performs shared config.
     pub fn shared_config(&self) -> Arc<RwLock<ProxyConfig>> {
         self.config.clone()
     }
 
+    /// Performs shared revision.
     pub fn shared_revision(&self) -> Arc<AtomicU64> {
         self.revision.clone()
     }
 }
 
+/// Loads groups from relational tables for this module's workflow.
 fn load_groups_from_relational_tables(conn: &Connection) -> Result<Vec<Group>, String> {
     let mut provider_stmt = conn
         .prepare("SELECT group_id, provider_id, provider_json FROM provider_records")
@@ -303,6 +318,7 @@ mod tests {
     use std::collections::HashMap;
     use uuid::Uuid;
 
+    /// Performs sample group.
     fn sample_group() -> Group {
         Group {
             id: "group-1".to_string(),
@@ -324,6 +340,7 @@ mod tests {
     }
 
     #[test]
+    /// Initializes imports groups from config file into sqlite for this module's workflow.
     fn initialize_imports_groups_from_config_file_into_sqlite() {
         let temp_dir = std::env::temp_dir().join(format!("config-store-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&temp_dir).expect("create temp dir");
@@ -373,6 +390,7 @@ mod tests {
     }
 
     #[test]
+    /// Initializes loads groups from sqlite when config groups empty for this module's workflow.
     fn initialize_loads_groups_from_sqlite_when_config_groups_empty() {
         let temp_dir = std::env::temp_dir().join(format!("config-store-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&temp_dir).expect("create temp dir");

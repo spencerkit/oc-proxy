@@ -29,6 +29,7 @@ pub(super) struct MetricsState {
 }
 
 impl MetricsState {
+    /// Performs new.
     pub(super) fn new() -> Self {
         Self {
             requests: AtomicU64::new(0),
@@ -69,12 +70,14 @@ impl MetricsState {
         metrics
     }
 
+    /// Performs mark started.
     pub(super) fn mark_started(&self) {
         if let Ok(mut guard) = self.uptime_started_at.write() {
             *guard = Some(Utc::now().to_rfc3339());
         }
     }
 
+    /// Performs mark stopped.
     pub(super) fn mark_stopped(&self) {
         if let Ok(mut guard) = self.uptime_started_at.write() {
             *guard = None;
@@ -141,6 +144,7 @@ impl StreamTokenAccumulator {
         }
     }
 
+    /// Performs consume line.
     fn consume_line(&mut self, line: &str) {
         let Some(rest) = line.strip_prefix("data:") else {
             return;
@@ -241,6 +245,7 @@ pub(super) fn extract_token_usage(payload: &Value) -> Option<TokenUsage> {
     })
 }
 
+/// Normalizes input tokens for this module's workflow.
 fn normalize_input_tokens(usage: &Value, raw_input_tokens: u64, cache_read_tokens: u64) -> u64 {
     // OpenAI usage may report `input_tokens` including cached tokens.
     // Anthropic reports cache read separately from input.
@@ -264,6 +269,7 @@ fn normalize_input_tokens(usage: &Value, raw_input_tokens: u64, cache_read_token
     }
 }
 
+/// Performs first u64.
 fn first_u64(obj: &Value, fields: &[&str]) -> u64 {
     for field in fields {
         if let Some(v) = obj.get(*field).and_then(|v| v.as_u64()) {
@@ -469,6 +475,7 @@ pub(super) fn finalize_log(
     state.stats_store.append_log(&entry);
 }
 
+/// Builds cost snapshot.
 fn build_cost_snapshot(rule: &Rule, usage: &TokenUsage) -> CostSnapshot {
     let cost = &rule.cost;
     if !cost.enabled {
@@ -501,6 +508,7 @@ fn build_cost_snapshot(rule: &Rule, usage: &TokenUsage) -> CostSnapshot {
     }
 }
 
+/// Performs should capture body.
 fn should_capture_body(state: &ServiceState) -> bool {
     state
         .config
@@ -509,6 +517,7 @@ fn should_capture_body(state: &ServiceState) -> bool {
         .unwrap_or(false)
 }
 
+/// Performs proxy error response.
 pub(super) fn proxy_error_response(
     status_code: u16,
     code: &str,

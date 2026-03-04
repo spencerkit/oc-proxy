@@ -14,6 +14,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Manager, WindowEvent};
 
+/// Creates tray for this module's workflow.
 fn create_tray(app: &AppHandle) -> Result<(), String> {
     let show_hide = MenuItem::with_id(
         app,
@@ -81,6 +82,7 @@ fn create_tray(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Performs setup close to tray.
 fn setup_close_to_tray(app: &AppHandle, state: SharedState, tray_ready: bool) {
     if let Some(window) = app.get_webview_window("main") {
         let window_for_event = window.clone();
@@ -96,6 +98,7 @@ fn setup_close_to_tray(app: &AppHandle, state: SharedState, tray_ready: bool) {
     }
 }
 
+/// Performs setup app.
 pub fn setup_app(app: &mut App, app_name: &str, app_version: &str) -> Result<(), String> {
     let app_data_dir = app
         .path()

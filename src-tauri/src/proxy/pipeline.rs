@@ -29,6 +29,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+/// Performs healthz.
 pub(super) async fn healthz(State(state): State<ServiceState>) -> Response {
     let trace_id = Uuid::new_v4().to_string();
     let headers = response_headers_json(&trace_id);
@@ -910,6 +911,7 @@ fn map_response_body(
     map_response_by_surface(source_surface, target_surface, upstream_json, request_model)
 }
 
+/// Resolves request timeout ms for this module's workflow.
 pub(super) fn resolve_request_timeout_ms(
     stream: bool,
     entry: &PathEntry,

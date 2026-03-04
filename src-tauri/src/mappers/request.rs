@@ -82,6 +82,7 @@ pub fn map_anthropic_to_openai_responses_request(
 
 // Backward-compatible alias: existing callers expect this to produce
 // OpenAI chat/completions request payload.
+/// Maps Anthropic to OpenAI request for this module's workflow.
 pub fn map_anthropic_to_openai_request(
     body: &Value,
     strict_mode: bool,

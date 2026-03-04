@@ -13,11 +13,13 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Decodes OpenAI responses request JSON into canonical request structure.
 pub fn decode_request(body: &Value, options: &MapOptions) -> Result<CanonicalRequest, String> {
     let normalized = normalize_openai_request("/v1/responses", body);
     openai_chat_completions::decode_request(&normalized, options)
 }
 
+/// Merges canonical text blocks into a single string payload.
 fn merge_text(blocks: &[CanonicalBlock]) -> String {
     let mut out = String::new();
     for block in blocks {
@@ -28,6 +30,7 @@ fn merge_text(blocks: &[CanonicalBlock]) -> String {
     out
 }
 
+/// Pushes a user text item into OpenAI responses input array.
 fn push_user_message(input: &mut Vec<Value>, text: &str) {
     if text.is_empty() {
         return;
@@ -39,6 +42,7 @@ fn push_user_message(input: &mut Vec<Value>, text: &str) {
     }));
 }
 
+/// Pushes an assistant text item into OpenAI responses input array.
 fn push_assistant_message(input: &mut Vec<Value>, text: &str) {
     if text.is_empty() {
         return;
@@ -50,6 +54,7 @@ fn push_assistant_message(input: &mut Vec<Value>, text: &str) {
     }));
 }
 
+/// Sanitizes a function-call id fragment to a safe alphanumeric token.
 fn sanitize_call_id_fragment(raw: &str) -> String {
     raw.chars()
         .map(|c| {
@@ -62,6 +67,7 @@ fn sanitize_call_id_fragment(raw: &str) -> String {
         .collect::<String>()
 }
 
+/// Normalizes function-call ids and maintains stable id remapping for references.
 fn normalize_function_call_id(raw: &str, id_map: &mut HashMap<String, String>) -> String {
     let normalized_raw = raw.trim();
     if normalized_raw.is_empty() {
@@ -86,6 +92,7 @@ fn normalize_function_call_id(raw: &str, id_map: &mut HashMap<String, String>) -
     normalized
 }
 
+/// Flattens `system` field into Responses API `instructions` string.
 fn normalize_system_to_instructions(system: &Value) -> Option<String> {
     if system.is_null() {
         return None;
@@ -123,6 +130,7 @@ fn normalize_system_to_instructions(system: &Value) -> Option<String> {
     Some(system.to_string())
 }
 
+/// Canonicalizes a schema key for tolerant alias matching.
 fn canonicalize_schema_key(key: &str) -> String {
     key.chars()
         .filter(|c| c.is_ascii_alphanumeric())
@@ -130,6 +138,7 @@ fn canonicalize_schema_key(key: &str) -> String {
         .collect::<String>()
 }
 
+/// Collects schema object properties recursively into a flattened key/value map.
 fn collect_schema_properties(schema: &Value, out: &mut serde_json::Map<String, Value>) {
     if let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) {
         for (key, value) in properties {
@@ -146,12 +155,14 @@ fn collect_schema_properties(schema: &Value, out: &mut serde_json::Map<String, V
     }
 }
 
+/// Returns flattened schema property map for argument alias normalization.
 fn schema_properties(schema: &Value) -> serde_json::Map<String, Value> {
     let mut out = serde_json::Map::new();
     collect_schema_properties(schema, &mut out);
     out
 }
 
+/// Builds alias lookup index from schema property names.
 fn schema_alias_index(
     properties: &serde_json::Map<String, Value>,
 ) -> HashMap<String, Option<String>> {
@@ -176,6 +187,7 @@ fn schema_alias_index(
     index
 }
 
+/// Normalizes function arguments payload using schema alias hints when possible.
 fn normalize_arguments_with_schema(arguments: &Value, schema: Option<&Value>) -> Value {
     let Some(schema) = schema else {
         return arguments.clone();
@@ -223,6 +235,7 @@ fn normalize_arguments_with_schema(arguments: &Value, schema: Option<&Value>) ->
     }
 }
 
+/// Encodes canonical request into OpenAI responses request JSON.
 pub fn encode_request(request: &CanonicalRequest) -> Value {
     let mut input = vec![];
     let mut system_chunks = vec![];
@@ -399,6 +412,7 @@ pub fn encode_request(request: &CanonicalRequest) -> Value {
     out
 }
 
+/// Decodes OpenAI responses response JSON into canonical response structure.
 pub fn decode_response(responses: &Value, request_model: &str) -> CanonicalResponse {
     let mut chat_like = json!({
         "id": responses.get("id").cloned().unwrap_or_else(|| json!("resp_generated")),
@@ -479,6 +493,7 @@ pub fn decode_response(responses: &Value, request_model: &str) -> CanonicalRespo
     canonical
 }
 
+/// Encodes canonical response into OpenAI responses response JSON.
 pub fn encode_response(response: &CanonicalResponse) -> Value {
     let mut output = vec![];
 
@@ -540,6 +555,7 @@ pub(crate) struct OpenaiChatToResponsesStreamMapper {
 }
 
 impl OpenaiChatToResponsesStreamMapper {
+    /// Creates a stream mapper that converts chat-completions chunks into responses events.
     pub(crate) fn new(request_model: &str) -> Self {
         Self {
             request_model: request_model.to_string(),
@@ -555,6 +571,7 @@ impl OpenaiChatToResponsesStreamMapper {
         }
     }
 
+    /// Consumes one chat-completions stream payload and emits responses event tuples.
     pub(crate) fn on_stream_payload(&mut self, payload: &Value) -> Vec<(String, Value)> {
         let mut out = Vec::new();
         self.update_common_metadata(payload);
@@ -595,10 +612,12 @@ impl OpenaiChatToResponsesStreamMapper {
         out
     }
 
+    /// Finalizes mapping when upstream emits `[DONE]`.
     pub(crate) fn on_done(&mut self) -> Vec<(String, Value)> {
         self.finish()
     }
 
+    /// Flushes final responses event sequence exactly once.
     pub(crate) fn finish(&mut self) -> Vec<(String, Value)> {
         if self.completed {
             return Vec::new();
@@ -608,6 +627,7 @@ impl OpenaiChatToResponsesStreamMapper {
         out
     }
 
+    /// Builds a final non-stream Responses JSON if mapper has completed.
     pub(crate) fn final_responses_json(&self) -> Option<Value> {
         if !self.completed {
             return None;
@@ -631,6 +651,7 @@ impl OpenaiChatToResponsesStreamMapper {
         }))
     }
 
+    /// Updates shared metadata fields (id/model/created/usage) from stream payload.
     fn update_common_metadata(&mut self, payload: &Value) {
         if let Some(id) = payload.get("id").and_then(|v| v.as_str()) {
             self.upstream_id = Some(id.to_string());
@@ -654,6 +675,7 @@ impl OpenaiChatToResponsesStreamMapper {
         }
     }
 
+    /// Produces stable Responses `id` from upstream id or generated fallback.
     fn response_id(&self) -> String {
         self.upstream_id
             .as_ref()
@@ -661,6 +683,7 @@ impl OpenaiChatToResponsesStreamMapper {
             .unwrap_or_else(|| format!("resp_{}", Uuid::new_v4().simple()))
     }
 
+    /// Resolves output model with request override precedence.
     fn response_model(&self) -> String {
         if !self.request_model.is_empty() {
             return self.request_model.clone();
@@ -670,11 +693,13 @@ impl OpenaiChatToResponsesStreamMapper {
             .unwrap_or_else(|| "unknown".to_string())
     }
 
+    /// Resolves output created timestamp with current-time fallback.
     fn response_created(&self) -> i64 {
         self.upstream_created
             .unwrap_or_else(|| chrono::Utc::now().timestamp())
     }
 
+    /// Creates or updates tool state for a tool-call index.
     fn ensure_tool_state(&mut self, tool_index: usize, tool_call: &Value) -> &mut ChatToolState {
         self.tool_states.entry(tool_index).or_insert_with(|| {
             let output_index = self.next_output_index;
@@ -702,6 +727,7 @@ impl OpenaiChatToResponsesStreamMapper {
         })
     }
 
+    /// Emits one `response.output_text.delta` event and accumulates full text.
     fn emit_text_delta(&mut self, text: &str, out: &mut Vec<(String, Value)>) {
         if text.is_empty() {
             return;
@@ -719,6 +745,7 @@ impl OpenaiChatToResponsesStreamMapper {
         ));
     }
 
+    /// Emits tool-call added/arguments-delta events from chat tool call chunk.
     fn emit_tool_delta(
         &mut self,
         tool_index: usize,
@@ -787,6 +814,7 @@ impl OpenaiChatToResponsesStreamMapper {
         }
     }
 
+    /// Maps chat finish_reason into Responses status string.
     fn finish_reason_to_status(reason: &str) -> &'static str {
         match reason {
             "length" => "incomplete",
@@ -794,6 +822,7 @@ impl OpenaiChatToResponsesStreamMapper {
         }
     }
 
+    /// Emits trailing item/text/completed events and seals mapper state.
     fn emit_completed(&mut self, out: &mut Vec<(String, Value)>) {
         if self.completed {
             return;

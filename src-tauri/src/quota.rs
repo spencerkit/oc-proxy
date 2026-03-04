@@ -21,10 +21,12 @@ struct FetchRuleQuotaResult {
     raw_response: Option<Value>,
 }
 
+/// Performs quota dev log enabled.
 fn quota_dev_log_enabled() -> bool {
     cfg!(debug_assertions)
 }
 
+/// Performs clip for log.
 fn clip_for_log(raw: &str, max_chars: usize) -> String {
     let mut out = String::new();
     for (idx, ch) in raw.chars().enumerate() {
@@ -37,6 +39,7 @@ fn clip_for_log(raw: &str, max_chars: usize) -> String {
     out
 }
 
+/// Performs headers for log.
 fn headers_for_log(headers: &HeaderMap) -> Value {
     let mut pairs: Vec<(String, String)> = Vec::new();
     for (key, value) in headers {
@@ -56,6 +59,7 @@ fn headers_for_log(headers: &HeaderMap) -> Value {
     Value::Object(map)
 }
 
+/// Performs log quota event.
 fn log_quota_event(group: &Group, rule: &Rule, stage: &str, details: Value) {
     if !quota_dev_log_enabled() {
         return;
@@ -67,6 +71,7 @@ fn log_quota_event(group: &Group, rule: &Rule, stage: &str, details: Value) {
     );
 }
 
+/// Performs body to value for debug.
 fn body_to_value_for_debug(raw: &str) -> Value {
     if raw.trim().is_empty() {
         Value::String("<empty>".to_string())
@@ -75,6 +80,7 @@ fn body_to_value_for_debug(raw: &str) -> Value {
     }
 }
 
+/// Fetchs rule quota for this module's workflow.
 pub async fn fetch_rule_quota(
     config: &ProxyConfig,
     group_id: &str,
@@ -94,6 +100,7 @@ pub async fn fetch_rule_quota(
     Ok(fetch_single_rule_quota(group, rule, false).await.snapshot)
 }
 
+/// Fetchs group quotas for this module's workflow.
 pub async fn fetch_group_quotas(
     config: &ProxyConfig,
     group_id: &str,
@@ -119,6 +126,7 @@ pub async fn fetch_group_quotas(
     ])
 }
 
+/// Runs a unit test for the expected behavior contract.
 pub async fn test_rule_quota_draft(group: &Group, rule: &Rule) -> RuleQuotaTestResult {
     let result = fetch_single_rule_quota(group, rule, true).await;
     let snapshot = result.snapshot;
@@ -143,6 +151,7 @@ pub async fn test_rule_quota_draft(group: &Group, rule: &Rule) -> RuleQuotaTestR
     }
 }
 
+/// Performs default test failure message.
 fn default_test_failure_message(status: &QuotaStatus) -> String {
     match status {
         QuotaStatus::Unknown => "remaining quota mapping returned empty result".to_string(),
@@ -152,6 +161,7 @@ fn default_test_failure_message(status: &QuotaStatus) -> String {
     }
 }
 
+/// Fetchs single rule quota for this module's workflow.
 async fn fetch_single_rule_quota(
     group: &Group,
     rule: &Rule,
@@ -403,6 +413,7 @@ async fn fetch_single_rule_quota(
     }
 }
 
+/// Performs new snapshot.
 fn new_snapshot(group: &Group, rule: &Rule) -> RuleQuotaSnapshot {
     RuleQuotaSnapshot {
         group_id: group.id.clone(),
@@ -423,6 +434,7 @@ fn new_snapshot(group: &Group, rule: &Rule) -> RuleQuotaSnapshot {
     }
 }
 
+/// Normalizes method name for this module's workflow.
 fn normalize_method_name(method: &str) -> String {
     let trimmed = method.trim();
     if trimmed.is_empty() {
@@ -432,6 +444,7 @@ fn normalize_method_name(method: &str) -> String {
     }
 }
 
+/// Performs render template.
 fn render_template(group: &Group, rule: &Rule, raw: &str) -> String {
     let resolved_token = if rule.quota.use_rule_token {
         rule.token.as_str()
@@ -449,6 +462,7 @@ fn render_template(group: &Group, rule: &Rule, raw: &str) -> String {
         .replace("{{quota.token}}", resolved_token)
 }
 
+/// Builds headers.
 fn build_headers(group: &Group, rule: &Rule) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
 
@@ -486,6 +500,7 @@ fn build_headers(group: &Group, rule: &Rule) -> Result<HeaderMap, String> {
     Ok(headers)
 }
 
+/// Performs render body suffix.
 fn render_body_suffix(raw_body: &str) -> String {
     let trimmed = raw_body.trim();
     if trimmed.is_empty() {
@@ -500,6 +515,7 @@ fn render_body_suffix(raw_body: &str) -> String {
     }
 }
 
+/// Maps payload to snapshot for this module's workflow.
 fn map_payload_to_snapshot(
     snapshot: &mut RuleQuotaSnapshot,
     rule: &Rule,

@@ -15,6 +15,7 @@ const QUOTA_REFRESH_MINUTES_MIN = 1
 const QUOTA_REFRESH_MINUTES_MAX = 1440
 const QUOTA_REFRESH_MINUTES_DEFAULT = 5
 
+/** Builds immediate config. */
 function buildImmediateConfig(config: ProxyConfig, next: Partial<ProxyConfig>): ProxyConfig {
   return {
     ...config,

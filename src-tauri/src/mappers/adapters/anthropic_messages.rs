@@ -15,10 +15,12 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+/// Performs non null.
 fn non_null(body: &Value, key: &str) -> Option<Value> {
     body.get(key).filter(|v| !v.is_null()).cloned()
 }
 
+/// Parses blocks.
 fn parse_blocks(role: &CanonicalRole, content: &Value) -> Vec<CanonicalBlock> {
     if let Some(arr) = content.as_array() {
         let mut blocks = Vec::with_capacity(arr.len());
@@ -89,6 +91,7 @@ fn parse_blocks(role: &CanonicalRole, content: &Value) -> Vec<CanonicalBlock> {
     }
 }
 
+/// Decodes request for this module's workflow.
 pub fn decode_request(body: &Value, options: &MapOptions) -> Result<CanonicalRequest, String> {
     let model = if options.target_model.is_empty() {
         str_or_empty(body.get("model"))
@@ -156,6 +159,7 @@ pub fn decode_request(body: &Value, options: &MapOptions) -> Result<CanonicalReq
     })
 }
 
+/// Pushs text block for this module's workflow.
 fn push_text_block(out: &mut Vec<Value>, text: &str) {
     if !text.is_empty() {
         out.push(json!({ "type": "text", "text": text }));
@@ -202,6 +206,7 @@ pub(crate) struct OpenaiChatToAnthropicStreamMapper {
 }
 
 impl OpenaiChatToAnthropicStreamMapper {
+    /// Performs new.
     pub(crate) fn new(request_model: &str) -> Self {
         Self {
             request_model: request_model.to_string(),
@@ -220,6 +225,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         }
     }
 
+    /// Handles stream payload in this processing pipeline.
     pub(crate) fn on_stream_payload(&mut self, parsed: &Value) -> Vec<(String, Value)> {
         let mut out = Vec::new();
         self.update_common_metadata(parsed);
@@ -231,6 +237,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         out
     }
 
+    /// Handles non stream payload in this processing pipeline.
     pub(crate) fn on_non_stream_payload(&mut self, parsed: &Value) -> Vec<(String, Value)> {
         let mut out = Vec::new();
         self.update_common_metadata(parsed);
@@ -271,18 +278,22 @@ impl OpenaiChatToAnthropicStreamMapper {
         out
     }
 
+    /// Handles done in this processing pipeline.
     pub(crate) fn on_done(&mut self) -> Vec<(String, Value)> {
         self.emit_final_events()
     }
 
+    /// Performs finish.
     pub(crate) fn finish(&mut self) -> Vec<(String, Value)> {
         self.emit_final_events()
     }
 
+    /// Performs final message JSON.
     pub(crate) fn final_message_json(&self) -> Option<Value> {
         self.build_final_message_json()
     }
 
+    /// Updates common metadata for this module's workflow.
     fn update_common_metadata(&mut self, parsed: &Value) {
         if let Some(id) = parsed.get("id").and_then(|v| v.as_str()) {
             self.upstream_id = Some(id.to_string());
@@ -302,6 +313,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         }
     }
 
+    /// Performs handle choice delta.
     fn handle_choice_delta(
         &mut self,
         choice: &Value,
@@ -341,6 +353,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         }
     }
 
+    /// Emits text delta for this module's workflow.
     fn emit_text_delta(&mut self, content: &str, out: &mut Vec<(String, Value)>) {
         if content.is_empty() {
             return;
@@ -396,6 +409,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         ));
     }
 
+    /// Emits tool delta for this module's workflow.
     fn emit_tool_delta(&mut self, tool_index: usize, chunk: &Value, out: &mut Vec<(String, Value)>) {
         self.ensure_message_start(out);
 
@@ -512,6 +526,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         }
     }
 
+    /// Performs upsert tool content block.
     fn upsert_tool_content_block(&mut self, block_index: usize, id: &str, name: &str) {
         match self.accumulated_content.get_mut(&block_index) {
             Some(AccumulatedContentBlock::ToolUse {
@@ -535,6 +550,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         }
     }
 
+    /// Performs ensure message start.
     fn ensure_message_start(&mut self, out: &mut Vec<(String, Value)>) {
         if self.message_started {
             return;
@@ -576,6 +592,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         self.message_started = true;
     }
 
+    /// Performs close active block.
     fn close_active_block(&mut self, out: &mut Vec<(String, Value)>) {
         let Some(active) = self.active_block.clone() else {
             return;
@@ -595,6 +612,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         self.active_block = None;
     }
 
+    /// Emits final events for this module's workflow.
     fn emit_final_events(&mut self) -> Vec<(String, Value)> {
         let mut out = Vec::new();
         if self.message_stopped || !self.message_started {
@@ -630,6 +648,7 @@ impl OpenaiChatToAnthropicStreamMapper {
         out
     }
 
+    /// Builds final message JSON.
     fn build_final_message_json(&self) -> Option<Value> {
         let id = self.resolved_message_id.as_ref()?;
         let model = self.resolved_model.as_ref()?;
@@ -687,6 +706,7 @@ impl OpenaiChatToAnthropicStreamMapper {
     }
 }
 
+/// Extracts OpenAI message content text for this module's workflow.
 fn extract_openai_message_content_text(content: &Value) -> Option<String> {
     if let Some(text) = content.as_str() {
         return (!text.is_empty()).then_some(text.to_string());
@@ -716,6 +736,7 @@ fn extract_openai_message_content_text(content: &Value) -> Option<String> {
     (!merged.is_empty()).then_some(merged)
 }
 
+/// Normalizes OpenAI tool call arguments for this module's workflow.
 fn normalize_openai_tool_call_arguments(tool_call: &Value) -> Value {
     let mut normalized = tool_call.clone();
     let args = normalized
@@ -738,6 +759,7 @@ fn normalize_openai_tool_call_arguments(tool_call: &Value) -> Value {
     normalized
 }
 
+/// Encodes request for this module's workflow.
 pub fn encode_request(request: &CanonicalRequest) -> Value {
     let mut system_chunks = vec![];
     let mut messages = vec![];
@@ -834,6 +856,7 @@ pub fn encode_request(request: &CanonicalRequest) -> Value {
     out
 }
 
+/// Decodes response for this module's workflow.
 pub fn decode_response(anthropic_response: &Value, request_model: &str) -> CanonicalResponse {
     let mut text_parts = vec![];
     let mut tool_calls = vec![];
@@ -910,6 +933,7 @@ pub fn decode_response(anthropic_response: &Value, request_model: &str) -> Canon
     }
 }
 
+/// Encodes response for this module's workflow.
 pub fn encode_response(response: &CanonicalResponse) -> Value {
     let mut content = vec![];
     if !response.text.is_empty() {

@@ -9,10 +9,12 @@ import type { LogEntry } from "@/types"
 import { formatTokenMillions } from "@/utils/tokenFormat"
 import styles from "./LogDetailPage.module.css"
 
+/** Returns true when value is an object/array container that can be expanded. */
 function isContainer(value: unknown): value is Record<string, unknown> | unknown[] {
   return typeof value === "object" && value !== null
 }
 
+/** Parses unknown input into structured JSON data when possible. */
 function parseStructuredValue(value: unknown): unknown | null {
   if (value === null || value === undefined) return null
   if (typeof value === "string") {
@@ -28,6 +30,7 @@ function parseStructuredValue(value: unknown): unknown | null {
   return isContainer(value) ? value : null
 }
 
+/** Converts any value into readable text for fallback display. */
 function toText(value: unknown, emptyText: string): string {
   if (value === null || value === undefined) {
     return emptyText
@@ -48,11 +51,13 @@ function toText(value: unknown, emptyText: string): string {
   }
 }
 
+/** Formats an ISO-like timestamp into local date-time string. */
 function formatTimestamp(timestamp: string): string {
   const date = new Date(timestamp)
   return date.toLocaleString()
 }
 
+/** Renders primitive JSON values with semantic styles. */
 function renderPrimitive(value: unknown) {
   if (value === null) {
     return <span className={styles.valueNull}>null</span>
@@ -79,6 +84,7 @@ interface JsonNodeProps {
   onToggle: (path: string) => void
 }
 
+/** Renders one JSON tree node and manages expand/collapse interactions. */
 function JsonNode({ value, label, path, depth, inArray, expandedPaths, onToggle }: JsonNodeProps) {
   const container = isContainer(value)
   const expanded = container ? expandedPaths.has(path) : false
@@ -143,6 +149,7 @@ function JsonNode({ value, label, path, depth, inArray, expandedPaths, onToggle 
   )
 }
 
+/** Implements value behavior. */
 function StructuredValue({
   value,
   emptyText,

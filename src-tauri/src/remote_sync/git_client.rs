@@ -6,7 +6,9 @@ use std::path::Path;
 use std::process::Command;
 
 pub trait GitClient {
+    /// Performs run output.
     fn run_output(&self, cwd: &Path, args: &[&str], context: &str) -> Result<String, String>;
+    /// Performs run status code.
     fn run_status_code(
         &self,
         cwd: &Path,
@@ -18,6 +20,7 @@ pub trait GitClient {
 #[derive(Clone, Default)]
 pub struct RealGitClient;
 
+/// Performs git command.
 fn git_command(cwd: &Path, args: &[&str]) -> Command {
     let mut cmd = Command::new("git");
     cmd.current_dir(cwd).args(args);
@@ -31,6 +34,7 @@ fn git_command(cwd: &Path, args: &[&str]) -> Command {
 }
 
 impl GitClient for RealGitClient {
+    /// Performs run output.
     fn run_output(&self, cwd: &Path, args: &[&str], context: &str) -> Result<String, String> {
         let output = git_command(cwd, args)
             .env("GIT_TERMINAL_PROMPT", "0")
@@ -48,6 +52,7 @@ impl GitClient for RealGitClient {
         Err(format!("{context}: {stderr}"))
     }
 
+    /// Performs run status code.
     fn run_status_code(
         &self,
         cwd: &Path,

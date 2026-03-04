@@ -22,6 +22,7 @@ window.onunhandledrejection = event => {
 
 console.log("Renderer starting...")
 
+/** Resolves theme. */
 function resolveTheme(theme?: unknown): "light" | "dark" {
   if (theme === "light" || theme === "dark") {
     return theme
@@ -30,6 +31,7 @@ function resolveTheme(theme?: unknown): "light" | "dark" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
 }
 
+/** Resolves router. */
 function resolveRouter() {
   if (window.__TAURI__) {
     return HashRouter

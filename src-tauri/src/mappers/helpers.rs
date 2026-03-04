@@ -4,6 +4,7 @@
 
 use serde_json::Value;
 
+/// Returns object field as array items, or empty list when missing/non-array.
 pub(crate) fn as_array<'a>(v: &'a Value, key: &str) -> Vec<&'a Value> {
     v.get(key)
         .and_then(|x| x.as_array())
@@ -11,10 +12,12 @@ pub(crate) fn as_array<'a>(v: &'a Value, key: &str) -> Vec<&'a Value> {
         .unwrap_or_default()
 }
 
+/// Returns string field value or empty string when missing/null/non-string.
 pub(crate) fn str_or_empty(v: Option<&Value>) -> String {
     v.and_then(|x| x.as_str()).unwrap_or_default().to_string()
 }
 
+/// Converts input into tool result content.
 pub(crate) fn to_tool_result_content(content: &Value) -> String {
     if let Some(s) = content.as_str() {
         return s.to_string();
@@ -44,6 +47,7 @@ pub(crate) fn to_tool_result_content(content: &Value) -> String {
     content.to_string()
 }
 
+/// Flattens mixed input item shape into plain text content.
 pub(crate) fn input_item_to_text(value: &Value) -> String {
     if value.is_null() {
         return String::new();
@@ -81,6 +85,7 @@ pub(crate) fn input_item_to_text(value: &Value) -> String {
     value.to_string()
 }
 
+/// Normalizes function-call arguments into string form.
 pub(crate) fn input_item_function_arguments(value: Option<&Value>) -> String {
     match value {
         Some(v) if v.is_string() => v.as_str().unwrap_or_default().to_string(),
@@ -89,6 +94,7 @@ pub(crate) fn input_item_function_arguments(value: Option<&Value>) -> String {
     }
 }
 
+/// Flattens Anthropic text block arrays into one merged string.
 pub(crate) fn flatten_anthropic_text(content: &Value) -> String {
     if let Some(s) = content.as_str() {
         return s.to_string();
@@ -119,6 +125,7 @@ pub(crate) enum OpenAIFinishReason<'a> {
     Other(&'a str),
 }
 
+/// Parses OpenAI finish reason.
 pub(crate) fn parse_openai_finish_reason(reason: &str) -> OpenAIFinishReason<'_> {
     match reason {
         "tool_calls" => OpenAIFinishReason::ToolCalls,
@@ -128,6 +135,7 @@ pub(crate) fn parse_openai_finish_reason(reason: &str) -> OpenAIFinishReason<'_>
     }
 }
 
+/// Maps OpenAI finish reason to Anthropic stop for this module's workflow.
 pub(crate) fn map_openai_finish_reason_to_anthropic_stop(reason: &str) -> &str {
     match parse_openai_finish_reason(reason) {
         OpenAIFinishReason::ToolCalls => "tool_use",
@@ -146,6 +154,7 @@ pub(crate) struct OpenAIUsageSummary {
     pub cache_write_tokens: u64,
 }
 
+/// Extracts OpenAI usage summary for this module's workflow.
 pub(crate) fn extract_openai_usage_summary(usage: &Value) -> Option<OpenAIUsageSummary> {
     if !usage.is_object() {
         return None;
@@ -201,6 +210,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    /// Performs OpenAI finish reason mapping is stable.
     fn openai_finish_reason_mapping_is_stable() {
         assert!(matches!(
             parse_openai_finish_reason("tool_calls"),
@@ -225,6 +235,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs OpenAI usage summary supports prompt details.
     fn openai_usage_summary_supports_prompt_details() {
         let usage = json!({
             "prompt_tokens": 12,

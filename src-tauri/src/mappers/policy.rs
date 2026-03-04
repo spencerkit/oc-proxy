@@ -60,6 +60,7 @@ const SUPPORTED_ANTHROPIC_KEYS: &[&str] = &[
     "context_management",
 ];
 
+/// Validates request fields for this module's workflow.
 pub fn validate_request_fields(
     source: MapperSurface,
     body: &Value,

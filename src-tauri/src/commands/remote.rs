@@ -8,6 +8,7 @@ use crate::services::remote_rules_service;
 use tauri::{AppHandle, State};
 
 #[tauri::command]
+/// Performs config remote rules upload.
 pub async fn config_remote_rules_upload(
     state: State<'_, SharedState>,
     app: AppHandle,
@@ -19,6 +20,7 @@ pub async fn config_remote_rules_upload(
 }
 
 #[tauri::command]
+/// Performs config remote rules pull.
 pub async fn config_remote_rules_pull(
     state: State<'_, SharedState>,
     app: AppHandle,

@@ -19,30 +19,35 @@ pub enum AppError {
 }
 
 impl AppError {
+    /// Performs validation.
     pub fn validation(message: impl Into<String>) -> Self {
         Self::Validation {
             message: message.into(),
         }
     }
 
+    /// Performs not found.
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::NotFound {
             message: message.into(),
         }
     }
 
+    /// Performs external.
     pub fn external(message: impl Into<String>) -> Self {
         Self::External {
             message: message.into(),
         }
     }
 
+    /// Performs internal.
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal {
             message: message.into(),
         }
     }
 
+    /// Performs code.
     pub fn code(&self) -> &'static str {
         match self {
             Self::Validation { .. } => "validation_error",
@@ -54,12 +59,14 @@ impl AppError {
 }
 
 impl From<String> for AppError {
+    /// Performs from.
     fn from(message: String) -> Self {
         Self::internal(message)
     }
 }
 
 impl From<&str> for AppError {
+    /// Performs from.
     fn from(message: &str) -> Self {
         Self::internal(message)
     }
@@ -70,6 +77,7 @@ mod tests {
     use super::AppError;
 
     #[test]
+    /// Performs app error code matches variant.
     fn app_error_code_matches_variant() {
         assert_eq!(AppError::validation("x").code(), "validation_error");
         assert_eq!(AppError::not_found("x").code(), "not_found");
@@ -78,6 +86,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs app error display keeps message.
     fn app_error_display_keeps_message() {
         let err = AppError::validation("bad input");
         assert_eq!(err.to_string(), "bad input");

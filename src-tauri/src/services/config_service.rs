@@ -12,10 +12,12 @@ use std::collections::{HashMap, HashSet};
 use tauri::AppHandle;
 use uuid::Uuid;
 
+/// Performs get config.
 pub fn get_config(state: &SharedState) -> ProxyConfig {
     state.config_store.get()
 }
 
+/// Saves config for this module's workflow.
 pub async fn save_config(
     state: &SharedState,
     app: &AppHandle,
@@ -35,6 +37,7 @@ pub async fn save_config(
     })
 }
 
+/// Performs import groups payload.
 pub async fn import_groups_payload(
     state: &SharedState,
     parsed: Value,
@@ -50,6 +53,7 @@ pub async fn import_groups_payload(
     Ok((imported_groups.len(), saved, restarted, status))
 }
 
+/// Performs import groups with source.
 pub async fn import_groups_with_source(
     state: &SharedState,
     parsed: Value,
@@ -70,6 +74,7 @@ pub async fn import_groups_with_source(
     })
 }
 
+/// Merges imported groups for this module's workflow.
 fn merge_imported_groups(current: &[Group], imported: &[Group]) -> Vec<Group> {
     let mut merged = current.to_vec();
     let mut index_by_group_path: HashMap<String, usize> = HashMap::new();
@@ -90,6 +95,7 @@ fn merge_imported_groups(current: &[Group], imported: &[Group]) -> Vec<Group> {
     merged
 }
 
+/// Merges group by provider name for this module's workflow.
 fn merge_group_by_provider_name(current: &Group, imported: &Group) -> Group {
     let mut providers = current.providers.clone();
     let mut current_index_by_name: HashMap<String, usize> = HashMap::new();
@@ -154,6 +160,7 @@ fn merge_group_by_provider_name(current: &Group, imported: &Group) -> Group {
     }
 }
 
+/// Normalizes group provider IDs for this module's workflow.
 fn normalize_group_provider_ids(mut group: Group) -> Group {
     let mut used_ids = HashSet::new();
     let mut old_to_new_id: HashMap<String, String> = HashMap::new();
@@ -180,6 +187,7 @@ fn normalize_group_provider_ids(mut group: Group) -> Group {
     group
 }
 
+/// Performs alloc provider ID.
 fn alloc_provider_id(candidate: &str, used_ids: &mut HashSet<String>) -> String {
     let candidate = candidate.trim();
     if !candidate.is_empty() && !used_ids.contains(candidate) {
@@ -194,6 +202,7 @@ fn alloc_provider_id(candidate: &str, used_ids: &mut HashSet<String>) -> String 
     }
 }
 
+/// Performs provider name key.
 fn provider_name_key(name: &str) -> String {
     name.trim().to_lowercase()
 }
@@ -206,6 +215,7 @@ mod tests {
     };
     use std::collections::HashMap;
 
+    /// Performs provider.
     fn provider(id: &str, name: &str, model: &str) -> Rule {
         Rule {
             id: id.to_string(),
@@ -220,6 +230,7 @@ mod tests {
         }
     }
 
+    /// Performs group.
     fn group(id: &str, name: &str, active: Option<&str>, providers: Vec<Rule>) -> Group {
         Group {
             id: id.to_string(),
@@ -231,6 +242,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs import merge updates by group ID and provider name.
     fn import_merge_updates_by_group_id_and_provider_name() {
         let current = vec![group(
             "group-a",
@@ -269,6 +281,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs import merge keeps local groups missing in import.
     fn import_merge_keeps_local_groups_missing_in_import() {
         let current = vec![group("group-local", "Local", None, vec![provider("p1", "x", "m1")])];
         let imported = vec![group("group-new", "New", None, vec![provider("p2", "y", "m2")])];

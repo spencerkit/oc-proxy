@@ -84,6 +84,7 @@ interface ProxyState {
 const STATUS_POLL_INTERVAL = 3000
 const LOGS_POLL_INTERVAL = 3000
 const MAX_LOGS = 100
+/** Implements key behavior. */
 const quotaKey = (groupId: string, providerId: string) => `${groupId}:${providerId}`
 const ACTIVE_GROUP_STORAGE_KEY = "ai-open-router.activeGroupId"
 
@@ -98,6 +99,7 @@ const readPersistedActiveGroupId = (): string | null => {
   }
 }
 
+/** Implements active group id behavior. */
 const persistActiveGroupId = (groupId: string | null) => {
   if (typeof window === "undefined") return
   try {
@@ -109,6 +111,7 @@ const persistActiveGroupId = (groupId: string | null) => {
   } catch {}
 }
 
+/** Normalizes group. */
 function normalizeGroup(group: Partial<Group> & Pick<Group, "id" | "name">): Group {
   const providers = group.providers ?? group.rules ?? []
   const activeProviderId = group.activeProviderId ?? group.activeRuleId ?? null
@@ -122,6 +125,7 @@ function normalizeGroup(group: Partial<Group> & Pick<Group, "id" | "name">): Gro
   }
 }
 
+/** Normalizes config. */
 function normalizeConfig(config: ProxyConfig): ProxyConfig {
   return {
     ...config,
@@ -131,6 +135,7 @@ function normalizeConfig(config: ProxyConfig): ProxyConfig {
   }
 }
 
+/** Builds save config payload. */
 function buildSaveConfigPayload(config: ProxyConfig): ProxyConfig {
   return {
     ...config,
@@ -148,6 +153,7 @@ function buildSaveConfigPayload(config: ProxyConfig): ProxyConfig {
   }
 }
 
+/** Implements error message behavior. */
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message

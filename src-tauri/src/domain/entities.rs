@@ -111,30 +111,37 @@ pub struct RuleQuotaConfig {
     pub response: RuleQuotaResponseMapping,
 }
 
+/// Performs default quota method.
 pub fn default_quota_method() -> String {
     "GET".to_string()
 }
 
+/// Performs default quota use rule token.
 pub fn default_quota_use_rule_token() -> bool {
     true
 }
 
+/// Performs default quota auth header.
 pub fn default_quota_auth_header() -> String {
     "Authorization".to_string()
 }
 
+/// Performs default quota auth scheme.
 pub fn default_quota_auth_scheme() -> String {
     "Bearer".to_string()
 }
 
+/// Performs default quota unit type.
 pub fn default_quota_unit_type() -> QuotaUnitType {
     QuotaUnitType::Percentage
 }
 
+/// Performs default quota low threshold percent.
 pub fn default_quota_low_threshold_percent() -> f64 {
     10.0
 }
 
+/// Performs default rule quota config.
 pub fn default_rule_quota_config() -> RuleQuotaConfig {
     RuleQuotaConfig {
         enabled: false,
@@ -169,10 +176,12 @@ pub struct RuleCostConfig {
     pub currency: String,
 }
 
+/// Performs default cost currency.
 pub fn default_cost_currency() -> String {
     "USD".to_string()
 }
 
+/// Performs default rule cost config.
 pub fn default_rule_cost_config() -> RuleCostConfig {
     RuleCostConfig {
         enabled: false,

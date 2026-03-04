@@ -18,6 +18,7 @@ pub(super) enum SseFramePayload {
 }
 
 impl SseDataParser {
+    /// Appends incoming bytes and parses all complete SSE lines currently available.
     pub(super) fn consume_chunk(&mut self, chunk: &[u8]) -> Vec<SseFrame> {
         self.line_buffer.push_str(&String::from_utf8_lossy(chunk));
         let mut out = Vec::new();
@@ -36,6 +37,7 @@ impl SseDataParser {
         out
     }
 
+    /// Flushes any trailing buffered line and pending SSE event on stream completion.
     pub(super) fn drain_remainder(&mut self) -> Vec<SseFrame> {
         let mut out = Vec::new();
         if !self.line_buffer.is_empty() {
@@ -53,6 +55,7 @@ impl SseDataParser {
         out
     }
 
+    /// Consumes a single normalized SSE line and updates event/data accumulators.
     fn consume_line(&mut self, line: &str) -> Option<SseFrame> {
         if line.is_empty() {
             return self.flush_event();
@@ -75,6 +78,7 @@ impl SseDataParser {
         None
     }
 
+    /// Emits one parsed frame from accumulated event/data lines when a frame boundary is reached.
     fn flush_event(&mut self) -> Option<SseFrame> {
         if self.current_data_lines.is_empty() {
             self.current_event = None;

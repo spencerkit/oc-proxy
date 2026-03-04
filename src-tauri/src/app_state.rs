@@ -17,6 +17,7 @@ pub struct AppState {
 
 pub type SharedState = Arc<AppState>;
 
+/// Returns whether the state has server setting changed.
 fn has_server_setting_changed(prev: &ProxyConfig, next: &ProxyConfig) -> bool {
     prev.server.host != next.server.host
         || prev.server.port != next.server.port
@@ -24,6 +25,7 @@ fn has_server_setting_changed(prev: &ProxyConfig, next: &ProxyConfig) -> bool {
         || prev.server.local_bearer_token != next.server.local_bearer_token
 }
 
+/// Performs sync runtime config.
 pub async fn sync_runtime_config(
     state: &SharedState,
     prev: ProxyConfig,
@@ -40,6 +42,7 @@ pub async fn sync_runtime_config(
     Ok((restarted, state.runtime.get_status()))
 }
 
+/// Applys launch on startup setting for this module's workflow.
 pub fn apply_launch_on_startup_setting(app: &AppHandle, enabled: bool) {
     let autostart_manager = app.autolaunch();
     if enabled {

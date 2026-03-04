@@ -6,6 +6,7 @@ use serde_json::{Map, Value};
 
 pub const CURRENT_CONFIG_VERSION: u32 = 2;
 
+/// Migrates arbitrary config payload into the latest supported schema version.
 pub fn migrate_config(input: Value) -> Result<Value, String> {
     let mut root = ensure_object_root(input);
     let mut version = detect_config_version(&root);
@@ -39,6 +40,7 @@ pub fn migrate_config(input: Value) -> Result<Value, String> {
     Ok(root)
 }
 
+/// Ensures migration always works with an object root.
 fn ensure_object_root(input: Value) -> Value {
     if input.is_object() {
         input
@@ -47,6 +49,7 @@ fn ensure_object_root(input: Value) -> Value {
     }
 }
 
+/// Detects config version from payload and defaults to v1 for legacy data.
 fn detect_config_version(root: &Value) -> u32 {
     root.get("configVersion")
         .and_then(Value::as_u64)
@@ -54,6 +57,7 @@ fn detect_config_version(root: &Value) -> u32 {
         .unwrap_or(1)
 }
 
+/// Applies v1 -> v2 migration defaults for locale mode and remote-git options.
 fn migrate_v1_to_v2(mut root: Value) -> Value {
     let Some(obj) = root.as_object_mut() else {
         return Value::Object(Map::new());
@@ -115,12 +119,14 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    /// Performs migrate defaults missing version to current.
     fn migrate_defaults_missing_version_to_current() {
         let migrated = migrate_config(json!({})).expect("migration should succeed");
         assert_eq!(migrated["configVersion"], CURRENT_CONFIG_VERSION);
     }
 
     #[test]
+    /// Performs migrate v1 to v2 fills locale mode and remote defaults.
     fn migrate_v1_to_v2_fills_locale_mode_and_remote_defaults() {
         let migrated = migrate_config(json!({
             "ui": {
@@ -140,6 +146,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs migrate rejects future version.
     fn migrate_rejects_future_version() {
         let err = migrate_config(json!({
             "configVersion": CURRENT_CONFIG_VERSION + 1
@@ -149,6 +156,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs migrate is idempotent on current version.
     fn migrate_is_idempotent_on_current_version() {
         let input = json!({
             "configVersion": CURRENT_CONFIG_VERSION,

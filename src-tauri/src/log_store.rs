@@ -23,6 +23,7 @@ struct DevLogSink {
 
 impl LogStore {
     #[allow(dead_code)]
+    /// Performs new.
     pub fn new(limit: usize) -> Self {
         Self::with_dev_log_file(limit, None)
     }
@@ -82,6 +83,7 @@ impl LogStore {
     }
 
     #[cfg(debug_assertions)]
+    /// Performs append to dev file.
     fn append_to_dev_file(&self, entry: &LogEntry) {
         let Some(sink) = &self.dev_log_sink else {
             return;
@@ -109,6 +111,7 @@ impl LogStore {
     }
 
     #[cfg(debug_assertions)]
+    /// Clears dev file for this module's workflow.
     fn clear_dev_file(&self) {
         let Some(sink) = &self.dev_log_sink else {
             return;
@@ -130,6 +133,7 @@ impl LogStore {
 }
 
 #[cfg(debug_assertions)]
+/// Inits dev log sink for this module's workflow.
 fn init_dev_log_sink(dev_log_path: Option<PathBuf>) -> Option<Arc<Mutex<DevLogSink>>> {
     let path = dev_log_path?;
     if let Some(parent) = path.parent() {

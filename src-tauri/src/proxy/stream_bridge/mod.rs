@@ -20,6 +20,7 @@ pub(super) struct StreamBridge {
     adapter: Box<DynBridgeAdapter>,
 }
 
+/// Creates a stream bridge instance for a specific source/target protocol pair.
 pub(super) fn create_stream_bridge(
     source: MapperSurface,
     target: MapperSurface,
@@ -31,6 +32,7 @@ pub(super) fn create_stream_bridge(
     })
 }
 
+/// Maps a non-stream response through the same bridge registry when supported.
 pub(super) fn map_non_stream_response_via_bridge(
     source: MapperSurface,
     target: MapperSurface,
@@ -41,6 +43,7 @@ pub(super) fn map_non_stream_response_via_bridge(
 }
 
 impl StreamBridge {
+    /// Consumes one upstream byte chunk, parses SSE frames, and emits mapped downstream frames.
     pub(super) fn consume_chunk(&mut self, chunk: &[u8]) -> Vec<Bytes> {
         let frames = self.parser.consume_chunk(chunk);
         let mut out = Vec::new();
@@ -56,6 +59,7 @@ impl StreamBridge {
         out
     }
 
+    /// Flushes parser remainder and adapter finalization output at end of stream.
     pub(super) fn finish(&mut self) -> Vec<Bytes> {
         let mut out = Vec::new();
 
@@ -81,6 +85,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    /// Verifies chat-completions stream can be converted to Anthropic SSE events.
     fn bridge_openai_chat_stream_to_anthropic_events() {
         let mut bridge = create_stream_bridge(
             MapperSurface::OpenaiChatCompletions,
@@ -114,6 +119,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies tool-call deltas are mapped to Anthropic tool_use event sequence.
     fn bridge_openai_tool_calls_to_anthropic_tool_use_events() {
         let mut bridge = create_stream_bridge(
             MapperSurface::OpenaiChatCompletions,
@@ -142,6 +148,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies parser handles split lines and trailing remainder correctly.
     fn bridge_parser_handles_split_lines_without_newline() {
         let mut bridge = create_stream_bridge(
             MapperSurface::OpenaiChatCompletions,
@@ -170,6 +177,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies Responses SSE events are transformed into chat chunk stream.
     fn bridge_responses_stream_to_chat_chunks() {
         let mut bridge = create_stream_bridge(
             MapperSurface::OpenaiResponses,
@@ -204,6 +212,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies chat chunk stream can be transformed into Responses event stream.
     fn bridge_chat_stream_to_responses_events() {
         let mut bridge = create_stream_bridge(
             MapperSurface::OpenaiChatCompletions,
@@ -235,6 +244,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies non-stream chat response can map to Anthropic message JSON.
     fn non_stream_bridge_maps_openai_chat_text_response() {
         let out = map_non_stream_response_via_bridge(
             MapperSurface::OpenaiChatCompletions,
@@ -271,6 +281,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies non-stream chat tool-calls can map to Anthropic tool_use JSON.
     fn non_stream_bridge_maps_openai_chat_tool_calls_response() {
         let out = map_non_stream_response_via_bridge(
             MapperSurface::OpenaiChatCompletions,
@@ -317,6 +328,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies non-stream Responses payload can map to chat completion JSON.
     fn non_stream_bridge_maps_responses_to_chat() {
         let out = map_non_stream_response_via_bridge(
             MapperSurface::OpenaiResponses,
@@ -345,6 +357,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies stream bridge emits exactly one terminal `[DONE]` marker.
     fn stream_bridge_emits_done_once_for_chat_to_responses() {
         let mut bridge = create_stream_bridge(
             MapperSurface::OpenaiChatCompletions,
