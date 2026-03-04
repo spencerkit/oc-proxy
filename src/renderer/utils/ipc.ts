@@ -127,8 +127,8 @@ export const ipc = {
     return getInvoke()<{ ok: boolean }>("logs_stats_clear")
   },
 
-  getRuleQuota(groupId: string, ruleId: string): Promise<RuleQuotaSnapshot> {
-    return getInvoke()<RuleQuotaSnapshot>("quota_get_rule", { groupId, ruleId })
+  getProviderQuota(groupId: string, providerId: string): Promise<RuleQuotaSnapshot> {
+    return getInvoke()<RuleQuotaSnapshot>("quota_get_rule", { groupId, ruleId: providerId })
   },
 
   getGroupQuotas(groupId: string): Promise<RuleQuotaSnapshot[]> {
@@ -137,18 +137,18 @@ export const ipc = {
 
   testRuleQuotaDraft(
     groupId: string,
-    ruleName: string,
-    ruleToken: string,
-    ruleApiAddress: string,
-    ruleDefaultModel: string,
+    providerName: string,
+    providerToken: string,
+    providerApiAddress: string,
+    providerDefaultModel: string,
     quota: RuleQuotaConfig
   ): Promise<RuleQuotaTestResult> {
     return getInvoke()<RuleQuotaTestResult>("quota_test_draft", {
       groupId,
-      ruleName,
-      ruleToken,
-      ruleApiAddress,
-      ruleDefaultModel,
+      ruleName: providerName,
+      ruleToken: providerToken,
+      ruleApiAddress: providerApiAddress,
+      ruleDefaultModel: providerDefaultModel,
       quota,
     })
   },

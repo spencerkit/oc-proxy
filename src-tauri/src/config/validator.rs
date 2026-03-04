@@ -48,18 +48,18 @@ pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
         if group.name.trim().is_empty() {
             return Err(format!("group.name is required for {}", group.id));
         }
-        for rule in &group.providers {
-            if rule.id.trim().is_empty() {
-                return Err(format!("rule.id is required in group {}", group.id));
+        for provider in &group.providers {
+            if provider.id.trim().is_empty() {
+                return Err(format!("provider.id is required in group {}", group.id));
             }
-            if rule.default_model.trim().is_empty() {
-                return Err(format!("rule.defaultModel required for {}", rule.id));
+            if provider.default_model.trim().is_empty() {
+                return Err(format!("provider.defaultModel required for {}", provider.id));
             }
         }
         if let Some(active) = &group.active_provider_id {
             if !group.providers.iter().any(|r| r.id == *active) {
                 return Err(format!(
-                    "group.activeRuleId not found in rules for {}",
+                    "group.activeProviderId not found in providers for {}",
                     group.id
                 ));
             }
@@ -96,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn group_active_rule_must_exist() {
+    fn group_active_provider_must_exist() {
         let mut cfg = default_config();
         cfg.groups = vec![Group {
             id: "g1".to_string(),
@@ -117,7 +117,7 @@ mod tests {
         }];
 
         let err = validate_config(&cfg).expect_err("validation should fail");
-        assert!(err.contains("group.activeRuleId"));
+        assert!(err.contains("group.activeProviderId"));
     }
 
     #[test]

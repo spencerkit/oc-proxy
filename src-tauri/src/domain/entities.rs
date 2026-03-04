@@ -208,9 +208,9 @@ pub struct Group {
     pub name: String,
     #[serde(default)]
     pub models: Vec<String>,
-    #[serde(rename = "activeRuleId", alias = "activeProviderId")]
+    #[serde(rename = "activeProviderId", alias = "activeRuleId")]
     pub active_provider_id: Option<String>,
-    #[serde(default, rename = "rules", alias = "providers")]
+    #[serde(default, rename = "providers", alias = "rules")]
     pub providers: Vec<Rule>,
 }
 
