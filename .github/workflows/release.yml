@@ -44,7 +44,11 @@ jobs:
         run: npm ci
 
       - name: Package app
-        run: npm run tauri:build
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/dist/target
+        run: |
+          cargo tauri build
+          npm run tauri:collect
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
