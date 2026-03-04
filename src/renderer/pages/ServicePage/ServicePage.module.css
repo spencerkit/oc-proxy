@@ -354,7 +354,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   transition: all var(--transition-fast);
-  height: 82px;
+  min-height: 90px;
   padding: var(--sp-2);
 }
 
@@ -403,9 +403,18 @@
 .ruleCardBottom {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  justify-content: space-between;
+  gap: var(--sp-3);
   width: 100%;
-  min-height: 26px;
+  min-height: 32px;
+}
+
+.ruleMetaLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex: 1;
 }
 
 .ruleActionButtons {
@@ -508,7 +517,7 @@
   align-items: center;
   gap: var(--sp-2);
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
 }
 
 .quotaResetAt {
@@ -582,7 +591,99 @@
   animation: spin 0.85s linear infinite;
 }
 
+.ruleTrendWrap {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.ruleTrendInlineMeta {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  padding-bottom: 1px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ruleMiniChart {
+  width: 132px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--bg-base) 85%, transparent);
+  border: 1px solid color-mix(in oklab, var(--border) 76%, transparent);
+}
+
+.ruleMiniBar {
+  opacity: 0.9;
+}
+
+.ruleMiniLine {
+  fill: none;
+  stroke: #ff8fb1;
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ruleMiniPoint {
+  fill: #ff8fb1;
+}
+
+.ruleMiniHoverSlot {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.ruleMiniChartEmpty {
+  width: 132px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px dashed color-mix(in oklab, var(--border) 75%, transparent);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
 /* Delete button */
+.editButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.ruleItemContainer:hover .editButton {
+  opacity: 1;
+}
+
+.editButton:hover {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.editButton:focus-visible {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
 .deleteButton {
   display: flex;
   align-items: center;
@@ -829,7 +930,19 @@
     min-height: 52px;
   }
 
+  .ruleItemContainer {
+    min-height: 80px;
+  }
+
+  .ruleTrendWrap {
+    display: none;
+  }
+
   .deleteButton {
+    opacity: 1;
+  }
+
+  .editButton {
     opacity: 1;
   }
 }

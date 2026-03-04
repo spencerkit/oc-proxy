@@ -129,14 +129,36 @@ export interface HourlyStatsPoint {
 export interface StatsSummaryResult {
   hours: number
   ruleKey?: string | null
+  ruleKeys?: string[] | null
   requests: number
   errors: number
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  rpm: number
+  inputTpm: number
+  outputTpm: number
   hourly: HourlyStatsPoint[]
   options: StatsRuleOption[]
+}
+
+export interface RuleCardHourlyPoint {
+  hour: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  tokens: number
+}
+
+export interface RuleCardStatsItem {
+  groupId: string
+  ruleId: string
+  requests: number
+  inputTokens: number
+  outputTokens: number
+  tokens: number
+  hourly: RuleCardHourlyPoint[]
 }
 
 export interface ClipboardTextResult {

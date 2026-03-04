@@ -3,7 +3,7 @@
 //! Performs boundary-level argument handling and delegates business logic to runtime/services.
 
 use crate::app_state::SharedState;
-use crate::models::{LogEntry, StatsSummaryResult};
+use crate::models::{LogEntry, RuleCardStatsItem, StatsSummaryResult};
 use serde_json::json;
 use tauri::State;
 
@@ -25,9 +25,19 @@ pub async fn logs_clear(state: State<'_, SharedState>) -> Result<serde_json::Val
 pub async fn logs_stats_summary(
     state: State<'_, SharedState>,
     hours: Option<u32>,
+    rule_keys: Option<Vec<String>>,
     rule_key: Option<String>,
 ) -> Result<StatsSummaryResult, String> {
-    Ok(state.runtime.stats_summary(hours, rule_key))
+    Ok(state.runtime.stats_summary(hours, rule_keys, rule_key))
+}
+
+#[tauri::command]
+pub async fn logs_stats_rule_cards(
+    state: State<'_, SharedState>,
+    group_id: String,
+    hours: Option<u32>,
+) -> Result<Vec<RuleCardStatsItem>, String> {
+    Ok(state.runtime.stats_rule_cards(group_id, hours))
 }
 
 #[tauri::command]

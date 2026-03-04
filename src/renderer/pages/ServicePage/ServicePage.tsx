@@ -21,8 +21,10 @@ export const ServicePage: React.FC = () => {
     saveConfig,
     status,
     ruleQuotas,
+    ruleCardStatsByRuleKey,
     quotaLoadingRuleKeys,
     fetchGroupQuotas,
+    fetchGroupRuleCardStats,
     fetchRuleQuota,
   } = useProxyStore()
   const { showToast } = useLogs()
@@ -35,6 +37,8 @@ export const ServicePage: React.FC = () => {
   const [activatingRuleId, setActivatingRuleId] = useState<string | null>(null)
   const [newGroupName, setNewGroupName] = useState("")
   const [newGroupId, setNewGroupId] = useState("")
+  const ruleCardStatsHours = 24
+  const ruleCardStatsRefreshIntervalMs = 10_000
 
   const groups = config?.groups ?? []
   const activeGroup = groups.find(g => g.id === activeGroupId)
@@ -63,11 +67,24 @@ export const ServicePage: React.FC = () => {
 
   React.useEffect(() => {
     if (!activeGroupId) return
+    void fetchGroupRuleCardStats(activeGroupId, ruleCardStatsHours)
+  }, [activeGroupId, fetchGroupRuleCardStats])
+
+  React.useEffect(() => {
+    if (!activeGroupId) return
     const timer = window.setInterval(() => {
       void fetchGroupQuotas(activeGroupId)
     }, quotaAutoRefreshIntervalMs)
     return () => window.clearInterval(timer)
   }, [activeGroupId, fetchGroupQuotas, quotaAutoRefreshIntervalMs])
+
+  React.useEffect(() => {
+    if (!activeGroupId) return
+    const timer = window.setInterval(() => {
+      void fetchGroupRuleCardStats(activeGroupId, ruleCardStatsHours)
+    }, ruleCardStatsRefreshIntervalMs)
+    return () => window.clearInterval(timer)
+  }, [activeGroupId, fetchGroupRuleCardStats])
 
   const handleSelectGroup = (groupId: string) => {
     setActiveGroupId(groupId)
@@ -250,6 +267,15 @@ export const ServicePage: React.FC = () => {
     return map
   }, [activeGroup, quotaLoadingRuleKeys])
 
+  const activeGroupRuleCardStatsByRuleId = React.useMemo(() => {
+    const map: Record<string, (typeof ruleCardStatsByRuleKey)[string] | undefined> = {}
+    if (!activeGroup) return map
+    for (const rule of activeGroup.rules) {
+      map[rule.id] = ruleCardStatsByRuleKey[`${activeGroup.id}:${rule.id}`]
+    }
+    return map
+  }, [activeGroup, ruleCardStatsByRuleKey])
+
   return (
     <div className={styles.servicePage}>
       {/* Group List Sidebar */}
@@ -367,6 +393,7 @@ export const ServicePage: React.FC = () => {
               activatingRuleId={activatingRuleId}
               quotaByRuleId={activeGroupQuotaByRuleId}
               quotaLoadingByRuleId={activeGroupQuotaLoadingByRuleId}
+              cardStatsByRuleId={activeGroupRuleCardStatsByRuleId}
               onRefreshQuota={handleRefreshRuleQuota}
               onDelete={handleRequestDeleteRule}
               groupName={activeGroup.name}

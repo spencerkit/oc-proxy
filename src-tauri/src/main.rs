@@ -26,7 +26,7 @@ use commands::{
     config_export_groups, config_export_groups_clipboard, config_export_groups_folder, config_get,
     config_import_groups, config_import_groups_json, config_remote_rules_pull,
     config_remote_rules_upload, config_save, logs_clear, logs_list, logs_stats_clear,
-    logs_stats_summary, quota_get_group, quota_get_rule, quota_test_draft,
+    logs_stats_rule_cards, logs_stats_summary, quota_get_group, quota_get_rule, quota_test_draft,
 };
 use tauri::Manager;
 
@@ -68,6 +68,7 @@ async fn main() {
             logs_list,
             logs_clear,
             logs_stats_summary,
+            logs_stats_rule_cards,
             logs_stats_clear,
             quota_get_rule,
             quota_get_group,

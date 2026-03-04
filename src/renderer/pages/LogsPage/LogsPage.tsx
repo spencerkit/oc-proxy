@@ -1,6 +1,6 @@
 import type { EChartsOption } from "echarts"
 import * as echarts from "echarts"
-import { RotateCcw, Trash2 } from "lucide-react"
+import { Check, RotateCcw, Trash2, X } from "lucide-react"
 import type React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
@@ -30,6 +30,8 @@ const MACARON = {
   requestLine: "#ff9fc0",
   requestAreaTop: "rgba(255, 159, 192, 0.26)",
   requestAreaBottom: "rgba(255, 159, 192, 0.02)",
+  tpmInputLine: "#4fc8a8",
+  tpmOutputLine: "#5d95ff",
 } as const
 
 type LogsTab = "stats" | "logs"
@@ -63,7 +65,19 @@ function formatTokenAxisValue(value: number | string): string {
     const text = Math.abs(scaled) >= 10 ? scaled.toFixed(0) : scaled.toFixed(1)
     return `${text.replace(/\.0$/, "")}M`
   }
+  if (Math.abs(numeric) >= 1_000) {
+    const scaled = numeric / 1_000
+    const text = Math.abs(scaled) >= 10 ? scaled.toFixed(0) : scaled.toFixed(1)
+    return `${text.replace(/\.0$/, "")}k`
+  }
   return String(Math.round(numeric))
+}
+
+function formatRateMetric(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0"
+  if (value < 0.01) return "<0.01"
+  if (value >= 1000) return formatTokenAxisValue(value)
+  return value.toFixed(2).replace(/\.00$/, "")
 }
 
 /**
@@ -78,14 +92,17 @@ export const LogsPage: React.FC = () => {
   const { showToast } = useLogs()
   const [activeTab, setActiveTab] = useState<LogsTab>("stats")
   const [statusFilter, setStatusFilter] = useState<"all" | LogEntry["status"]>("all")
-  const [ruleFilter, setRuleFilter] = useState("all")
-  const [ruleInputValue, setRuleInputValue] = useState("")
+  const [selectedRuleKeys, setSelectedRuleKeys] = useState<string[]>([])
+  const [ruleSearchValue, setRuleSearchValue] = useState("")
   const [ruleDropdownOpen, setRuleDropdownOpen] = useState(false)
   const [hoursFilter, setHoursFilter] = useState<number>(24)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const hasInitializedRuleSelectionRef = useRef(false)
   const ruleComboboxRef = useRef<HTMLDivElement | null>(null)
-  const chartDomRef = useRef<HTMLDivElement | null>(null)
-  const chartRef = useRef<echarts.ECharts | null>(null)
+  const usageChartDomRef = useRef<HTMLDivElement | null>(null)
+  const usageChartRef = useRef<echarts.ECharts | null>(null)
+  const rateChartDomRef = useRef<HTMLDivElement | null>(null)
+  const rateChartRef = useRef<echarts.ECharts | null>(null)
   const statusFilters: Array<"all" | LogEntry["status"]> = [
     "all",
     "error",
@@ -95,9 +112,7 @@ export const LogsPage: React.FC = () => {
   ]
 
   const ruleOptions = useMemo(() => {
-    const options: Array<{ key: string; label: string }> = [
-      { key: "all", label: t("logs.statsRuleAll") },
-    ]
+    const options: Array<{ key: string; label: string }> = []
     for (const group of config?.groups || []) {
       for (const rule of group.rules || []) {
         options.push({
@@ -107,37 +122,56 @@ export const LogsPage: React.FC = () => {
       }
     }
     return options
-  }, [config, t])
+  }, [config])
+
+  const ruleOptionsByKey = useMemo(() => {
+    const map = new Map<string, { key: string; label: string }>()
+    for (const option of ruleOptions) {
+      map.set(option.key, option)
+    }
+    return map
+  }, [ruleOptions])
+
+  const selectedRuleKeySet = useMemo(() => new Set(selectedRuleKeys), [selectedRuleKeys])
+
+  const selectedRuleOptions = useMemo(() => {
+    return selectedRuleKeys
+      .map(key => ruleOptionsByKey.get(key))
+      .filter((option): option is { key: string; label: string } => Boolean(option))
+  }, [ruleOptionsByKey, selectedRuleKeys])
 
   const visibleRuleOptions = useMemo(() => {
-    const keyword = ruleInputValue.trim().toLowerCase()
+    const keyword = ruleSearchValue.trim().toLowerCase()
     if (!keyword) return ruleOptions
+    return ruleOptions.filter(option => option.label.toLowerCase().includes(keyword))
+  }, [ruleOptions, ruleSearchValue])
 
-    return ruleOptions.filter(option => {
-      if (option.key === "all") return false
-      return option.label.toLowerCase().includes(keyword)
+  const allRuleKeys = useMemo(() => ruleOptions.map(option => option.key), [ruleOptions])
+  const isAllSelected = allRuleKeys.length > 0 && selectedRuleKeys.length === allRuleKeys.length
+
+  useEffect(() => {
+    const validKeys = new Set(allRuleKeys)
+    setSelectedRuleKeys(prev => {
+      if (!hasInitializedRuleSelectionRef.current) {
+        hasInitializedRuleSelectionRef.current = true
+        return [...allRuleKeys]
+      }
+      return prev.filter(key => validKeys.has(key))
     })
-  }, [ruleInputValue, ruleOptions])
+  }, [allRuleKeys])
 
   useEffect(() => {
-    const selected = ruleOptions.find(option => option.key === ruleFilter)
-    if (selected?.key === "all") {
-      setRuleInputValue("")
-    } else {
-      setRuleInputValue(selected?.label ?? "")
-    }
-  }, [ruleFilter, ruleOptions])
+    if (!hasInitializedRuleSelectionRef.current) return
+    void refreshLogsStats(hoursFilter, selectedRuleKeys)
+  }, [hoursFilter, refreshLogsStats, selectedRuleKeys])
 
   useEffect(() => {
-    void refreshLogsStats(hoursFilter, ruleFilter === "all" ? undefined : ruleFilter)
-  }, [hoursFilter, refreshLogsStats, ruleFilter])
-
-  useEffect(() => {
+    if (!hasInitializedRuleSelectionRef.current) return
     const timer = window.setInterval(() => {
-      void refreshLogsStats(hoursFilter, ruleFilter === "all" ? undefined : ruleFilter)
+      void refreshLogsStats(hoursFilter, selectedRuleKeys)
     }, 3000)
     return () => window.clearInterval(timer)
-  }, [hoursFilter, refreshLogsStats, ruleFilter])
+  }, [hoursFilter, refreshLogsStats, selectedRuleKeys])
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -154,17 +188,27 @@ export const LogsPage: React.FC = () => {
 
   useEffect(() => {
     return () => {
-      if (chartRef.current) {
-        chartRef.current.dispose()
-        chartRef.current = null
+      if (usageChartRef.current) {
+        usageChartRef.current.dispose()
+        usageChartRef.current = null
+      }
+      if (rateChartRef.current) {
+        rateChartRef.current.dispose()
+        rateChartRef.current = null
       }
     }
   }, [])
 
   useEffect(() => {
-    if (activeTab !== "stats" && chartRef.current) {
-      chartRef.current.dispose()
-      chartRef.current = null
+    if (activeTab !== "stats") {
+      if (usageChartRef.current) {
+        usageChartRef.current.dispose()
+        usageChartRef.current = null
+      }
+      if (rateChartRef.current) {
+        rateChartRef.current.dispose()
+        rateChartRef.current = null
+      }
     }
   }, [activeTab])
 
@@ -180,12 +224,21 @@ export const LogsPage: React.FC = () => {
   const handleResetStats = async () => {
     try {
       await clearLogsStats()
-      await refreshLogsStats(hoursFilter, ruleFilter === "all" ? undefined : ruleFilter)
+      await refreshLogsStats(hoursFilter, selectedRuleKeys)
       showToast(t("logs.resetStatsSuccess"), "success")
     } catch (error) {
       showToast(t("logs.resetStatsError"), "error")
       console.error(error)
     }
+  }
+
+  const handleToggleRule = (ruleKey: string) => {
+    setSelectedRuleKeys(prev => {
+      if (prev.includes(ruleKey)) {
+        return prev.filter(key => key !== ruleKey)
+      }
+      return [...prev, ruleKey]
+    })
   }
 
   const formatTimestamp = (timestamp: string) => {
@@ -235,13 +288,7 @@ export const LogsPage: React.FC = () => {
 
   const getHoursLabel = (hours: number) => t(`logs.statsHours${hours}`)
 
-  const applyRuleOption = (option: { key: string; label: string }) => {
-    setRuleFilter(option.key)
-    setRuleInputValue(option.key === "all" ? "" : option.label)
-    setRuleDropdownOpen(false)
-  }
-
-  const trendSeries = useMemo(() => {
+  const usageTrendSeries = useMemo(() => {
     const hourly = [...(logsStats?.hourly ?? [])].sort((a, b) => {
       return new Date(a.hour).getTime() - new Date(b.hour).getTime()
     })
@@ -256,14 +303,27 @@ export const LogsPage: React.FC = () => {
     }
   }, [hoursFilter, logsStats?.hourly])
 
+  const rateTrendSeries = useMemo(() => {
+    const hourly = [...(logsStats?.hourly ?? [])].sort((a, b) => {
+      return new Date(a.hour).getTime() - new Date(b.hour).getTime()
+    })
+
+    return {
+      labels: hourly.map(point => formatHourLabel(point.hour, hoursFilter)),
+      rpm: hourly.map(point => point.requests / 60),
+      inputTpm: hourly.map(point => point.inputTokens / 60),
+      outputTpm: hourly.map(point => point.outputTokens / 60),
+    }
+  }, [hoursFilter, logsStats?.hourly])
+
   useEffect(() => {
-    if (activeTab !== "stats" || !chartDomRef.current) return
+    if (activeTab !== "stats" || !usageChartDomRef.current) return
 
     const chart =
-      chartRef.current && chartRef.current.getDom() === chartDomRef.current
-        ? chartRef.current
-        : echarts.init(chartDomRef.current)
-    chartRef.current = chart
+      usageChartRef.current && usageChartRef.current.getDom() === usageChartDomRef.current
+        ? usageChartRef.current
+        : echarts.init(usageChartDomRef.current)
+    usageChartRef.current = chart
 
     const option: EChartsOption = {
       animationDuration: 260,
@@ -294,7 +354,7 @@ export const LogsPage: React.FC = () => {
       },
       xAxis: {
         type: "category",
-        data: trendSeries.labels,
+        data: usageTrendSeries.labels,
         axisLine: { lineStyle: { color: MACARON.axis } },
         axisLabel: { color: MACARON.axis, fontSize: 11 },
       },
@@ -320,7 +380,7 @@ export const LogsPage: React.FC = () => {
         {
           name: t("logs.trendInput"),
           type: "bar",
-          data: trendSeries.inputTokens,
+          data: usageTrendSeries.inputTokens,
           yAxisIndex: 0,
           barMaxWidth: 14,
           itemStyle: {
@@ -334,7 +394,7 @@ export const LogsPage: React.FC = () => {
         {
           name: t("logs.trendOutput"),
           type: "bar",
-          data: trendSeries.outputTokens,
+          data: usageTrendSeries.outputTokens,
           yAxisIndex: 0,
           barMaxWidth: 14,
           itemStyle: {
@@ -348,7 +408,7 @@ export const LogsPage: React.FC = () => {
         {
           name: t("logs.trendCacheInput"),
           type: "bar",
-          data: trendSeries.cacheInputTokens,
+          data: usageTrendSeries.cacheInputTokens,
           yAxisIndex: 0,
           barMaxWidth: 14,
           itemStyle: {
@@ -362,7 +422,7 @@ export const LogsPage: React.FC = () => {
         {
           name: t("logs.trendCacheOutput"),
           type: "bar",
-          data: trendSeries.cacheOutputTokens,
+          data: usageTrendSeries.cacheOutputTokens,
           yAxisIndex: 0,
           barMaxWidth: 14,
           itemStyle: {
@@ -376,7 +436,7 @@ export const LogsPage: React.FC = () => {
         {
           name: t("logs.trendRequests"),
           type: "line",
-          data: trendSeries.requests,
+          data: usageTrendSeries.requests,
           yAxisIndex: 1,
           smooth: true,
           symbol: "circle",
@@ -403,7 +463,114 @@ export const LogsPage: React.FC = () => {
       window.cancelAnimationFrame(frameId)
       window.removeEventListener("resize", handleResize)
     }
-  }, [activeTab, t, trendSeries])
+  }, [activeTab, t, usageTrendSeries])
+
+  useEffect(() => {
+    if (activeTab !== "stats" || !rateChartDomRef.current) return
+
+    const chart =
+      rateChartRef.current && rateChartRef.current.getDom() === rateChartDomRef.current
+        ? rateChartRef.current
+        : echarts.init(rateChartDomRef.current)
+    rateChartRef.current = chart
+
+    const option: EChartsOption = {
+      animationDuration: 260,
+      backgroundColor: "transparent",
+      grid: {
+        left: 56,
+        right: 56,
+        top: 40,
+        bottom: 32,
+      },
+      legend: {
+        top: 8,
+        textStyle: { color: MACARON.legend, fontSize: 12 },
+        data: [t("logs.trendRpm"), t("logs.trendInputTpm"), t("logs.trendOutputTpm")],
+      },
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: MACARON.tooltipBg,
+        borderColor: MACARON.tooltipBorder,
+        borderWidth: 1,
+        textStyle: { color: MACARON.tooltipText },
+      },
+      xAxis: {
+        type: "category",
+        data: rateTrendSeries.labels,
+        axisLine: { lineStyle: { color: MACARON.axis } },
+        axisLabel: { color: MACARON.axis, fontSize: 11 },
+      },
+      yAxis: [
+        {
+          type: "value",
+          name: t("logs.trendRateLeftAxis"),
+          axisLabel: {
+            color: MACARON.axis,
+            fontSize: 11,
+            formatter: (value: number) => formatRateMetric(value),
+          },
+          splitLine: { lineStyle: { color: MACARON.split, type: "dashed" } },
+        },
+        {
+          type: "value",
+          name: t("logs.trendRateRightAxis"),
+          axisLabel: {
+            color: MACARON.axis,
+            fontSize: 11,
+            formatter: (value: number) => formatRateMetric(value),
+          },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: t("logs.trendInputTpm"),
+          type: "line",
+          data: rateTrendSeries.inputTpm,
+          yAxisIndex: 0,
+          smooth: true,
+          symbol: "circle",
+          symbolSize: 5,
+          lineStyle: { color: MACARON.tpmInputLine, width: 2 },
+          itemStyle: { color: MACARON.tpmInputLine },
+        },
+        {
+          name: t("logs.trendOutputTpm"),
+          type: "line",
+          data: rateTrendSeries.outputTpm,
+          yAxisIndex: 0,
+          smooth: true,
+          symbol: "circle",
+          symbolSize: 5,
+          lineStyle: { color: MACARON.tpmOutputLine, width: 2 },
+          itemStyle: { color: MACARON.tpmOutputLine },
+        },
+        {
+          name: t("logs.trendRpm"),
+          type: "line",
+          data: rateTrendSeries.rpm,
+          yAxisIndex: 1,
+          smooth: true,
+          symbol: "circle",
+          symbolSize: 5,
+          lineStyle: { color: MACARON.requestLine, width: 2 },
+          itemStyle: { color: MACARON.requestLine },
+        },
+      ],
+    }
+
+    chart.setOption(option, true)
+
+    const frameId = window.requestAnimationFrame(() => chart.resize())
+    const handleResize = () => chart.resize()
+    window.addEventListener("resize", handleResize)
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      window.removeEventListener("resize", handleResize)
+    }
+  }, [activeTab, rateTrendSeries, t])
 
   const renderLogEntry = (log: LogEntry) => {
     return (
@@ -507,7 +674,7 @@ export const LogsPage: React.FC = () => {
         <h2>{t("logs.title")}</h2>
         <p className={styles.subtitle}>
           {activeTab === "stats"
-            ? t("logs.statsTabSubtitle", { range: getHoursLabel(hoursFilter) })
+            ? `${t("logs.statsTabSubtitle", { range: getHoursLabel(hoursFilter) })} · ${t("logs.statsRulesSelected", { count: selectedRuleKeys.length })}`
             : statusFilter === "all"
               ? t("logs.recentLogs", { count: logs.length })
               : t("logs.filteredLogs", { shown: filteredLogs.length, total: logs.length })}
@@ -541,40 +708,72 @@ export const LogsPage: React.FC = () => {
                 <input
                   className={styles.inlineInput}
                   type="text"
-                  value={ruleInputValue}
+                  value={ruleSearchValue}
                   onFocus={() => setRuleDropdownOpen(true)}
                   onChange={e => {
-                    const next = e.target.value
-                    setRuleInputValue(next)
+                    setRuleSearchValue(e.target.value)
                     setRuleDropdownOpen(true)
-                    if (!next.trim()) {
-                      setRuleFilter("all")
-                    }
                   }}
                   onKeyDown={e => {
                     if (e.key === "Escape") {
                       setRuleDropdownOpen(false)
                     }
+                    if (
+                      e.key === "Backspace" &&
+                      !ruleSearchValue.trim() &&
+                      selectedRuleKeys.length > 0
+                    ) {
+                      e.preventDefault()
+                      setSelectedRuleKeys(prev => prev.slice(0, Math.max(0, prev.length - 1)))
+                    }
                     if (e.key === "Enter" && visibleRuleOptions.length > 0) {
                       e.preventDefault()
-                      applyRuleOption(visibleRuleOptions[0])
+                      handleToggleRule(visibleRuleOptions[0].key)
                     }
                   }}
-                  placeholder={t("logs.statsRuleAll")}
+                  placeholder={t("logs.statsRuleSearchPlaceholder")}
                 />
-                {ruleDropdownOpen && visibleRuleOptions.length > 0 && (
+                {ruleDropdownOpen && (
                   <div className={styles.ruleDropdown}>
-                    {visibleRuleOptions.map(option => (
+                    <div className={styles.ruleDropdownActions}>
                       <button
-                        key={option.key}
                         type="button"
-                        className={`${styles.ruleOption} ${ruleFilter === option.key ? styles.ruleOptionActive : ""}`}
+                        className={styles.ruleDropdownAction}
                         onMouseDown={event => event.preventDefault()}
-                        onClick={() => applyRuleOption(option)}
+                        onClick={() => setSelectedRuleKeys([...allRuleKeys])}
                       >
-                        {option.label}
+                        {t("logs.statsSelectAll")}
                       </button>
-                    ))}
+                      <button
+                        type="button"
+                        className={styles.ruleDropdownAction}
+                        onMouseDown={event => event.preventDefault()}
+                        onClick={() => setSelectedRuleKeys([])}
+                      >
+                        {t("logs.statsClearSelection")}
+                      </button>
+                    </div>
+                    {visibleRuleOptions.length === 0 ? (
+                      <div className={styles.ruleDropdownEmpty}>{t("logs.noStatsData")}</div>
+                    ) : (
+                      visibleRuleOptions.map(option => {
+                        const checked = selectedRuleKeySet.has(option.key)
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            className={`${styles.ruleOption} ${checked ? styles.ruleOptionActive : ""}`}
+                            onMouseDown={event => event.preventDefault()}
+                            onClick={() => handleToggleRule(option.key)}
+                          >
+                            <span className={styles.ruleOptionCheck}>
+                              {checked && <Check size={12} />}
+                            </span>
+                            <span>{option.label}</span>
+                          </button>
+                        )
+                      })
+                    )}
                   </div>
                 )}
               </div>
@@ -605,6 +804,40 @@ export const LogsPage: React.FC = () => {
             </div>
           </div>
 
+          <div className={styles.ruleChipsRow}>
+            <span className={styles.ruleSelectionText}>
+              {isAllSelected
+                ? t("logs.statsRuleAll")
+                : t("logs.statsRulesSelected", { count: selectedRuleKeys.length })}
+            </span>
+            <button
+              type="button"
+              className={styles.ruleClearButton}
+              onClick={() => setSelectedRuleKeys([])}
+              disabled={selectedRuleKeys.length === 0}
+            >
+              {t("logs.statsClearSelection")}
+            </button>
+            <div className={styles.ruleChipList}>
+              {!isAllSelected &&
+                selectedRuleOptions.map(option => (
+                  <span key={option.key} className={styles.ruleChip}>
+                    {option.label}
+                    <button
+                      type="button"
+                      className={styles.ruleChipRemove}
+                      onClick={() => {
+                        setSelectedRuleKeys(prev => prev.filter(key => key !== option.key))
+                      }}
+                      aria-label={`${t("logs.statsClearSelection")}: ${option.label}`}
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+            </div>
+          </div>
+
           <div className={styles.metricsSection}>
             <h3 className={styles.metricsTitle}>{t("logs.requestMetricsSection")}</h3>
             <div className={styles.summaryGrid}>
@@ -623,8 +856,10 @@ export const LogsPage: React.FC = () => {
                 <strong className={styles.summaryValue}>{successRate}%</strong>
               </div>
               <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.statsTimeFilterLabel")}</span>
-                <strong className={styles.summaryValue}>{getHoursLabel(hoursFilter)}</strong>
+                <span className={styles.summaryLabel}>{t("logs.rpm")}</span>
+                <strong className={styles.summaryValue}>
+                  {formatRateMetric(logsStats?.rpm ?? 0)}
+                </strong>
               </div>
             </div>
           </div>
@@ -656,14 +891,36 @@ export const LogsPage: React.FC = () => {
                   {formatTokenMillions(logsStats?.cacheWriteTokens ?? 0)}
                 </strong>
               </div>
+              <div className={styles.summaryCard}>
+                <span className={styles.summaryLabel}>{t("logs.inputTpm")}</span>
+                <strong className={styles.summaryValue}>
+                  {formatRateMetric(logsStats?.inputTpm ?? 0)}
+                </strong>
+              </div>
+              <div className={styles.summaryCard}>
+                <span className={styles.summaryLabel}>{t("logs.outputTpm")}</span>
+                <strong className={styles.summaryValue}>
+                  {formatRateMetric(logsStats?.outputTpm ?? 0)}
+                </strong>
+              </div>
             </div>
           </div>
 
           <div className={styles.metricsSection}>
             <h3 className={styles.metricsTitle}>{t("logs.trendChartTitle")}</h3>
             <div className={styles.chartCard}>
-              <div ref={chartDomRef} className={styles.trendChart} />
-              {trendSeries.labels.length === 0 && (
+              <div ref={usageChartDomRef} className={styles.trendChart} />
+              {usageTrendSeries.labels.length === 0 && (
+                <div className={styles.chartEmpty}>{t("logs.noStatsData")}</div>
+              )}
+            </div>
+          </div>
+
+          <div className={styles.metricsSection}>
+            <h3 className={styles.metricsTitle}>{t("logs.rateTrendChartTitle")}</h3>
+            <div className={styles.chartCard}>
+              <div ref={rateChartDomRef} className={styles.trendChart} />
+              {rateTrendSeries.labels.length === 0 && (
                 <div className={styles.chartEmpty}>{t("logs.noStatsData")}</div>
               )}
             </div>

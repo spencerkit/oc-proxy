@@ -2,10 +2,13 @@
 //! Aggregated statistics store derived from request logs.
 //! Maintains hourly buckets, persistence, retention pruning, and summary query APIs.
 
-use crate::models::{HourlyStatsPoint, LogEntry, StatsRuleOption, StatsSummaryResult};
+use crate::models::{
+    HourlyStatsPoint, LogEntry, RuleCardHourlyPoint, RuleCardStatsItem, StatsRuleOption,
+    StatsSummaryResult,
+};
 use chrono::{DateTime, Duration, Timelike, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -46,6 +49,21 @@ struct StatsBucket {
 struct PersistedStats {
     version: u8,
     buckets: Vec<StatsBucket>,
+}
+
+#[derive(Debug, Clone)]
+enum RuleSelection {
+    All,
+    Empty,
+    Selected(HashSet<String>),
+}
+
+#[derive(Debug, Default, Clone)]
+struct RuleCardAccumulator {
+    requests: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    hourly: BTreeMap<String, RuleCardHourlyPoint>,
 }
 
 impl StatsStore {
@@ -151,11 +169,23 @@ impl StatsStore {
         self.dirty.store(true, Ordering::Release);
     }
 
-    /// Build summary for a time window and optional `group::rule` filter.
-    pub fn summarize(&self, hours: Option<u32>, rule_key: Option<String>) -> StatsSummaryResult {
+    /// Build summary for a time window and optional rule filters.
+    ///
+    /// `rule_keys` supports multi-select semantics:
+    /// - `None`: all rules
+    /// - `Some([])`: empty selection (returns zero summary)
+    /// - `Some([..])`: selected rules
+    /// `rule_key` is kept for backward compatibility.
+    pub fn summarize(
+        &self,
+        hours: Option<u32>,
+        rule_keys: Option<Vec<String>>,
+        rule_key: Option<String>,
+    ) -> StatsSummaryResult {
         let requested_hours = hours.unwrap_or(DEFAULT_HOURS).clamp(1, MAX_HOURS);
         let cutoff = Utc::now() - Duration::hours(requested_hours as i64);
-        let (rule_group, rule_id) = parse_rule_key(rule_key.as_deref());
+        let selection = normalize_rule_selection(rule_keys, rule_key.as_deref());
+        let normalized_rule_keys = selection_to_rule_keys(&selection);
 
         let guard = match self.inner.lock() {
             Ok(v) => v,
@@ -163,12 +193,16 @@ impl StatsStore {
                 return StatsSummaryResult {
                     hours: requested_hours,
                     rule_key,
+                    rule_keys: normalized_rule_keys,
                     requests: 0,
                     errors: 0,
                     input_tokens: 0,
                     output_tokens: 0,
                     cache_read_tokens: 0,
                     cache_write_tokens: 0,
+                    rpm: 0.0,
+                    input_tpm: 0.0,
+                    output_tpm: 0.0,
                     hourly: vec![],
                     options: vec![],
                 }
@@ -211,12 +245,8 @@ impl StatsStore {
                 continue;
             }
 
-            if let (Some(expect_group), Some(expect_rule)) = (&rule_group, &rule_id) {
-                if bucket.group_id.as_deref() != Some(expect_group.as_str())
-                    || bucket.rule_id.as_deref() != Some(expect_rule.as_str())
-                {
-                    continue;
-                }
+            if !should_include_bucket(bucket, &selection) {
+                continue;
             }
 
             requests += bucket.requests;
@@ -245,18 +275,108 @@ impl StatsStore {
             point.cache_write_tokens += bucket.cache_write_tokens;
         }
 
+        let minutes = (requested_hours as f64) * 60.0;
+        let rpm = if minutes <= 0.0 {
+            0.0
+        } else {
+            requests as f64 / minutes
+        };
+        let input_tpm = if minutes <= 0.0 {
+            0.0
+        } else {
+            input_tokens as f64 / minutes
+        };
+        let output_tpm = if minutes <= 0.0 {
+            0.0
+        } else {
+            output_tokens as f64 / minutes
+        };
+
         StatsSummaryResult {
             hours: requested_hours,
             rule_key,
+            rule_keys: normalized_rule_keys,
             requests,
             errors,
             input_tokens,
             output_tokens,
             cache_read_tokens,
             cache_write_tokens,
+            rpm,
+            input_tpm,
+            output_tpm,
             hourly: hourly_map.into_values().collect(),
             options: options_map.into_values().collect(),
         }
+    }
+
+    /// Build compact per-rule stats for service-page rule cards in one group.
+    pub fn summarize_rule_cards(
+        &self,
+        group_id: &str,
+        hours: Option<u32>,
+    ) -> Vec<RuleCardStatsItem> {
+        let normalized_group_id = group_id.trim();
+        if normalized_group_id.is_empty() {
+            return vec![];
+        }
+
+        let requested_hours = hours.unwrap_or(DEFAULT_HOURS).clamp(1, MAX_HOURS);
+        let cutoff = Utc::now() - Duration::hours(requested_hours as i64);
+
+        let guard = match self.inner.lock() {
+            Ok(v) => v,
+            Err(_) => return vec![],
+        };
+
+        let mut map: BTreeMap<String, RuleCardAccumulator> = BTreeMap::new();
+        for bucket in guard.values() {
+            let Some(bucket_time) = parse_ts(&bucket.hour) else {
+                continue;
+            };
+            if bucket_time < retention_cutoff() || bucket_time < cutoff {
+                continue;
+            }
+
+            if bucket.group_id.as_deref() != Some(normalized_group_id) {
+                continue;
+            }
+            let Some(rule_id) = bucket.rule_id.as_ref() else {
+                continue;
+            };
+
+            let acc = map.entry(rule_id.clone()).or_default();
+            acc.requests += bucket.requests;
+            acc.input_tokens += bucket.input_tokens;
+            acc.output_tokens += bucket.output_tokens;
+
+            let point =
+                acc.hourly
+                    .entry(bucket.hour.clone())
+                    .or_insert_with(|| RuleCardHourlyPoint {
+                        hour: bucket.hour.clone(),
+                        requests: 0,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        tokens: 0,
+                    });
+            point.requests += bucket.requests;
+            point.input_tokens += bucket.input_tokens;
+            point.output_tokens += bucket.output_tokens;
+            point.tokens = point.input_tokens + point.output_tokens;
+        }
+
+        map.into_iter()
+            .map(|(rule_id, acc)| RuleCardStatsItem {
+                group_id: normalized_group_id.to_string(),
+                rule_id,
+                requests: acc.requests,
+                input_tokens: acc.input_tokens,
+                output_tokens: acc.output_tokens,
+                tokens: acc.input_tokens + acc.output_tokens,
+                hourly: acc.hourly.into_values().collect(),
+            })
+            .collect()
     }
 
     /// Clear in-memory and persisted stats data.
@@ -319,17 +439,66 @@ impl StatsStore {
     }
 }
 
-fn parse_rule_key(rule_key: Option<&str>) -> (Option<String>, Option<String>) {
-    let Some(rule_key) = rule_key else {
-        return (None, None);
-    };
+fn normalize_rule_selection(
+    rule_keys: Option<Vec<String>>,
+    legacy_rule_key: Option<&str>,
+) -> RuleSelection {
+    if let Some(rule_keys) = rule_keys {
+        if rule_keys.is_empty() {
+            return RuleSelection::Empty;
+        }
+        let set: HashSet<String> = rule_keys
+            .into_iter()
+            .filter_map(|key| normalize_rule_key(&key))
+            .collect();
+        if set.is_empty() {
+            RuleSelection::Empty
+        } else {
+            RuleSelection::Selected(set)
+        }
+    } else if let Some(single) = legacy_rule_key.and_then(normalize_rule_key) {
+        let mut set = HashSet::new();
+        set.insert(single);
+        RuleSelection::Selected(set)
+    } else {
+        RuleSelection::All
+    }
+}
+
+fn normalize_rule_key(rule_key: &str) -> Option<String> {
     let mut parts = rule_key.splitn(2, "::");
     let group = parts.next().unwrap_or_default().trim();
     let rule = parts.next().unwrap_or_default().trim();
     if group.is_empty() || rule.is_empty() {
-        return (None, None);
+        return None;
     }
-    (Some(group.to_string()), Some(rule.to_string()))
+    Some(format!("{group}::{rule}"))
+}
+
+fn selection_to_rule_keys(selection: &RuleSelection) -> Option<Vec<String>> {
+    match selection {
+        RuleSelection::All => None,
+        RuleSelection::Empty => Some(vec![]),
+        RuleSelection::Selected(set) => {
+            let mut items: Vec<String> = set.iter().cloned().collect();
+            items.sort();
+            Some(items)
+        }
+    }
+}
+
+fn should_include_bucket(bucket: &StatsBucket, selection: &RuleSelection) -> bool {
+    match selection {
+        RuleSelection::All => true,
+        RuleSelection::Empty => false,
+        RuleSelection::Selected(set) => {
+            let (Some(group_id), Some(rule_id)) = (&bucket.group_id, &bucket.rule_id) else {
+                return false;
+            };
+            let key = format!("{group_id}::{rule_id}");
+            set.contains(&key)
+        }
+    }
 }
 
 fn normalize_hour(ts: &str) -> Option<String> {

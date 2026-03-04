@@ -328,14 +328,40 @@ pub struct HourlyStatsPoint {
 pub struct StatsSummaryResult {
     pub hours: u32,
     pub rule_key: Option<String>,
+    pub rule_keys: Option<Vec<String>>,
     pub requests: u64,
     pub errors: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    pub rpm: f64,
+    pub input_tpm: f64,
+    pub output_tpm: f64,
     pub hourly: Vec<HourlyStatsPoint>,
     pub options: Vec<StatsRuleOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleCardHourlyPoint {
+    pub hour: String,
+    pub requests: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleCardStatsItem {
+    pub group_id: String,
+    pub rule_id: String,
+    pub requests: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub tokens: u64,
+    pub hourly: Vec<RuleCardHourlyPoint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

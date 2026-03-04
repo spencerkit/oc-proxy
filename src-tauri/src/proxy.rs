@@ -229,9 +229,21 @@ impl ProxyRuntime {
     pub fn stats_summary(
         &self,
         hours: Option<u32>,
+        rule_keys: Option<Vec<String>>,
         rule_key: Option<String>,
     ) -> crate::models::StatsSummaryResult {
-        self.inner.stats_store.summarize(hours, rule_key)
+        self.inner.stats_store.summarize(hours, rule_keys, rule_key)
+    }
+
+    /// Query compact rule-card stats for one group.
+    pub fn stats_rule_cards(
+        &self,
+        group_id: String,
+        hours: Option<u32>,
+    ) -> Vec<crate::models::RuleCardStatsItem> {
+        self.inner
+            .stats_store
+            .summarize_rule_cards(&group_id, hours)
     }
 
     /// Clear aggregated stats data.

@@ -19,6 +19,7 @@ import type {
   ProxyStatus,
   RemoteRulesPullResult,
   RemoteRulesUploadResult,
+  RuleCardStatsItem,
   RuleQuotaSnapshot,
   StatsSummaryResult,
 } from "@/types"
@@ -34,6 +35,7 @@ interface ProxyState {
   logs: LogEntry[]
   logsStats: StatsSummaryResult | null
   ruleQuotas: Record<string, RuleQuotaSnapshot>
+  ruleCardStatsByRuleKey: Record<string, RuleCardStatsItem>
   quotaLoadingRuleKeys: Record<string, boolean>
   activeGroupId: string | null
   loading: boolean
@@ -47,7 +49,7 @@ interface ProxyState {
   init: () => Promise<void>
   refreshStatus: () => Promise<void>
   refreshLogs: () => Promise<void>
-  refreshLogsStats: (hours?: number, ruleKey?: string) => Promise<void>
+  refreshLogsStats: (hours?: number, ruleKeys?: string[], ruleKey?: string) => Promise<void>
   saveConfig: (config: ProxyConfig) => Promise<void>
   exportGroupsBackup: () => Promise<GroupBackupExportResult>
   exportGroupsToFolder: () => Promise<GroupBackupExportResult>
@@ -61,6 +63,7 @@ interface ProxyState {
   clearLogs: () => Promise<void>
   clearLogsStats: () => Promise<void>
   fetchGroupQuotas: (groupId: string) => Promise<void>
+  fetchGroupRuleCardStats: (groupId: string, hours?: number) => Promise<void>
   fetchRuleQuota: (groupId: string, ruleId: string) => Promise<void>
   startPolling: () => void
   stopPolling: () => void
@@ -102,6 +105,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   logs: [],
   logsStats: null,
   ruleQuotas: {},
+  ruleCardStatsByRuleKey: {},
   quotaLoadingRuleKeys: {},
   activeGroupId: null,
   loading: false,
@@ -179,9 +183,9 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   /**
    * Refresh request/token stats summary from IPC
    */
-  refreshLogsStats: async (hours?: number, ruleKey?: string) => {
+  refreshLogsStats: async (hours?: number, ruleKeys?: string[], ruleKey?: string) => {
     try {
-      const logsStats = await ipc.getLogsStatsSummary(hours, ruleKey)
+      const logsStats = await ipc.getLogsStatsSummary(hours, ruleKeys, ruleKey)
       set({ logsStats, error: null })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to refresh logs stats"
@@ -408,6 +412,32 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
       })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to fetch group quotas"
+      set({ error: errorMessage })
+      throw error
+    }
+  },
+
+  fetchGroupRuleCardStats: async (groupId: string, hours?: number) => {
+    try {
+      if (!groupId.trim()) return
+      set({ error: null })
+      const items = await ipc.getRuleCardStats(groupId, hours)
+      set(state => {
+        const next = { ...state.ruleCardStatsByRuleKey }
+        const groupPrefix = `${groupId}:`
+        for (const key of Object.keys(next)) {
+          if (key.startsWith(groupPrefix)) {
+            delete next[key]
+          }
+        }
+        for (const item of items) {
+          next[quotaKey(item.groupId, item.ruleId)] = item
+        }
+        return { ruleCardStatsByRuleKey: next }
+      })
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to fetch group rule card stats"
       set({ error: errorMessage })
       throw error
     }

@@ -1,9 +1,20 @@
-import { Check, ChevronRight, Folder, Loader2, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
+import {
+  Check,
+  ChevronRight,
+  Folder,
+  Loader2,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react"
 import type React from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components"
 import { useTranslation } from "@/hooks"
-import type { Group, RuleQuotaSnapshot } from "@/types"
+import type { Group, RuleCardStatsItem, RuleQuotaSnapshot } from "@/types"
+import { formatTokenMillions } from "@/utils/tokenFormat"
 import styles from "./ServicePage.module.css"
 
 export interface ServicePageProps {
@@ -77,6 +88,7 @@ export const RuleList: React.FC<{
   activatingRuleId?: string | null
   quotaByRuleId?: Record<string, RuleQuotaSnapshot | undefined>
   quotaLoadingByRuleId?: Record<string, boolean | undefined>
+  cardStatsByRuleId?: Record<string, RuleCardStatsItem | undefined>
   onRefreshQuota?: (ruleId: string) => void | Promise<void>
   onDelete: (ruleId: string) => void
   groupName: string
@@ -89,6 +101,7 @@ export const RuleList: React.FC<{
   activatingRuleId,
   quotaByRuleId,
   quotaLoadingByRuleId,
+  cardStatsByRuleId,
   onRefreshQuota,
   onDelete,
   groupName,
@@ -262,6 +275,165 @@ export const RuleList: React.FC<{
     }
   }
 
+  const formatCompactRequest = (value: number) => {
+    if (!Number.isFinite(value)) return "0"
+    if (Math.abs(value) >= 1_000_000) {
+      return `${(value / 1_000_000).toFixed(1).replace(/\\.0$/, "")}M`
+    }
+    if (Math.abs(value) >= 1_000) {
+      return `${(value / 1_000).toFixed(1).replace(/\\.0$/, "")}k`
+    }
+    return String(Math.round(value))
+  }
+
+  const formatMiniTime = (hourIso: string) => {
+    const date = new Date(hourIso)
+    if (Number.isNaN(date.getTime())) {
+      return hourIso
+    }
+    const MM = String(date.getMonth() + 1).padStart(2, "0")
+    const dd = String(date.getDate()).padStart(2, "0")
+    const HH = String(date.getHours()).padStart(2, "0")
+    return `${MM}-${dd} ${HH}:00`
+  }
+
+  const formatExactCount = (value: number) => {
+    if (!Number.isFinite(value)) return "0"
+    return Math.round(value).toLocaleString()
+  }
+
+  const formatTokenCount = (value: number) => {
+    if (!Number.isFinite(value)) return "0"
+    if (value > 1_000_000) {
+      return `${(value / 1_000_000).toFixed(2).replace(/\\.00$/, "")}M`
+    }
+    return Math.round(value).toLocaleString()
+  }
+
+  const renderRuleMiniChart = (stats?: RuleCardStatsItem) => {
+    const hourly = [...(stats?.hourly ?? [])].sort((a, b) => {
+      return new Date(a.hour).getTime() - new Date(b.hour).getTime()
+    })
+    if (hourly.length === 0) {
+      return <div className={styles.ruleMiniChartEmpty}>{t("servicePage.noStatsData")}</div>
+    }
+
+    const width = 132
+    const height = 30
+    const padX = 3
+    const padY = 3
+    const innerW = width - padX * 2
+    const innerH = height - padY * 2
+    const tokenMax = Math.max(1, ...hourly.map(point => point.tokens))
+    const requestMax = Math.max(1, ...hourly.map(point => point.requests))
+    const step = hourly.length > 1 ? innerW / (hourly.length - 1) : 0
+    const barWidth = Math.max(2, Math.min(5, innerW / Math.max(hourly.length * 1.8, 1)))
+
+    const resolveTokenBarColor = (ratioRaw: number) => {
+      const ratio = Math.min(1, Math.max(0, ratioRaw))
+      // Low usage: green-ish, high usage: orange/red.
+      const hue = 160 - ratio * 145
+      const saturation = 72 + ratio * 8
+      const lightness = 58 - ratio * 14
+      return `hsl(${hue} ${saturation}% ${lightness}%)`
+    }
+
+    const linePoints = hourly.map((point, index) => {
+      const x = padX + (hourly.length === 1 ? innerW / 2 : index * step)
+      const ratio = point.requests / requestMax
+      const y = padY + innerH - ratio * innerH
+      return { x, y }
+    })
+
+    const buildSmoothPath = (points: Array<{ x: number; y: number }>) => {
+      if (points.length === 0) return ""
+      if (points.length === 1) {
+        return `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`
+      }
+      let d = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`
+      for (let i = 1; i < points.length - 1; i++) {
+        const xc = (points[i].x + points[i + 1].x) / 2
+        const yc = (points[i].y + points[i + 1].y) / 2
+        d += ` Q ${points[i].x.toFixed(2)} ${points[i].y.toFixed(2)} ${xc.toFixed(2)} ${yc.toFixed(2)}`
+      }
+      const prev = points[points.length - 2]
+      const last = points[points.length - 1]
+      d += ` Q ${prev.x.toFixed(2)} ${prev.y.toFixed(2)} ${last.x.toFixed(2)} ${last.y.toFixed(2)}`
+      return d
+    }
+
+    const smoothPath = buildSmoothPath(linePoints)
+    const buildMiniTooltip = (point: RuleCardStatsItem["hourly"][number]) => {
+      return [
+        `${t("servicePage.miniTime")}: ${formatMiniTime(point.hour)}`,
+        `${t("servicePage.miniRequests")}: ${formatExactCount(point.requests)}`,
+        `${t("servicePage.miniTokens")}: ${formatTokenCount(point.tokens)}`,
+      ].join("\n")
+    }
+
+    return (
+      <svg
+        className={styles.ruleMiniChart}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={t("servicePage.ruleMiniTrend")}
+      >
+        {hourly.map((point, index) => {
+          const centerX = padX + (hourly.length === 1 ? innerW / 2 : index * step)
+          const barH = (point.tokens / tokenMax) * innerH
+          const y = padY + innerH - barH
+          return (
+            <rect
+              key={`${point.hour}-bar`}
+              className={styles.ruleMiniBar}
+              x={centerX - barWidth / 2}
+              y={y}
+              width={barWidth}
+              height={Math.max(1, barH)}
+              rx={1}
+              fill={resolveTokenBarColor(point.tokens / tokenMax)}
+            />
+          )
+        })}
+        <path className={styles.ruleMiniLine} d={smoothPath} />
+        {linePoints.map((point, index) => (
+          <circle
+            key={`${hourly[index].hour}-point`}
+            className={styles.ruleMiniPoint}
+            cx={point.x}
+            cy={point.y}
+            r={1.8}
+          />
+        ))}
+        {hourly.map((point, index) => {
+          const slotStart = hourly.length === 1 ? padX : padX + index * step - step / 2
+          const slotEnd =
+            hourly.length === 1
+              ? padX + innerW
+              : index === hourly.length - 1
+                ? padX + innerW
+                : padX + (index + 1) * step - step / 2
+          const x = Math.max(padX, slotStart)
+          const right = Math.min(padX + innerW, slotEnd)
+          const width = Math.max(1, right - x)
+          return (
+            <rect
+              key={`${point.hour}-hover`}
+              className={styles.ruleMiniHoverSlot}
+              x={x}
+              y={padY}
+              width={width}
+              height={innerH}
+            >
+              <title>{buildMiniTooltip(point)}</title>
+            </rect>
+          )
+        })}
+      </svg>
+    )
+  }
+
   return (
     <div className={styles.ruleList}>
       <div className={styles.ruleListHeader}>
@@ -325,6 +497,15 @@ export const RuleList: React.FC<{
                     )}
                     <button
                       type="button"
+                      className={styles.editButton}
+                      onClick={() => handleRuleClick(rule.id)}
+                      title={t("servicePage.editRule")}
+                      aria-label={`${t("servicePage.editRule")}: ${rule.name}`}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      type="button"
                       className={styles.deleteButton}
                       onClick={() => onDelete(rule.id)}
                       title={t("servicePage.deleteRule")}
@@ -336,37 +517,53 @@ export const RuleList: React.FC<{
                 </div>
                 {(() => {
                   const badge = resolveQuotaBadge(rule)
+                  const cardStats = cardStatsByRuleId?.[rule.id]
                   return (
                     <div className={styles.ruleCardBottom}>
-                      <div className={styles.ruleQuotaWrap}>
-                        <span
-                          className={`${styles.quotaBadge} ${badge.className}`}
-                          title={badge.text}
-                        >
-                          {badge.text}
-                        </span>
-                        {badge.resetAt && (
-                          <span className={styles.quotaResetAt}>
-                            {t("ruleQuota.resetAt", { value: badge.resetAt })}
-                          </span>
+                      <div className={styles.ruleMetaLeft}>
+                        {rule.quota?.enabled && (
+                          <button
+                            type="button"
+                            className={styles.quotaRefreshButton}
+                            onClick={() => onRefreshQuota?.(rule.id)}
+                            title={t("ruleQuota.refresh")}
+                            aria-label={`${t("ruleQuota.refresh")}: ${rule.name}`}
+                            disabled={Boolean(quotaLoadingByRuleId?.[rule.id])}
+                          >
+                            {quotaLoadingByRuleId?.[rule.id] ? (
+                              <Loader2 size={14} className={styles.spinner} />
+                            ) : (
+                              <RefreshCw size={14} />
+                            )}
+                          </button>
                         )}
-                      </div>
-                      {rule.quota?.enabled && (
-                        <button
-                          type="button"
-                          className={styles.quotaRefreshButton}
-                          onClick={() => onRefreshQuota?.(rule.id)}
-                          title={t("ruleQuota.refresh")}
-                          aria-label={`${t("ruleQuota.refresh")}: ${rule.name}`}
-                          disabled={Boolean(quotaLoadingByRuleId?.[rule.id])}
-                        >
-                          {quotaLoadingByRuleId?.[rule.id] ? (
-                            <Loader2 size={14} className={styles.spinner} />
-                          ) : (
-                            <RefreshCw size={14} />
+                        <div className={styles.ruleQuotaWrap}>
+                          <span
+                            className={`${styles.quotaBadge} ${badge.className}`}
+                            title={badge.text}
+                          >
+                            {badge.text}
+                          </span>
+                          {badge.resetAt && (
+                            <span className={styles.quotaResetAt}>
+                              {t("ruleQuota.resetAt", { value: badge.resetAt })}
+                            </span>
                           )}
-                        </button>
-                      )}
+                        </div>
+                      </div>
+                      <div className={styles.ruleTrendWrap}>
+                        <div className={styles.ruleTrendInlineMeta}>
+                          <span>
+                            {t("servicePage.miniRequests")}:{" "}
+                            {formatCompactRequest(cardStats?.requests ?? 0)}
+                          </span>
+                          <span>
+                            {t("servicePage.miniTokens")}:{" "}
+                            {formatTokenMillions(cardStats?.tokens ?? 0)}
+                          </span>
+                        </div>
+                        {renderRuleMiniChart(cardStats)}
+                      </div>
                     </div>
                   )
                 })()}
