@@ -58,10 +58,9 @@ jobs:
         with:
           name: ai-open-router-${{ matrix.os_name }}-${{ github.ref_name }}
           path: |
-            dist/target/release/bundle/**
-            dist/target/*/release/bundle/**
             dist/*.dmg
             dist/*-setup.exe
+            dist/*.msi
           if-no-files-found: error
 
   publish:
@@ -104,4 +103,6 @@ jobs:
           tag_name: ${{ steps.release.outputs.tag }}
           body_path: /tmp/release-notes.md
           files: |
-            release-artifacts/**
+            release-artifacts/*.dmg
+            release-artifacts/*-setup.exe
+            release-artifacts/*.msi
