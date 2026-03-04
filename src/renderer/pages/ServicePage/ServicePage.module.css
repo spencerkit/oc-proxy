@@ -356,6 +356,7 @@
   transition: all var(--transition-fast);
   min-height: 90px;
   padding: var(--sp-2);
+  position: relative;
 }
 
 .ruleItems li {
@@ -374,6 +375,23 @@
   background: var(--surface-selected);
   border-color: var(--accent);
   box-shadow: var(--shadow-sm);
+  border-left: 3px solid var(--accent);
+}
+
+.enabledCornerBadge {
+  position: absolute;
+  left: 8px;
+  top: -8px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg-raised));
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
 }
 
 .ruleItem {
@@ -421,6 +439,14 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.ruleHeaderRight {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
   flex-shrink: 0;
 }
 
@@ -502,16 +528,6 @@
   background: var(--surface-active);
 }
 
-.currentBadge {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  color: var(--accent);
-  background: var(--accent-subtle);
-  padding: 2px var(--sp-2);
-  border-radius: var(--radius-full);
-  white-space: nowrap;
-}
-
 .ruleQuotaWrap {
   display: flex;
   align-items: center;
@@ -530,34 +546,38 @@
   min-width: 0;
 }
 
-.activateButton {
+.activateIconButton {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 28px;
   height: 28px;
-  padding: 0 var(--sp-2);
-  border: 1px solid var(--accent);
+  border: none;
   border-radius: var(--radius-sm);
-  background: var(--accent-subtle);
+  background: transparent;
   color: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
   cursor: pointer;
   transition: all var(--transition-fast);
   flex-shrink: 0;
+  opacity: 0;
 }
 
-.activateButton:hover {
-  background: var(--accent);
-  color: var(--accent-text);
+.ruleItemContainer:hover .activateIconButton {
+  opacity: 1;
 }
 
-.activateButton:disabled {
+.activateIconButton:hover {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.activateIconButton:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.activateButton:focus-visible {
+.activateIconButton:focus-visible {
+  opacity: 1;
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-subtle);
 }

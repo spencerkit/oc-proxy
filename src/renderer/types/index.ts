@@ -126,7 +126,52 @@ export interface HourlyStatsPoint {
   cacheWriteTokens: number
 }
 
+export type StatsDimension = "rule" | "protocol" | "status"
+
+export interface ComparisonSummary {
+  requestsDeltaPct: number
+  errorsDeltaPct: number
+  rpmDeltaPct: number
+  inputTpmDeltaPct: number
+  outputTpmDeltaPct: number
+}
+
+export interface StatsCountBreakdownItem {
+  key: string
+  count: number
+  ratio: number
+}
+
+export interface StatsTokenBreakdownItem {
+  key: string
+  tokens: number
+  ratio: number
+}
+
+export interface StatsRuleCountBreakdownItem {
+  key: string
+  label: string
+  count: number
+  ratio: number
+}
+
+export interface StatsRuleTokenBreakdownItem {
+  key: string
+  label: string
+  tokens: number
+  ratio: number
+}
+
+export interface StatsBreakdowns {
+  errorsByStatus: StatsCountBreakdownItem[]
+  requestsByProtocol: StatsCountBreakdownItem[]
+  tokensByProtocol: StatsTokenBreakdownItem[]
+  requestsByRule: StatsRuleCountBreakdownItem[]
+  tokensByRule: StatsRuleTokenBreakdownItem[]
+}
+
 export interface StatsSummaryResult {
+  dimension: StatsDimension
   hours: number
   ruleKey?: string | null
   ruleKeys?: string[] | null
@@ -139,6 +184,11 @@ export interface StatsSummaryResult {
   rpm: number
   inputTpm: number
   outputTpm: number
+  peakRpm: number
+  peakInputTpm: number
+  peakOutputTpm: number
+  comparison?: ComparisonSummary | null
+  breakdowns?: StatsBreakdowns | null
   hourly: HourlyStatsPoint[]
   options: StatsRuleOption[]
 }

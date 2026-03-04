@@ -231,8 +231,12 @@ impl ProxyRuntime {
         hours: Option<u32>,
         rule_keys: Option<Vec<String>>,
         rule_key: Option<String>,
+        dimension: Option<String>,
+        enable_comparison: Option<bool>,
     ) -> crate::models::StatsSummaryResult {
-        self.inner.stats_store.summarize(hours, rule_keys, rule_key)
+        self.inner
+            .stats_store
+            .summarize(hours, rule_keys, rule_key, dimension, enable_comparison)
     }
 
     /// Query compact rule-card stats for one group.

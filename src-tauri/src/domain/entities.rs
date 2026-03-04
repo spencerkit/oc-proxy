@@ -326,6 +326,7 @@ pub struct HourlyStatsPoint {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsSummaryResult {
+    pub dimension: String,
     pub hours: u32,
     pub rule_key: Option<String>,
     pub rule_keys: Option<Vec<String>>,
@@ -338,8 +339,67 @@ pub struct StatsSummaryResult {
     pub rpm: f64,
     pub input_tpm: f64,
     pub output_tpm: f64,
+    pub peak_rpm: f64,
+    pub peak_input_tpm: f64,
+    pub peak_output_tpm: f64,
+    pub comparison: Option<ComparisonSummary>,
+    pub breakdowns: Option<StatsBreakdowns>,
     pub hourly: Vec<HourlyStatsPoint>,
     pub options: Vec<StatsRuleOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComparisonSummary {
+    pub requests_delta_pct: f64,
+    pub errors_delta_pct: f64,
+    pub rpm_delta_pct: f64,
+    pub input_tpm_delta_pct: f64,
+    pub output_tpm_delta_pct: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsCountBreakdownItem {
+    pub key: String,
+    pub count: u64,
+    pub ratio: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsTokenBreakdownItem {
+    pub key: String,
+    pub tokens: u64,
+    pub ratio: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsRuleCountBreakdownItem {
+    pub key: String,
+    pub label: String,
+    pub count: u64,
+    pub ratio: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsRuleTokenBreakdownItem {
+    pub key: String,
+    pub label: String,
+    pub tokens: u64,
+    pub ratio: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsBreakdowns {
+    pub errors_by_status: Vec<StatsCountBreakdownItem>,
+    pub requests_by_protocol: Vec<StatsCountBreakdownItem>,
+    pub tokens_by_protocol: Vec<StatsTokenBreakdownItem>,
+    pub requests_by_rule: Vec<StatsRuleCountBreakdownItem>,
+    pub tokens_by_rule: Vec<StatsRuleTokenBreakdownItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

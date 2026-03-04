@@ -80,6 +80,13 @@ function formatRateMetric(value: number): string {
   return value.toFixed(2).replace(/\.00$/, "")
 }
 
+function formatDelta(delta: number): string {
+  if (!Number.isFinite(delta) || Math.abs(delta) < 0.01) return "0%"
+  const abs = Math.abs(delta)
+  const text = abs >= 100 ? abs.toFixed(0) : abs.toFixed(1)
+  return `${delta > 0 ? "+" : "-"}${text.replace(/\.0$/, "")}%`
+}
+
 /**
  * LogsPage Component
  * Request log viewer page
@@ -96,6 +103,7 @@ export const LogsPage: React.FC = () => {
   const [ruleSearchValue, setRuleSearchValue] = useState("")
   const [ruleDropdownOpen, setRuleDropdownOpen] = useState(false)
   const [hoursFilter, setHoursFilter] = useState<number>(24)
+  const [enableComparison, setEnableComparison] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const hasInitializedRuleSelectionRef = useRef(false)
   const ruleComboboxRef = useRef<HTMLDivElement | null>(null)
@@ -103,6 +111,10 @@ export const LogsPage: React.FC = () => {
   const usageChartRef = useRef<echarts.ECharts | null>(null)
   const rateChartDomRef = useRef<HTMLDivElement | null>(null)
   const rateChartRef = useRef<echarts.ECharts | null>(null)
+  const errorBreakdownChartDomRef = useRef<HTMLDivElement | null>(null)
+  const errorBreakdownChartRef = useRef<echarts.ECharts | null>(null)
+  const contributionChartDomRef = useRef<HTMLDivElement | null>(null)
+  const contributionChartRef = useRef<echarts.ECharts | null>(null)
   const statusFilters: Array<"all" | LogEntry["status"]> = [
     "all",
     "error",
@@ -162,16 +174,16 @@ export const LogsPage: React.FC = () => {
 
   useEffect(() => {
     if (!hasInitializedRuleSelectionRef.current) return
-    void refreshLogsStats(hoursFilter, selectedRuleKeys)
-  }, [hoursFilter, refreshLogsStats, selectedRuleKeys])
+    void refreshLogsStats(hoursFilter, selectedRuleKeys, undefined, "rule", enableComparison)
+  }, [hoursFilter, refreshLogsStats, selectedRuleKeys, enableComparison])
 
   useEffect(() => {
     if (!hasInitializedRuleSelectionRef.current) return
     const timer = window.setInterval(() => {
-      void refreshLogsStats(hoursFilter, selectedRuleKeys)
+      void refreshLogsStats(hoursFilter, selectedRuleKeys, undefined, "rule", enableComparison)
     }, 3000)
     return () => window.clearInterval(timer)
-  }, [hoursFilter, refreshLogsStats, selectedRuleKeys])
+  }, [hoursFilter, refreshLogsStats, selectedRuleKeys, enableComparison])
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -196,6 +208,14 @@ export const LogsPage: React.FC = () => {
         rateChartRef.current.dispose()
         rateChartRef.current = null
       }
+      if (errorBreakdownChartRef.current) {
+        errorBreakdownChartRef.current.dispose()
+        errorBreakdownChartRef.current = null
+      }
+      if (contributionChartRef.current) {
+        contributionChartRef.current.dispose()
+        contributionChartRef.current = null
+      }
     }
   }, [])
 
@@ -208,6 +228,14 @@ export const LogsPage: React.FC = () => {
       if (rateChartRef.current) {
         rateChartRef.current.dispose()
         rateChartRef.current = null
+      }
+      if (errorBreakdownChartRef.current) {
+        errorBreakdownChartRef.current.dispose()
+        errorBreakdownChartRef.current = null
+      }
+      if (contributionChartRef.current) {
+        contributionChartRef.current.dispose()
+        contributionChartRef.current = null
       }
     }
   }, [activeTab])
@@ -224,7 +252,7 @@ export const LogsPage: React.FC = () => {
   const handleResetStats = async () => {
     try {
       await clearLogsStats()
-      await refreshLogsStats(hoursFilter, selectedRuleKeys)
+      await refreshLogsStats(hoursFilter, selectedRuleKeys, undefined, "rule", enableComparison)
       showToast(t("logs.resetStatsSuccess"), "success")
     } catch (error) {
       showToast(t("logs.resetStatsError"), "error")
@@ -315,6 +343,58 @@ export const LogsPage: React.FC = () => {
       outputTpm: hourly.map(point => point.outputTokens / 60),
     }
   }, [hoursFilter, logsStats?.hourly])
+
+  const comparison = logsStats?.comparison ?? null
+  const errorBreakdownSeries = useMemo(() => {
+    const source = (logsStats?.breakdowns?.errorsByStatus ?? []).slice(0, 8)
+    return {
+      labels: source.map(item => item.key),
+      values: source.map(item => item.count),
+    }
+  }, [logsStats?.breakdowns?.errorsByStatus])
+
+  const contributionSeries = useMemo(() => {
+    const topRequests: Array<{ key: string; label?: string; count: number }> = (
+      logsStats?.breakdowns?.requestsByRule ?? []
+    )
+      .slice(0, 5)
+      .map(item => ({
+        key: item.key,
+        label: "label" in item && typeof item.label === "string" ? item.label : undefined,
+        count: item.count,
+      }))
+    const topTokens: Array<{ key: string; label?: string; tokens: number }> = (
+      logsStats?.breakdowns?.tokensByRule ?? []
+    )
+      .slice(0, 5)
+      .map(item => ({
+        key: item.key,
+        label: "label" in item && typeof item.label === "string" ? item.label : undefined,
+        tokens: item.tokens,
+      }))
+    const keys: string[] =
+      topRequests.length >= topTokens.length
+        ? topRequests.map(item => item.key)
+        : topTokens.map(item => item.key)
+
+    return {
+      labels: keys.map(key => {
+        const option = ruleOptionsByKey.get(key)
+        if (option?.label) return option.label
+        const requestItem = topRequests.find(entry => entry.key === key)
+        const tokenItem = topTokens.find(entry => entry.key === key)
+        return requestItem?.label || tokenItem?.label || key
+      }),
+      requests: keys.map(key => {
+        const item = topRequests.find(entry => entry.key === key)
+        return item?.count ?? 0
+      }),
+      tokens: keys.map(key => {
+        const item = topTokens.find(entry => entry.key === key)
+        return item?.tokens ?? 0
+      }),
+    }
+  }, [logsStats?.breakdowns?.requestsByRule, logsStats?.breakdowns?.tokensByRule, ruleOptionsByKey])
 
   useEffect(() => {
     if (activeTab !== "stats" || !usageChartDomRef.current) return
@@ -534,6 +614,12 @@ export const LogsPage: React.FC = () => {
           symbolSize: 5,
           lineStyle: { color: MACARON.tpmInputLine, width: 2 },
           itemStyle: { color: MACARON.tpmInputLine },
+          markPoint: {
+            symbol: "pin",
+            symbolSize: 28,
+            label: { color: "#fff", fontSize: 10 },
+            data: [{ type: "max", name: t("logs.peakInputTpm") }],
+          },
         },
         {
           name: t("logs.trendOutputTpm"),
@@ -545,6 +631,12 @@ export const LogsPage: React.FC = () => {
           symbolSize: 5,
           lineStyle: { color: MACARON.tpmOutputLine, width: 2 },
           itemStyle: { color: MACARON.tpmOutputLine },
+          markPoint: {
+            symbol: "pin",
+            symbolSize: 28,
+            label: { color: "#fff", fontSize: 10 },
+            data: [{ type: "max", name: t("logs.peakOutputTpm") }],
+          },
         },
         {
           name: t("logs.trendRpm"),
@@ -556,6 +648,12 @@ export const LogsPage: React.FC = () => {
           symbolSize: 5,
           lineStyle: { color: MACARON.requestLine, width: 2 },
           itemStyle: { color: MACARON.requestLine },
+          markPoint: {
+            symbol: "pin",
+            symbolSize: 28,
+            label: { color: "#fff", fontSize: 10 },
+            data: [{ type: "max", name: t("logs.peakRpm") }],
+          },
         },
       ],
     }
@@ -571,6 +669,154 @@ export const LogsPage: React.FC = () => {
       window.removeEventListener("resize", handleResize)
     }
   }, [activeTab, rateTrendSeries, t])
+
+  useEffect(() => {
+    if (activeTab !== "stats" || !errorBreakdownChartDomRef.current) return
+
+    const chart =
+      errorBreakdownChartRef.current &&
+      errorBreakdownChartRef.current.getDom() === errorBreakdownChartDomRef.current
+        ? errorBreakdownChartRef.current
+        : echarts.init(errorBreakdownChartDomRef.current)
+    errorBreakdownChartRef.current = chart
+
+    const option: EChartsOption = {
+      animationDuration: 260,
+      backgroundColor: "transparent",
+      grid: { left: 48, right: 20, top: 20, bottom: 50 },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "shadow" },
+        backgroundColor: MACARON.tooltipBg,
+        borderColor: MACARON.tooltipBorder,
+        borderWidth: 1,
+        textStyle: { color: MACARON.tooltipText },
+      },
+      xAxis: {
+        type: "category",
+        data: errorBreakdownSeries.labels,
+        axisLine: { lineStyle: { color: MACARON.axis } },
+        axisLabel: { color: MACARON.axis, fontSize: 11, rotate: 24 },
+      },
+      yAxis: {
+        type: "value",
+        axisLine: { show: false },
+        axisLabel: { color: MACARON.axis, fontSize: 11 },
+        splitLine: { lineStyle: { color: MACARON.split, type: "dashed" } },
+      },
+      series: [
+        {
+          name: t("logs.errorsCount"),
+          type: "bar",
+          barMaxWidth: 28,
+          data: errorBreakdownSeries.values,
+          itemStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: "#ffb0b0" },
+              { offset: 1, color: "#ff8f8f" },
+            ]),
+            borderRadius: [6, 6, 0, 0],
+          },
+        },
+      ],
+    }
+
+    chart.setOption(option, true)
+    const frameId = window.requestAnimationFrame(() => chart.resize())
+    const handleResize = () => chart.resize()
+    window.addEventListener("resize", handleResize)
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      window.removeEventListener("resize", handleResize)
+    }
+  }, [activeTab, errorBreakdownSeries, t])
+
+  useEffect(() => {
+    if (activeTab !== "stats" || !contributionChartDomRef.current) return
+
+    const chart =
+      contributionChartRef.current &&
+      contributionChartRef.current.getDom() === contributionChartDomRef.current
+        ? contributionChartRef.current
+        : echarts.init(contributionChartDomRef.current)
+    contributionChartRef.current = chart
+
+    const option: EChartsOption = {
+      animationDuration: 260,
+      backgroundColor: "transparent",
+      grid: { left: 56, right: 20, top: 24, bottom: 48 },
+      legend: {
+        top: 0,
+        textStyle: { color: MACARON.legend, fontSize: 12 },
+        data: [t("logs.trendRequests"), t("logs.trendTokens")],
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "shadow" },
+        backgroundColor: MACARON.tooltipBg,
+        borderColor: MACARON.tooltipBorder,
+        borderWidth: 1,
+        textStyle: { color: MACARON.tooltipText },
+      },
+      xAxis: {
+        type: "category",
+        data: contributionSeries.labels,
+        axisLine: { lineStyle: { color: MACARON.axis } },
+        axisLabel: { color: MACARON.axis, fontSize: 11, interval: 0, rotate: 18 },
+      },
+      yAxis: [
+        {
+          type: "value",
+          axisLabel: { color: MACARON.axis, fontSize: 11 },
+          splitLine: { lineStyle: { color: MACARON.split, type: "dashed" } },
+        },
+        {
+          type: "value",
+          axisLabel: {
+            color: MACARON.axis,
+            fontSize: 11,
+            formatter: (value: number) => formatTokenAxisValue(value),
+          },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: t("logs.trendRequests"),
+          type: "bar",
+          barMaxWidth: 26,
+          data: contributionSeries.requests,
+          itemStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: "#ffd08f" },
+              { offset: 1, color: "#ffb15f" },
+            ]),
+            borderRadius: [6, 6, 0, 0],
+          },
+        },
+        {
+          name: t("logs.trendTokens"),
+          type: "line",
+          yAxisIndex: 1,
+          smooth: true,
+          symbol: "circle",
+          symbolSize: 6,
+          data: contributionSeries.tokens,
+          lineStyle: { color: MACARON.tpmOutputLine, width: 2 },
+          itemStyle: { color: MACARON.tpmOutputLine },
+        },
+      ],
+    }
+
+    chart.setOption(option, true)
+    const frameId = window.requestAnimationFrame(() => chart.resize())
+    const handleResize = () => chart.resize()
+    window.addEventListener("resize", handleResize)
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      window.removeEventListener("resize", handleResize)
+    }
+  }, [activeTab, contributionSeries, t])
 
   const renderLogEntry = (log: LogEntry) => {
     return (
@@ -794,6 +1040,12 @@ export const LogsPage: React.FC = () => {
 
             <div className={styles.toolbarActions}>
               <Button
+                variant={enableComparison ? "primary" : "default"}
+                onClick={() => setEnableComparison(prev => !prev)}
+              >
+                {enableComparison ? t("logs.disableComparison") : t("logs.enableComparison")}
+              </Button>
+              <Button
                 variant="default"
                 icon={RotateCcw}
                 onClick={handleResetStats}
@@ -844,12 +1096,26 @@ export const LogsPage: React.FC = () => {
               <div className={styles.summaryCard}>
                 <span className={styles.summaryLabel}>{t("logs.totalRequests")}</span>
                 <strong className={styles.summaryValue}>{totalRequests}</strong>
+                {enableComparison && comparison && (
+                  <span
+                    className={`${styles.summaryDelta} ${comparison.requestsDeltaPct >= 0 ? styles.summaryDeltaUp : styles.summaryDeltaDown}`}
+                  >
+                    {formatDelta(comparison.requestsDeltaPct)}
+                  </span>
+                )}
               </div>
               <div className={styles.summaryCard}>
                 <span className={styles.summaryLabel}>{t("logs.errorsCount")}</span>
                 <strong className={`${styles.summaryValue} ${styles.summaryValueDanger}`}>
                   {totalErrors}
                 </strong>
+                {enableComparison && comparison && (
+                  <span
+                    className={`${styles.summaryDelta} ${comparison.errorsDeltaPct >= 0 ? styles.summaryDeltaDown : styles.summaryDeltaUp}`}
+                  >
+                    {formatDelta(comparison.errorsDeltaPct)}
+                  </span>
+                )}
               </div>
               <div className={styles.summaryCard}>
                 <span className={styles.summaryLabel}>{t("logs.successRate")}</span>
@@ -860,6 +1126,19 @@ export const LogsPage: React.FC = () => {
                 <strong className={styles.summaryValue}>
                   {formatRateMetric(logsStats?.rpm ?? 0)}
                 </strong>
+                {enableComparison && comparison && (
+                  <span
+                    className={`${styles.summaryDelta} ${comparison.rpmDeltaPct >= 0 ? styles.summaryDeltaUp : styles.summaryDeltaDown}`}
+                  >
+                    {formatDelta(comparison.rpmDeltaPct)}
+                  </span>
+                )}
+              </div>
+              <div className={styles.summaryCard}>
+                <span className={styles.summaryLabel}>{t("logs.peakRpm")}</span>
+                <strong className={styles.summaryValue}>
+                  {formatRateMetric(logsStats?.peakRpm ?? 0)}
+                </strong>
               </div>
             </div>
           </div>
@@ -868,39 +1147,36 @@ export const LogsPage: React.FC = () => {
             <h3 className={styles.metricsTitle}>{t("logs.tokenMetricsSection")}</h3>
             <div className={styles.summaryGrid}>
               <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.totalInputTokens")}</span>
+                <span className={styles.summaryLabel}>{t("logs.tokenInOut")}</span>
                 <strong className={styles.summaryValue}>
-                  {formatTokenMillions(logsStats?.inputTokens ?? 0)}
-                </strong>
-              </div>
-              <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.totalOutputTokens")}</span>
-                <strong className={styles.summaryValue}>
+                  {formatTokenMillions(logsStats?.inputTokens ?? 0)} /{" "}
                   {formatTokenMillions(logsStats?.outputTokens ?? 0)}
                 </strong>
               </div>
               <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.totalCacheReadTokens")}</span>
+                <span className={styles.summaryLabel}>{t("logs.cacheHitWrite")}</span>
                 <strong className={styles.summaryValue}>
-                  {formatTokenMillions(logsStats?.cacheReadTokens ?? 0)}
-                </strong>
-              </div>
-              <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.totalCacheWriteTokens")}</span>
-                <strong className={styles.summaryValue}>
+                  {formatTokenMillions(logsStats?.cacheReadTokens ?? 0)} /{" "}
                   {formatTokenMillions(logsStats?.cacheWriteTokens ?? 0)}
                 </strong>
               </div>
               <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.inputTpm")}</span>
+                <span className={styles.summaryLabel}>{t("logs.tpmInOut")}</span>
                 <strong className={styles.summaryValue}>
-                  {formatRateMetric(logsStats?.inputTpm ?? 0)}
+                  {formatRateMetric(logsStats?.inputTpm ?? 0)} /{" "}
+                  {formatRateMetric(logsStats?.outputTpm ?? 0)}
                 </strong>
               </div>
               <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.outputTpm")}</span>
+                <span className={styles.summaryLabel}>{t("logs.peakInputTpm")}</span>
                 <strong className={styles.summaryValue}>
-                  {formatRateMetric(logsStats?.outputTpm ?? 0)}
+                  {formatRateMetric(logsStats?.peakInputTpm ?? 0)}
+                </strong>
+              </div>
+              <div className={styles.summaryCard}>
+                <span className={styles.summaryLabel}>{t("logs.peakOutputTpm")}</span>
+                <strong className={styles.summaryValue}>
+                  {formatRateMetric(logsStats?.peakOutputTpm ?? 0)}
                 </strong>
               </div>
             </div>
@@ -921,6 +1197,26 @@ export const LogsPage: React.FC = () => {
             <div className={styles.chartCard}>
               <div ref={rateChartDomRef} className={styles.trendChart} />
               {rateTrendSeries.labels.length === 0 && (
+                <div className={styles.chartEmpty}>{t("logs.noStatsData")}</div>
+              )}
+            </div>
+          </div>
+
+          <div className={styles.metricsSection}>
+            <h3 className={styles.metricsTitle}>{t("logs.contributionRankingTitle")}</h3>
+            <div className={styles.chartCard}>
+              <div ref={contributionChartDomRef} className={styles.trendChart} />
+              {contributionSeries.labels.length === 0 && (
+                <div className={styles.chartEmpty}>{t("logs.noStatsData")}</div>
+              )}
+            </div>
+          </div>
+
+          <div className={styles.metricsSection}>
+            <h3 className={styles.metricsTitle}>{t("logs.errorBreakdownTitle")}</h3>
+            <div className={styles.chartCard}>
+              <div ref={errorBreakdownChartDomRef} className={styles.trendChart} />
+              {errorBreakdownSeries.labels.length === 0 && (
                 <div className={styles.chartEmpty}>{t("logs.noStatsData")}</div>
               )}
             </div>

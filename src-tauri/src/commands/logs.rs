@@ -27,8 +27,12 @@ pub async fn logs_stats_summary(
     hours: Option<u32>,
     rule_keys: Option<Vec<String>>,
     rule_key: Option<String>,
+    dimension: Option<String>,
+    enable_comparison: Option<bool>,
 ) -> Result<StatsSummaryResult, String> {
-    Ok(state.runtime.stats_summary(hours, rule_keys, rule_key))
+    Ok(state
+        .runtime
+        .stats_summary(hours, rule_keys, rule_key, dimension, enable_comparison))
 }
 
 #[tauri::command]

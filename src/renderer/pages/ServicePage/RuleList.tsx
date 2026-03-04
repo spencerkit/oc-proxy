@@ -462,6 +462,9 @@ export const RuleList: React.FC<{
                 key={rule.id}
                 className={`${styles.ruleItemContainer} ${rule.id === activeRuleId ? styles.ruleItemContainerActive : ""}`}
               >
+                {rule.id === activeRuleId && (
+                  <span className={styles.enabledCornerBadge}>{t("servicePage.current")}</span>
+                )}
                 <div className={styles.ruleCardTop}>
                   <button
                     type="button"
@@ -473,46 +476,44 @@ export const RuleList: React.FC<{
                   >
                     <div className={styles.ruleMainLine}>
                       <span className={styles.ruleModel}>{rule.name}</span>
-                      <span className={styles.ruleDirection}>
-                        {t(`ruleProtocol.${rule.protocol}`)}
-                      </span>
-                      {rule.id === activeRuleId && (
-                        <span className={styles.currentBadge}>{t("servicePage.current")}</span>
-                      )}
                     </div>
                   </button>
-                  <div className={styles.ruleActionButtons}>
-                    {rule.id !== activeRuleId && (
+                  <div className={styles.ruleHeaderRight}>
+                    <div className={styles.ruleActionButtons}>
+                      {rule.id !== activeRuleId && (
+                        <button
+                          type="button"
+                          className={styles.activateIconButton}
+                          onClick={() => onActivate(rule.id)}
+                          title={t("servicePage.activateRule")}
+                          aria-label={`${t("servicePage.activateRule")}: ${rule.name}`}
+                          disabled={activatingRuleId === rule.id}
+                        >
+                          <Play size={13} />
+                        </button>
+                      )}
                       <button
                         type="button"
-                        className={styles.activateButton}
-                        onClick={() => onActivate(rule.id)}
-                        title={t("servicePage.activateRule")}
-                        aria-label={`${t("servicePage.activateRule")}: ${rule.name}`}
-                        disabled={activatingRuleId === rule.id}
+                        className={styles.editButton}
+                        onClick={() => handleRuleClick(rule.id)}
+                        title={t("servicePage.editRule")}
+                        aria-label={`${t("servicePage.editRule")}: ${rule.name}`}
                       >
-                        <Play size={13} />
-                        <span>{t("servicePage.activateRule")}</span>
+                        <Pencil size={14} />
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      className={styles.editButton}
-                      onClick={() => handleRuleClick(rule.id)}
-                      title={t("servicePage.editRule")}
-                      aria-label={`${t("servicePage.editRule")}: ${rule.name}`}
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.deleteButton}
-                      onClick={() => onDelete(rule.id)}
-                      title={t("servicePage.deleteRule")}
-                      aria-label={`${t("servicePage.deleteRule")}: ${rule.name}`}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                      <button
+                        type="button"
+                        className={styles.deleteButton}
+                        onClick={() => onDelete(rule.id)}
+                        title={t("servicePage.deleteRule")}
+                        aria-label={`${t("servicePage.deleteRule")}: ${rule.name}`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <span className={styles.ruleDirection}>
+                      {t(`ruleProtocol.${rule.protocol}`)}
+                    </span>
                   </div>
                 </div>
                 {(() => {

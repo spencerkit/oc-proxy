@@ -21,6 +21,7 @@ import type {
   RemoteRulesUploadResult,
   RuleCardStatsItem,
   RuleQuotaSnapshot,
+  StatsDimension,
   StatsSummaryResult,
 } from "@/types"
 import { ipc } from "@/utils/ipc"
@@ -49,7 +50,13 @@ interface ProxyState {
   init: () => Promise<void>
   refreshStatus: () => Promise<void>
   refreshLogs: () => Promise<void>
-  refreshLogsStats: (hours?: number, ruleKeys?: string[], ruleKey?: string) => Promise<void>
+  refreshLogsStats: (
+    hours?: number,
+    ruleKeys?: string[],
+    ruleKey?: string,
+    dimension?: StatsDimension,
+    enableComparison?: boolean
+  ) => Promise<void>
   saveConfig: (config: ProxyConfig) => Promise<void>
   exportGroupsBackup: () => Promise<GroupBackupExportResult>
   exportGroupsToFolder: () => Promise<GroupBackupExportResult>
@@ -127,7 +134,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
       const [config, status, logsStats] = await Promise.all([
         ipc.getConfig(),
         ipc.getStatus(),
-        ipc.getLogsStatsSummary(),
+        ipc.getLogsStatsSummary(undefined, undefined, undefined, "rule", false),
       ])
 
       console.log("[Store] Config received:", config)
@@ -183,9 +190,21 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   /**
    * Refresh request/token stats summary from IPC
    */
-  refreshLogsStats: async (hours?: number, ruleKeys?: string[], ruleKey?: string) => {
+  refreshLogsStats: async (
+    hours?: number,
+    ruleKeys?: string[],
+    ruleKey?: string,
+    dimension?: StatsDimension,
+    enableComparison?: boolean
+  ) => {
     try {
-      const logsStats = await ipc.getLogsStatsSummary(hours, ruleKeys, ruleKey)
+      const logsStats = await ipc.getLogsStatsSummary(
+        hours,
+        ruleKeys,
+        ruleKey,
+        dimension,
+        enableComparison
+      )
       set({ logsStats, error: null })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to refresh logs stats"

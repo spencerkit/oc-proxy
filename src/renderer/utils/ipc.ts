@@ -13,6 +13,7 @@ import type {
   RuleQuotaSnapshot,
   RuleQuotaTestResult,
   SaveConfigResult,
+  StatsDimension,
   StatsSummaryResult,
 } from "@/types"
 
@@ -103,12 +104,16 @@ export const ipc = {
   getLogsStatsSummary(
     hours?: number,
     ruleKeys?: string[],
-    ruleKey?: string
+    ruleKey?: string,
+    dimension?: StatsDimension,
+    enableComparison?: boolean
   ): Promise<StatsSummaryResult> {
     const args: Record<string, unknown> = {}
     if (typeof hours === "number") args.hours = hours
     if (Array.isArray(ruleKeys)) args.ruleKeys = ruleKeys
     if (typeof ruleKey === "string") args.ruleKey = ruleKey
+    if (typeof dimension === "string") args.dimension = dimension
+    if (typeof enableComparison === "boolean") args.enableComparison = enableComparison
     return getInvoke()<StatsSummaryResult>("logs_stats_summary", args)
   },
 
