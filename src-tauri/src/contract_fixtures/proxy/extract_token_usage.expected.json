@@ -1,5 +1,5 @@
 {
-  "input_tokens": 120,
+  "input_tokens": 98,
   "output_tokens": 30,
   "cache_read_tokens": 22,
   "cache_write_tokens": 4

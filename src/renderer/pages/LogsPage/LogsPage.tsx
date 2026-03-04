@@ -30,11 +30,20 @@ const MACARON = {
   requestLine: "#ff9fc0",
   requestAreaTop: "rgba(255, 159, 192, 0.26)",
   requestAreaBottom: "rgba(255, 159, 192, 0.02)",
-  tpmInputLine: "#4fc8a8",
-  tpmOutputLine: "#5d95ff",
+  tpsOutputLine: "#5d95ff",
 } as const
 
 type LogsTab = "stats" | "logs"
+
+function resolveCurrencyPrefix(currency?: string | null): string {
+  const normalized = currency?.trim().toUpperCase()
+  if (!normalized) return "$"
+  if (normalized === "USD") return "$"
+  if (normalized === "CNY" || normalized === "RMB") return "¥"
+  if (normalized === "EUR") return "€"
+  if (normalized === "JPY") return "¥"
+  return `${normalized} `
+}
 
 function formatHourLabel(hourIso: string, hoursFilter: number): string {
   const date = new Date(hourIso)
@@ -73,11 +82,21 @@ function formatTokenAxisValue(value: number | string): string {
   return String(Math.round(numeric))
 }
 
-function formatRateMetric(value: number): string {
+function formatTpsMetric(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0"
-  if (value < 0.01) return "<0.01"
-  if (value >= 1000) return formatTokenAxisValue(value)
-  return value.toFixed(2).replace(/\.00$/, "")
+  const rounded = Math.round(value)
+  if (rounded >= 1_000_000) return `${Math.round(rounded / 1_000_000)}M`
+  if (rounded >= 1_000) return `${Math.round(rounded / 1_000)}k`
+  return String(rounded)
+}
+
+function formatCostMetric(value: number, currency?: string | null): string {
+  const safe = Number.isFinite(value) ? Math.max(0, value) : 0
+  const prefix = resolveCurrencyPrefix(currency)
+  if (safe === 0) return `${prefix}0.00`
+  if (safe < 0.0001) return `${prefix}<0.0001`
+  if (safe < 1) return `${prefix}${safe.toFixed(4)}`
+  return `${prefix}${safe.toFixed(2)}`
 }
 
 function formatDelta(delta: number): string {
@@ -99,14 +118,14 @@ export const LogsPage: React.FC = () => {
   const { showToast } = useLogs()
   const [activeTab, setActiveTab] = useState<LogsTab>("stats")
   const [statusFilter, setStatusFilter] = useState<"all" | LogEntry["status"]>("all")
-  const [selectedRuleKeys, setSelectedRuleKeys] = useState<string[]>([])
-  const [ruleSearchValue, setRuleSearchValue] = useState("")
-  const [ruleDropdownOpen, setRuleDropdownOpen] = useState(false)
+  const [selectedProviderKeys, setSelectedProviderKeys] = useState<string[]>([])
+  const [providerSearchValue, setProviderSearchValue] = useState("")
+  const [providerDropdownOpen, setProviderDropdownOpen] = useState(false)
   const [hoursFilter, setHoursFilter] = useState<number>(24)
   const [enableComparison, setEnableComparison] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
-  const hasInitializedRuleSelectionRef = useRef(false)
-  const ruleComboboxRef = useRef<HTMLDivElement | null>(null)
+  const hasInitializedProviderSelectionRef = useRef(false)
+  const providerComboboxRef = useRef<HTMLDivElement | null>(null)
   const usageChartDomRef = useRef<HTMLDivElement | null>(null)
   const usageChartRef = useRef<echarts.ECharts | null>(null)
   const rateChartDomRef = useRef<HTMLDivElement | null>(null)
@@ -126,14 +145,27 @@ export const LogsPage: React.FC = () => {
   const ruleOptions = useMemo(() => {
     const options: Array<{ key: string; label: string }> = []
     for (const group of config?.groups || []) {
-      for (const rule of group.rules || []) {
+      for (const provider of group.providers || []) {
         options.push({
-          key: `${group.id}::${rule.id}`,
-          label: `${group.name || group.id}-${rule.name || rule.id}`,
+          key: `${group.id}::${provider.id}`,
+          label: `${group.name || group.id}-${provider.name || provider.id}`,
         })
       }
     }
     return options
+  }, [config])
+
+  const providerCostMetaByKey = useMemo(() => {
+    const map = new Map<string, { enabled: boolean; currency: string }>()
+    for (const group of config?.groups || []) {
+      for (const provider of group.providers || []) {
+        map.set(`${group.id}::${provider.id}`, {
+          enabled: Boolean(provider.cost?.enabled),
+          currency: provider.cost?.currency || "USD",
+        })
+      }
+    }
+    return map
   }, [config])
 
   const ruleOptionsByKey = useMemo(() => {
@@ -144,28 +176,35 @@ export const LogsPage: React.FC = () => {
     return map
   }, [ruleOptions])
 
-  const selectedRuleKeySet = useMemo(() => new Set(selectedRuleKeys), [selectedRuleKeys])
+  const selectedProviderKeySet = useMemo(
+    () => new Set(selectedProviderKeys),
+    [selectedProviderKeys]
+  )
 
   const selectedRuleOptions = useMemo(() => {
-    return selectedRuleKeys
+    return selectedProviderKeys
       .map(key => ruleOptionsByKey.get(key))
       .filter((option): option is { key: string; label: string } => Boolean(option))
-  }, [ruleOptionsByKey, selectedRuleKeys])
+  }, [ruleOptionsByKey, selectedProviderKeys])
+
+  const hasAnyCostEnabledInSelection = useMemo(() => {
+    return selectedProviderKeys.some(key => providerCostMetaByKey.get(key)?.enabled)
+  }, [providerCostMetaByKey, selectedProviderKeys])
 
   const visibleRuleOptions = useMemo(() => {
-    const keyword = ruleSearchValue.trim().toLowerCase()
+    const keyword = providerSearchValue.trim().toLowerCase()
     if (!keyword) return ruleOptions
     return ruleOptions.filter(option => option.label.toLowerCase().includes(keyword))
-  }, [ruleOptions, ruleSearchValue])
+  }, [ruleOptions, providerSearchValue])
 
   const allRuleKeys = useMemo(() => ruleOptions.map(option => option.key), [ruleOptions])
-  const isAllSelected = allRuleKeys.length > 0 && selectedRuleKeys.length === allRuleKeys.length
+  const isAllSelected = allRuleKeys.length > 0 && selectedProviderKeys.length === allRuleKeys.length
 
   useEffect(() => {
     const validKeys = new Set(allRuleKeys)
-    setSelectedRuleKeys(prev => {
-      if (!hasInitializedRuleSelectionRef.current) {
-        hasInitializedRuleSelectionRef.current = true
+    setSelectedProviderKeys(prev => {
+      if (!hasInitializedProviderSelectionRef.current) {
+        hasInitializedProviderSelectionRef.current = true
         return [...allRuleKeys]
       }
       return prev.filter(key => validKeys.has(key))
@@ -173,24 +212,24 @@ export const LogsPage: React.FC = () => {
   }, [allRuleKeys])
 
   useEffect(() => {
-    if (!hasInitializedRuleSelectionRef.current) return
-    void refreshLogsStats(hoursFilter, selectedRuleKeys, undefined, "rule", enableComparison)
-  }, [hoursFilter, refreshLogsStats, selectedRuleKeys, enableComparison])
+    if (!hasInitializedProviderSelectionRef.current) return
+    void refreshLogsStats(hoursFilter, selectedProviderKeys, undefined, "rule", enableComparison)
+  }, [hoursFilter, refreshLogsStats, selectedProviderKeys, enableComparison])
 
   useEffect(() => {
-    if (!hasInitializedRuleSelectionRef.current) return
+    if (!hasInitializedProviderSelectionRef.current) return
     const timer = window.setInterval(() => {
-      void refreshLogsStats(hoursFilter, selectedRuleKeys, undefined, "rule", enableComparison)
+      void refreshLogsStats(hoursFilter, selectedProviderKeys, undefined, "rule", enableComparison)
     }, 3000)
     return () => window.clearInterval(timer)
-  }, [hoursFilter, refreshLogsStats, selectedRuleKeys, enableComparison])
+  }, [hoursFilter, refreshLogsStats, selectedProviderKeys, enableComparison])
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
-      if (!ruleComboboxRef.current) return
+      if (!providerComboboxRef.current) return
       const target = event.target as Node
-      if (!ruleComboboxRef.current.contains(target)) {
-        setRuleDropdownOpen(false)
+      if (!providerComboboxRef.current.contains(target)) {
+        setProviderDropdownOpen(false)
       }
     }
 
@@ -252,7 +291,7 @@ export const LogsPage: React.FC = () => {
   const handleResetStats = async () => {
     try {
       await clearLogsStats()
-      await refreshLogsStats(hoursFilter, selectedRuleKeys, undefined, "rule", enableComparison)
+      await refreshLogsStats(hoursFilter, selectedProviderKeys, undefined, "rule", enableComparison)
       showToast(t("logs.resetStatsSuccess"), "success")
     } catch (error) {
       showToast(t("logs.resetStatsError"), "error")
@@ -261,7 +300,7 @@ export const LogsPage: React.FC = () => {
   }
 
   const handleToggleRule = (ruleKey: string) => {
-    setSelectedRuleKeys(prev => {
+    setSelectedProviderKeys(prev => {
       if (prev.includes(ruleKey)) {
         return prev.filter(key => key !== ruleKey)
       }
@@ -338,9 +377,7 @@ export const LogsPage: React.FC = () => {
 
     return {
       labels: hourly.map(point => formatHourLabel(point.hour, hoursFilter)),
-      rpm: hourly.map(point => point.requests / 60),
-      inputTpm: hourly.map(point => point.inputTokens / 60),
-      outputTpm: hourly.map(point => point.outputTokens / 60),
+      outputTps: hourly.map(point => point.outputTps),
     }
   }, [hoursFilter, logsStats?.hourly])
 
@@ -395,6 +432,14 @@ export const LogsPage: React.FC = () => {
       }),
     }
   }, [logsStats?.breakdowns?.requestsByRule, logsStats?.breakdowns?.tokensByRule, ruleOptionsByKey])
+
+  const totalCostText = useMemo(() => {
+    const currency = logsStats?.costCurrency
+    if (currency === "MIXED") {
+      return `${t("logs.costMixedCurrency")} ${formatCostMetric(logsStats?.totalCost ?? 0, "USD")}`
+    }
+    return formatCostMetric(logsStats?.totalCost ?? 0, currency || "USD")
+  }, [logsStats?.costCurrency, logsStats?.totalCost, t])
 
   useEffect(() => {
     if (activeTab !== "stats" || !usageChartDomRef.current) return
@@ -566,7 +611,7 @@ export const LogsPage: React.FC = () => {
       legend: {
         top: 8,
         textStyle: { color: MACARON.legend, fontSize: 12 },
-        data: [t("logs.trendRpm"), t("logs.trendInputTpm"), t("logs.trendOutputTpm")],
+        data: [t("logs.trendOutputTps")],
       },
       tooltip: {
         trigger: "axis",
@@ -581,78 +626,31 @@ export const LogsPage: React.FC = () => {
         axisLine: { lineStyle: { color: MACARON.axis } },
         axisLabel: { color: MACARON.axis, fontSize: 11 },
       },
-      yAxis: [
-        {
-          type: "value",
-          name: t("logs.trendRateLeftAxis"),
-          axisLabel: {
-            color: MACARON.axis,
-            fontSize: 11,
-            formatter: (value: number) => formatRateMetric(value),
-          },
-          splitLine: { lineStyle: { color: MACARON.split, type: "dashed" } },
+      yAxis: {
+        type: "value",
+        name: t("logs.trendRateAxis"),
+        axisLabel: {
+          color: MACARON.axis,
+          fontSize: 11,
+          formatter: (value: number) => formatTpsMetric(value),
         },
-        {
-          type: "value",
-          name: t("logs.trendRateRightAxis"),
-          axisLabel: {
-            color: MACARON.axis,
-            fontSize: 11,
-            formatter: (value: number) => formatRateMetric(value),
-          },
-          splitLine: { show: false },
-        },
-      ],
+        splitLine: { lineStyle: { color: MACARON.split, type: "dashed" } },
+      },
       series: [
         {
-          name: t("logs.trendInputTpm"),
+          name: t("logs.trendOutputTps"),
           type: "line",
-          data: rateTrendSeries.inputTpm,
-          yAxisIndex: 0,
+          data: rateTrendSeries.outputTps,
           smooth: true,
           symbol: "circle",
           symbolSize: 5,
-          lineStyle: { color: MACARON.tpmInputLine, width: 2 },
-          itemStyle: { color: MACARON.tpmInputLine },
+          lineStyle: { color: MACARON.tpsOutputLine, width: 2 },
+          itemStyle: { color: MACARON.tpsOutputLine },
           markPoint: {
             symbol: "pin",
             symbolSize: 28,
             label: { color: "#fff", fontSize: 10 },
-            data: [{ type: "max", name: t("logs.peakInputTpm") }],
-          },
-        },
-        {
-          name: t("logs.trendOutputTpm"),
-          type: "line",
-          data: rateTrendSeries.outputTpm,
-          yAxisIndex: 0,
-          smooth: true,
-          symbol: "circle",
-          symbolSize: 5,
-          lineStyle: { color: MACARON.tpmOutputLine, width: 2 },
-          itemStyle: { color: MACARON.tpmOutputLine },
-          markPoint: {
-            symbol: "pin",
-            symbolSize: 28,
-            label: { color: "#fff", fontSize: 10 },
-            data: [{ type: "max", name: t("logs.peakOutputTpm") }],
-          },
-        },
-        {
-          name: t("logs.trendRpm"),
-          type: "line",
-          data: rateTrendSeries.rpm,
-          yAxisIndex: 1,
-          smooth: true,
-          symbol: "circle",
-          symbolSize: 5,
-          lineStyle: { color: MACARON.requestLine, width: 2 },
-          itemStyle: { color: MACARON.requestLine },
-          markPoint: {
-            symbol: "pin",
-            symbolSize: 28,
-            label: { color: "#fff", fontSize: 10 },
-            data: [{ type: "max", name: t("logs.peakRpm") }],
+            data: [{ type: "max", name: t("logs.peakOutputTps") }],
           },
         },
       ],
@@ -802,8 +800,8 @@ export const LogsPage: React.FC = () => {
           symbol: "circle",
           symbolSize: 6,
           data: contributionSeries.tokens,
-          lineStyle: { color: MACARON.tpmOutputLine, width: 2 },
-          itemStyle: { color: MACARON.tpmOutputLine },
+          lineStyle: { color: MACARON.tpsOutputLine, width: 2 },
+          itemStyle: { color: MACARON.tpsOutputLine },
         },
       ],
     }
@@ -920,7 +918,7 @@ export const LogsPage: React.FC = () => {
         <h2>{t("logs.title")}</h2>
         <p className={styles.subtitle}>
           {activeTab === "stats"
-            ? `${t("logs.statsTabSubtitle", { range: getHoursLabel(hoursFilter) })} · ${t("logs.statsRulesSelected", { count: selectedRuleKeys.length })}`
+            ? `${t("logs.statsTabSubtitle", { range: getHoursLabel(hoursFilter) })} · ${t("logs.statsRulesSelected", { count: selectedProviderKeys.length })}`
             : statusFilter === "all"
               ? t("logs.recentLogs", { count: logs.length })
               : t("logs.filteredLogs", { shown: filteredLogs.length, total: logs.length })}
@@ -950,27 +948,27 @@ export const LogsPage: React.FC = () => {
         <>
           <div className={styles.statsToolbar}>
             <div className={styles.advancedFilterGroup}>
-              <div className={styles.ruleCombobox} ref={ruleComboboxRef}>
+              <div className={styles.ruleCombobox} ref={providerComboboxRef}>
                 <input
                   className={styles.inlineInput}
                   type="text"
-                  value={ruleSearchValue}
-                  onFocus={() => setRuleDropdownOpen(true)}
+                  value={providerSearchValue}
+                  onFocus={() => setProviderDropdownOpen(true)}
                   onChange={e => {
-                    setRuleSearchValue(e.target.value)
-                    setRuleDropdownOpen(true)
+                    setProviderSearchValue(e.target.value)
+                    setProviderDropdownOpen(true)
                   }}
                   onKeyDown={e => {
                     if (e.key === "Escape") {
-                      setRuleDropdownOpen(false)
+                      setProviderDropdownOpen(false)
                     }
                     if (
                       e.key === "Backspace" &&
-                      !ruleSearchValue.trim() &&
-                      selectedRuleKeys.length > 0
+                      !providerSearchValue.trim() &&
+                      selectedProviderKeys.length > 0
                     ) {
                       e.preventDefault()
-                      setSelectedRuleKeys(prev => prev.slice(0, Math.max(0, prev.length - 1)))
+                      setSelectedProviderKeys(prev => prev.slice(0, Math.max(0, prev.length - 1)))
                     }
                     if (e.key === "Enter" && visibleRuleOptions.length > 0) {
                       e.preventDefault()
@@ -979,14 +977,14 @@ export const LogsPage: React.FC = () => {
                   }}
                   placeholder={t("logs.statsRuleSearchPlaceholder")}
                 />
-                {ruleDropdownOpen && (
+                {providerDropdownOpen && (
                   <div className={styles.ruleDropdown}>
                     <div className={styles.ruleDropdownActions}>
                       <button
                         type="button"
                         className={styles.ruleDropdownAction}
                         onMouseDown={event => event.preventDefault()}
-                        onClick={() => setSelectedRuleKeys([...allRuleKeys])}
+                        onClick={() => setSelectedProviderKeys([...allRuleKeys])}
                       >
                         {t("logs.statsSelectAll")}
                       </button>
@@ -994,7 +992,7 @@ export const LogsPage: React.FC = () => {
                         type="button"
                         className={styles.ruleDropdownAction}
                         onMouseDown={event => event.preventDefault()}
-                        onClick={() => setSelectedRuleKeys([])}
+                        onClick={() => setSelectedProviderKeys([])}
                       >
                         {t("logs.statsClearSelection")}
                       </button>
@@ -1003,7 +1001,7 @@ export const LogsPage: React.FC = () => {
                       <div className={styles.ruleDropdownEmpty}>{t("logs.noStatsData")}</div>
                     ) : (
                       visibleRuleOptions.map(option => {
-                        const checked = selectedRuleKeySet.has(option.key)
+                        const checked = selectedProviderKeySet.has(option.key)
                         return (
                           <button
                             key={option.key}
@@ -1060,13 +1058,13 @@ export const LogsPage: React.FC = () => {
             <span className={styles.ruleSelectionText}>
               {isAllSelected
                 ? t("logs.statsRuleAll")
-                : t("logs.statsRulesSelected", { count: selectedRuleKeys.length })}
+                : t("logs.statsRulesSelected", { count: selectedProviderKeys.length })}
             </span>
             <button
               type="button"
               className={styles.ruleClearButton}
-              onClick={() => setSelectedRuleKeys([])}
-              disabled={selectedRuleKeys.length === 0}
+              onClick={() => setSelectedProviderKeys([])}
+              disabled={selectedProviderKeys.length === 0}
             >
               {t("logs.statsClearSelection")}
             </button>
@@ -1079,7 +1077,7 @@ export const LogsPage: React.FC = () => {
                       type="button"
                       className={styles.ruleChipRemove}
                       onClick={() => {
-                        setSelectedRuleKeys(prev => prev.filter(key => key !== option.key))
+                        setSelectedProviderKeys(prev => prev.filter(key => key !== option.key))
                       }}
                       aria-label={`${t("logs.statsClearSelection")}: ${option.label}`}
                     >
@@ -1121,25 +1119,6 @@ export const LogsPage: React.FC = () => {
                 <span className={styles.summaryLabel}>{t("logs.successRate")}</span>
                 <strong className={styles.summaryValue}>{successRate}%</strong>
               </div>
-              <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.rpm")}</span>
-                <strong className={styles.summaryValue}>
-                  {formatRateMetric(logsStats?.rpm ?? 0)}
-                </strong>
-                {enableComparison && comparison && (
-                  <span
-                    className={`${styles.summaryDelta} ${comparison.rpmDeltaPct >= 0 ? styles.summaryDeltaUp : styles.summaryDeltaDown}`}
-                  >
-                    {formatDelta(comparison.rpmDeltaPct)}
-                  </span>
-                )}
-              </div>
-              <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.peakRpm")}</span>
-                <strong className={styles.summaryValue}>
-                  {formatRateMetric(logsStats?.peakRpm ?? 0)}
-                </strong>
-              </div>
             </div>
           </div>
 
@@ -1161,24 +1140,48 @@ export const LogsPage: React.FC = () => {
                 </strong>
               </div>
               <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.tpmInOut")}</span>
+                <span className={styles.summaryLabel}>{t("logs.outputTps")}</span>
                 <strong className={styles.summaryValue}>
-                  {formatRateMetric(logsStats?.inputTpm ?? 0)} /{" "}
-                  {formatRateMetric(logsStats?.outputTpm ?? 0)}
+                  {formatTpsMetric(logsStats?.outputTps ?? 0)}
                 </strong>
               </div>
               <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.peakInputTpm")}</span>
+                <span className={styles.summaryLabel}>{t("logs.peakOutputTps")}</span>
                 <strong className={styles.summaryValue}>
-                  {formatRateMetric(logsStats?.peakInputTpm ?? 0)}
+                  {formatTpsMetric(logsStats?.peakOutputTps ?? 0)}
                 </strong>
               </div>
-              <div className={styles.summaryCard}>
-                <span className={styles.summaryLabel}>{t("logs.peakOutputTpm")}</span>
-                <strong className={styles.summaryValue}>
-                  {formatRateMetric(logsStats?.peakOutputTpm ?? 0)}
-                </strong>
-              </div>
+              {hasAnyCostEnabledInSelection ? (
+                <div className={styles.summaryCard}>
+                  <span className={styles.summaryLabel}>{t("logs.totalCost")}</span>
+                  <strong className={styles.summaryValue}>{totalCostText}</strong>
+                  {enableComparison && comparison && (
+                    <span
+                      className={`${styles.summaryDelta} ${comparison.totalCostDeltaPct >= 0 ? styles.summaryDeltaUp : styles.summaryDeltaDown}`}
+                    >
+                      {formatDelta(comparison.totalCostDeltaPct)}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className={`${styles.summaryCard} ${styles.summaryCardNotice}`}>
+                  <span className={styles.summaryLabel}>{t("logs.totalCost")}</span>
+                  <strong className={styles.summaryValue}>
+                    {t("logs.costSummaryUnavailable")}
+                  </strong>
+                  <span className={styles.summaryNoticeText}>
+                    {t("logs.costSummaryUnavailableHint")}
+                  </span>
+                  <Button
+                    size="small"
+                    variant="ghost"
+                    onClick={() => navigate("/")}
+                    className={styles.summaryNoticeAction}
+                  >
+                    {t("logs.goConfigureBilling")}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
 

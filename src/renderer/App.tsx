@@ -140,6 +140,8 @@ const App: React.FC = () => {
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/logs/:traceId" element={<LogDetailPage />} />
         <Route path="/groups/:groupId/edit" element={<GroupEditPage />} />
+        <Route path="/groups/:groupId/providers/new" element={<RuleCreatePage />} />
+        <Route path="/groups/:groupId/providers/:ruleId/edit" element={<RuleEditPage />} />
         <Route path="/groups/:groupId/rules/new" element={<RuleCreatePage />} />
         <Route path="/groups/:groupId/rules/:ruleId/edit" element={<RuleEditPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

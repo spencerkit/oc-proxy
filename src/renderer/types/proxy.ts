@@ -64,6 +64,15 @@ export interface RuleQuotaTestResult {
   message?: string | null
 }
 
+export interface RuleCostConfig {
+  enabled: boolean
+  inputPricePerM: number
+  outputPricePerM: number
+  cacheInputPricePerM: number
+  cacheOutputPricePerM: number
+  currency: string
+}
+
 /**
  * Proxy rule interface
  * Defines a single translation rule between API formats
@@ -77,7 +86,10 @@ export interface Rule {
   defaultModel: string
   modelMappings: Record<string, string>
   quota: RuleQuotaConfig
+  cost?: RuleCostConfig
 }
+
+export type Provider = Rule
 
 /**
  * Proxy group interface
@@ -87,8 +99,10 @@ export interface Group {
   id: string
   name: string
   models: string[]
+  activeProviderId: string | null
+  providers: Provider[]
   activeRuleId: string | null
-  rules: Rule[]
+  rules: Provider[]
 }
 
 /**
@@ -123,6 +137,16 @@ export interface TokenUsage {
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+}
+
+export interface CostSnapshot {
+  enabled: boolean
+  currency: string
+  inputPricePerM: number
+  outputPricePerM: number
+  cacheInputPricePerM: number
+  cacheOutputPricePerM: number
+  totalCost: number
 }
 
 /**
@@ -173,6 +197,7 @@ export interface LogEntry {
   forwardRequestBody: unknown
   responseBody: unknown
   tokenUsage?: TokenUsage | null
+  costSnapshot?: CostSnapshot | null
   httpStatus: number | null
   upstreamStatus: number | null
   durationMs: number

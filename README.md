@@ -184,6 +184,31 @@ Expression support and safety:
 
 ![Logs Page](docs/assets/screenshots/logs-page.png)
 
+### Regenerate Screenshots (Playwright + Tauri Mock)
+
+To regenerate screenshots without starting Tauri runtime, use the built-in Playwright script with mocked Tauri `invoke` API:
+
+```bash
+npm run screenshots:mock
+```
+
+Default behavior:
+- Starts Vite dev server at `http://127.0.0.1:4173`
+- Injects mock Tauri IPC responses (`window.__TAURI_INTERNALS__.invoke`)
+- Captures:
+  - `docs/assets/screenshots/service-page.png`
+  - `docs/assets/screenshots/settings-page.png`
+  - `docs/assets/screenshots/logs-page.png`
+
+Optional arguments:
+
+```bash
+node scripts/capture-screenshots.js \
+  --base-url http://127.0.0.1:4173 \
+  --output-dir docs/assets/screenshots \
+  --keep-server
+```
+
 ## Quick Start
 
 ### Prerequisites

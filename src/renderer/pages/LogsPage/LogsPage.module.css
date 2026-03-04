@@ -409,6 +409,10 @@
   gap: 4px;
 }
 
+.summaryCardNotice {
+  border-style: dashed;
+}
+
 .summaryLabel {
   font-size: var(--text-xs);
   text-transform: uppercase;
@@ -454,6 +458,16 @@
 
 .summaryDeltaDown {
   color: var(--danger);
+}
+
+.summaryNoticeText {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.summaryNoticeAction {
+  justify-self: flex-start;
+  margin-top: 2px;
 }
 
 /* Logs container */

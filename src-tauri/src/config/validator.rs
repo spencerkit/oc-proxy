@@ -48,7 +48,7 @@ pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
         if group.name.trim().is_empty() {
             return Err(format!("group.name is required for {}", group.id));
         }
-        for rule in &group.rules {
+        for rule in &group.providers {
             if rule.id.trim().is_empty() {
                 return Err(format!("rule.id is required in group {}", group.id));
             }
@@ -56,8 +56,8 @@ pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
                 return Err(format!("rule.defaultModel required for {}", rule.id));
             }
         }
-        if let Some(active) = &group.active_rule_id {
-            if !group.rules.iter().any(|r| r.id == *active) {
+        if let Some(active) = &group.active_provider_id {
+            if !group.providers.iter().any(|r| r.id == *active) {
                 return Err(format!(
                     "group.activeRuleId not found in rules for {}",
                     group.id
@@ -73,7 +73,9 @@ pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
 mod tests {
     use super::validate_config;
     use crate::config::schema::default_config;
-    use crate::domain::entities::{default_rule_quota_config, Group, Rule, RuleProtocol};
+    use crate::domain::entities::{
+        default_rule_cost_config, default_rule_quota_config, Group, Rule, RuleProtocol,
+    };
     use std::collections::HashMap;
 
     #[test]
@@ -100,8 +102,8 @@ mod tests {
             id: "g1".to_string(),
             name: "demo".to_string(),
             models: vec!["a1".to_string()],
-            active_rule_id: Some("not_exists".to_string()),
-            rules: vec![Rule {
+            active_provider_id: Some("not_exists".to_string()),
+            providers: vec![Rule {
                 id: "r1".to_string(),
                 name: "rule-1".to_string(),
                 protocol: RuleProtocol::Anthropic,
@@ -110,6 +112,7 @@ mod tests {
                 default_model: "m1".to_string(),
                 model_mappings: HashMap::new(),
                 quota: default_rule_quota_config(),
+                cost: default_rule_cost_config(),
             }],
         }];
 

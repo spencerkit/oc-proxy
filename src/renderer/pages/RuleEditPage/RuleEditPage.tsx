@@ -5,7 +5,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { Button, Input, JsonTreeView, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { useProxyStore } from "@/store"
-import type { ProxyConfig, Rule, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
+import type { Provider, ProxyConfig, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
 import { ipc } from "@/utils/ipc"
 import styles from "./RuleEditPage.module.css"
 
@@ -69,7 +69,9 @@ const normalizeNumericInput = (raw: string) => {
   return `${normalized.slice(0, firstDot + 1)}${normalized.slice(firstDot + 1).replace(/\./g, "")}`
 }
 
-const normalizeQuotaUnitType = (raw: unknown): Rule["quota"]["unitType"] => {
+const COST_CURRENCY_OPTIONS = ["USD", "CNY", "EUR", "JPY", "HKD", "GBP", "SGD"] as const
+
+const normalizeQuotaUnitType = (raw: unknown): Provider["quota"]["unitType"] => {
   if (raw === "percentage" || raw === "amount" || raw === "tokens") {
     return raw
   }
@@ -101,12 +103,12 @@ const buildQuotaConfig = ({
   authHeader: string
   authScheme: string
   customHeaders: Record<string, string>
-  unitType: Rule["quota"]["unitType"]
+  unitType: Provider["quota"]["unitType"]
   lowThresholdPercent: number
   remainingExpr: string
   unitPath: string
   resetAtPath: string
-}): Rule["quota"] => ({
+}): Provider["quota"] => ({
   enabled,
   provider: provider.trim() || "custom",
   endpoint: endpoint.trim(),
@@ -155,7 +157,7 @@ const formatTokenQuotaValue = (value?: number | null): string => {
 }
 
 const formatQuotaPreviewByUnitType = (
-  unitType: Rule["quota"]["unitType"],
+  unitType: Provider["quota"]["unitType"],
   snapshot?: RuleQuotaSnapshot | null
 ): string => {
   if (!snapshot) return "-"
@@ -191,7 +193,7 @@ export const RuleEditPage: React.FC = () => {
   const { showToast } = useLogs()
 
   const [name, setName] = useState("")
-  const [protocol, setProtocol] = useState<Rule["protocol"]>("anthropic")
+  const [protocol, setProtocol] = useState<Provider["protocol"]>("anthropic")
   const [token, setToken] = useState("")
   const [showToken, setShowToken] = useState(false)
   const [apiAddress, setApiAddress] = useState("")
@@ -207,7 +209,7 @@ export const RuleEditPage: React.FC = () => {
   const [quotaAuthHeader, setQuotaAuthHeader] = useState("Authorization")
   const [quotaAuthScheme, setQuotaAuthScheme] = useState("Bearer")
   const [quotaHeadersText, setQuotaHeadersText] = useState("{}")
-  const [quotaUnitType, setQuotaUnitType] = useState<Rule["quota"]["unitType"]>("percentage")
+  const [quotaUnitType, setQuotaUnitType] = useState<Provider["quota"]["unitType"]>("percentage")
   const [quotaRemainingExpr, setQuotaRemainingExpr] = useState("")
   const [quotaUnitPath, setQuotaUnitPath] = useState("")
   const [quotaResetAtPath, setQuotaResetAtPath] = useState("")
@@ -215,6 +217,12 @@ export const RuleEditPage: React.FC = () => {
   const [quotaTestLoading, setQuotaTestLoading] = useState(false)
   const [quotaTestResult, setQuotaTestResult] = useState<RuleQuotaTestResult | null>(null)
   const [quotaTestFingerprint, setQuotaTestFingerprint] = useState<string | null>(null)
+  const [costEnabled, setCostEnabled] = useState(false)
+  const [inputPricePerM, setInputPricePerM] = useState("")
+  const [outputPricePerM, setOutputPricePerM] = useState("")
+  const [cacheInputPricePerM, setCacheInputPricePerM] = useState("")
+  const [cacheOutputPricePerM, setCacheOutputPricePerM] = useState("")
+  const [costCurrency, setCostCurrency] = useState("USD")
 
   const [loading, setLoading] = useState(true)
   const [errors, setErrors] = useState<{
@@ -228,9 +236,9 @@ export const RuleEditPage: React.FC = () => {
     quotaThreshold?: string
   }>({})
 
-  // Find the group and rule
+  // Find the group and provider
   const group = config?.groups.find(g => g.id === groupId)
-  const rule = group?.rules.find(r => r.id === ruleId)
+  const provider = group?.providers.find(item => item.id === ruleId)
   const quotaDraftFingerprint = JSON.stringify({
     token,
     name,
@@ -253,15 +261,15 @@ export const RuleEditPage: React.FC = () => {
     !!quotaTestResult && !!quotaTestFingerprint && quotaTestFingerprint !== quotaDraftFingerprint
 
   useEffect(() => {
-    if (rule) {
-      setName(rule.name)
-      setProtocol(rule.protocol)
-      setToken(rule.token)
-      setApiAddress(rule.apiAddress)
-      setDefaultModel(rule.defaultModel)
-      setModelMappings(rule.modelMappings || {})
+    if (provider) {
+      setName(provider.name)
+      setProtocol(provider.protocol)
+      setToken(provider.token)
+      setApiAddress(provider.apiAddress)
+      setDefaultModel(provider.defaultModel)
+      setModelMappings(provider.modelMappings || {})
 
-      const quota = rule.quota
+      const quota = provider.quota
       setQuotaEnabled(!!quota?.enabled)
       setQuotaProvider(quota?.provider || "custom")
       setQuotaEndpoint(quota?.endpoint || "")
@@ -276,6 +284,12 @@ export const RuleEditPage: React.FC = () => {
       setQuotaUnitPath(readMappingPath(quota?.response?.unit))
       setQuotaResetAtPath(readMappingPath(quota?.response?.resetAt))
       setQuotaLowThresholdPercent(String(quota?.lowThresholdPercent ?? 10))
+      setCostEnabled(!!provider.cost?.enabled)
+      setInputPricePerM(String(provider.cost?.inputPricePerM ?? ""))
+      setOutputPricePerM(String(provider.cost?.outputPricePerM ?? ""))
+      setCacheInputPricePerM(String(provider.cost?.cacheInputPricePerM ?? ""))
+      setCacheOutputPricePerM(String(provider.cost?.cacheOutputPricePerM ?? ""))
+      setCostCurrency(provider.cost?.currency || "USD")
 
       setLoading(false)
     } else if (config) {
@@ -283,7 +297,7 @@ export const RuleEditPage: React.FC = () => {
       showToast(t("toast.ruleNotFound"), "error")
       navigate("/")
     }
-  }, [rule, config, t, showToast, navigate])
+  }, [provider, config, t, showToast, navigate])
 
   useEffect(() => {
     if (quotaEnabled) return
@@ -444,7 +458,7 @@ export const RuleEditPage: React.FC = () => {
     try {
       const result = await ipc.testRuleQuotaDraft(
         groupId,
-        name.trim() || "Draft Rule",
+        name.trim() || "Draft Provider",
         token,
         apiAddress,
         defaultModel,
@@ -493,7 +507,7 @@ export const RuleEditPage: React.FC = () => {
         if (group.id === groupId) {
           return {
             ...group,
-            rules: group.rules.map(r =>
+            providers: group.providers.map(r =>
               r.id === ruleId
                 ? {
                     ...r,
@@ -508,6 +522,14 @@ export const RuleEditPage: React.FC = () => {
                         .filter(([key, value]) => key && value)
                     ),
                     quota: quotaConfig,
+                    cost: {
+                      enabled: costEnabled,
+                      inputPricePerM: Number(inputPricePerM || "0"),
+                      outputPricePerM: Number(outputPricePerM || "0"),
+                      cacheInputPricePerM: Number(cacheInputPricePerM || "0"),
+                      cacheOutputPricePerM: Number(cacheOutputPricePerM || "0"),
+                      currency: costCurrency.trim() || "USD",
+                    },
                   }
                 : r
             ),
@@ -556,7 +578,7 @@ export const RuleEditPage: React.FC = () => {
           <span className={styles.breadcrumbSeparator}>/</span>
           <span className={styles.breadcrumbItem}>{group?.name}</span>
           <span className={styles.breadcrumbSeparator}>/</span>
-          <span className={styles.breadcrumbItem}>{rule?.name}</span>
+          <span className={styles.breadcrumbItem}>{provider?.name}</span>
         </nav>
       </div>
 
@@ -877,7 +899,7 @@ export const RuleEditPage: React.FC = () => {
                         className={styles.nativeSelect}
                         value={quotaUnitType}
                         onChange={e =>
-                          setQuotaUnitType(e.target.value as Rule["quota"]["unitType"])
+                          setQuotaUnitType(e.target.value as Provider["quota"]["unitType"])
                         }
                       >
                         <option value="percentage">{t("ruleForm.quotaUnitTypePercentage")}</option>
@@ -1003,6 +1025,95 @@ export const RuleEditPage: React.FC = () => {
                       </div>
                     </div>
                   )}
+                </>
+              )}
+            </section>
+
+            <section className={styles.formSection}>
+              <h2 className={styles.sectionTitle}>{t("ruleForm.sectionCost")}</h2>
+              <div className={styles.switchRow}>
+                <div>
+                  <label htmlFor="cost-enabled">{t("ruleForm.costEnabled")}</label>
+                  <p className={styles.fieldHint}>{t("ruleForm.costEnabledHint")}</p>
+                </div>
+                <Switch id="cost-enabled" checked={costEnabled} onChange={setCostEnabled} />
+              </div>
+              {costEnabled && (
+                <>
+                  <div className={styles.formGroup}>
+                    <label htmlFor="cost-currency">{t("ruleForm.costCurrency")}</label>
+                    <select
+                      id="cost-currency"
+                      className={styles.nativeSelect}
+                      value={costCurrency}
+                      onChange={e => setCostCurrency(e.target.value)}
+                    >
+                      {!COST_CURRENCY_OPTIONS.includes(
+                        costCurrency as (typeof COST_CURRENCY_OPTIONS)[number]
+                      ) && <option value={costCurrency}>{costCurrency}</option>}
+                      {COST_CURRENCY_OPTIONS.map(currency => (
+                        <option key={currency} value={currency}>
+                          {currency}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.dualColumnRow}>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="cost-input">{t("ruleForm.costInputPerM")}</label>
+                      <Input
+                        id="cost-input"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.0001"
+                        value={inputPricePerM}
+                        onChange={e => setInputPricePerM(normalizeNumericInput(e.target.value))}
+                      />
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="cost-output">{t("ruleForm.costOutputPerM")}</label>
+                      <Input
+                        id="cost-output"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.0001"
+                        value={outputPricePerM}
+                        onChange={e => setOutputPricePerM(normalizeNumericInput(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                  <div className={styles.dualColumnRow}>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="cost-cache-input">{t("ruleForm.costCacheInputPerM")}</label>
+                      <Input
+                        id="cost-cache-input"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.0001"
+                        value={cacheInputPricePerM}
+                        onChange={e =>
+                          setCacheInputPricePerM(normalizeNumericInput(e.target.value))
+                        }
+                      />
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="cost-cache-output">{t("ruleForm.costCacheOutputPerM")}</label>
+                      <Input
+                        id="cost-cache-output"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.0001"
+                        value={cacheOutputPricePerM}
+                        onChange={e =>
+                          setCacheOutputPricePerM(normalizeNumericInput(e.target.value))
+                        }
+                      />
+                    </div>
+                  </div>
                 </>
               )}
             </section>

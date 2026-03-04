@@ -17,6 +17,16 @@ import type { Group, RuleCardStatsItem, RuleQuotaSnapshot } from "@/types"
 import { formatTokenMillions } from "@/utils/tokenFormat"
 import styles from "./ServicePage.module.css"
 
+function resolveCurrencyPrefix(currency?: string): string {
+  const normalized = currency?.trim().toUpperCase()
+  if (!normalized) return "$"
+  if (normalized === "USD") return "$"
+  if (normalized === "CNY" || normalized === "RMB") return "¥"
+  if (normalized === "EUR") return "€"
+  if (normalized === "JPY") return "¥"
+  return `${normalized} `
+}
+
 export interface ServicePageProps {
   groups: Group[]
   activeGroupId: string | null
@@ -81,24 +91,24 @@ export const GroupList: React.FC<{
  * Displays rules within a group
  */
 export const RuleList: React.FC<{
-  rules: Group["rules"]
-  activeRuleId: string | null
-  onSelect: (ruleId: string) => void
-  onActivate: (ruleId: string) => void | Promise<void>
-  activatingRuleId?: string | null
+  providers: Group["providers"]
+  activeProviderId: string | null
+  onSelect: (providerId: string) => void
+  onActivate: (providerId: string) => void | Promise<void>
+  activatingProviderId?: string | null
   quotaByRuleId?: Record<string, RuleQuotaSnapshot | undefined>
   quotaLoadingByRuleId?: Record<string, boolean | undefined>
   cardStatsByRuleId?: Record<string, RuleCardStatsItem | undefined>
-  onRefreshQuota?: (ruleId: string) => void | Promise<void>
-  onDelete: (ruleId: string) => void
+  onRefreshQuota?: (providerId: string) => void | Promise<void>
+  onDelete: (providerId: string) => void
   groupName: string
   groupId: string
 }> = ({
-  rules,
-  activeRuleId,
+  providers,
+  activeProviderId,
   onSelect,
   onActivate,
-  activatingRuleId,
+  activatingProviderId,
   quotaByRuleId,
   quotaLoadingByRuleId,
   cardStatsByRuleId,
@@ -110,12 +120,12 @@ export const RuleList: React.FC<{
   const { t } = useTranslation()
   const navigate = useNavigate()
 
-  const handleRuleClick = (ruleId: string) => {
-    navigate(`/groups/${groupId}/rules/${ruleId}/edit`)
+  const handleProviderClick = (providerId: string) => {
+    navigate(`/groups/${groupId}/providers/${providerId}/edit`)
   }
 
   const handleAddRuleClick = () => {
-    navigate(`/groups/${groupId}/rules/new`)
+    navigate(`/groups/${groupId}/providers/new`)
   }
 
   const formatQuotaValue = (value?: number | null) => {
@@ -176,8 +186,8 @@ export const RuleList: React.FC<{
     return `${yy}-${MM}-${dd} ${HH}:${mm}`
   }
 
-  const resolveQuotaBadge = (rule: Group["rules"][number]) => {
-    if (!rule.quota?.enabled) {
+  const resolveQuotaBadge = (provider: Group["providers"][number]) => {
+    if (!provider.quota?.enabled) {
       return {
         className: styles.quotaBadgeUnsupported,
         text: t("ruleQuota.unsupported"),
@@ -185,7 +195,7 @@ export const RuleList: React.FC<{
       }
     }
 
-    const snapshot = quotaByRuleId?.[rule.id]
+    const snapshot = quotaByRuleId?.[provider.id]
     if (!snapshot) {
       return {
         className: styles.quotaBadgeUnknown,
@@ -226,7 +236,7 @@ export const RuleList: React.FC<{
       }
     }
 
-    const rawUnitType = rule.quota?.unitType
+    const rawUnitType = provider.quota?.unitType
     const unitType =
       rawUnitType === "amount" || rawUnitType === "tokens" || rawUnitType === "percentage"
         ? rawUnitType
@@ -308,6 +318,15 @@ export const RuleList: React.FC<{
       return `${(value / 1_000_000).toFixed(2).replace(/\\.00$/, "")}M`
     }
     return Math.round(value).toLocaleString()
+  }
+
+  const formatCostConsumed = (value: number, currency?: string) => {
+    const safe = Number.isFinite(value) ? Math.max(0, value) : 0
+    const prefix = resolveCurrencyPrefix(currency)
+    if (safe === 0) return `${prefix}0.00`
+    if (safe < 0.0001) return `${prefix}<0.0001`
+    if (safe < 1) return `${prefix}${safe.toFixed(4)}`
+    return `${prefix}${safe.toFixed(2)}`
   }
 
   const renderRuleMiniChart = (stats?: RuleCardStatsItem) => {
@@ -439,7 +458,7 @@ export const RuleList: React.FC<{
       <div className={styles.ruleListHeader}>
         <div className={styles.ruleHeaderTitle}>
           <h3>{t("servicePage.ruleName")}</h3>
-          <span className={styles.countBadge}>{rules.length}</span>
+          <span className={styles.countBadge}>{providers.length}</span>
           <span className={styles.ruleGroupName} title={groupName}>
             {groupName}
           </span>
@@ -453,41 +472,41 @@ export const RuleList: React.FC<{
         />
       </div>
       <div className={styles.ruleListContent}>
-        {rules.length === 0 ? (
+        {providers.length === 0 ? (
           <p className={styles.emptyHint}>{t("servicePage.noRulesHint")}</p>
         ) : (
           <ul className={styles.ruleItems}>
-            {rules.map(rule => (
+            {providers.map(provider => (
               <li
-                key={rule.id}
-                className={`${styles.ruleItemContainer} ${rule.id === activeRuleId ? styles.ruleItemContainerActive : ""}`}
+                key={provider.id}
+                className={`${styles.ruleItemContainer} ${provider.id === activeProviderId ? styles.ruleItemContainerActive : ""}`}
               >
-                {rule.id === activeRuleId && (
+                {provider.id === activeProviderId && (
                   <span className={styles.enabledCornerBadge}>{t("servicePage.current")}</span>
                 )}
                 <div className={styles.ruleCardTop}>
                   <button
                     type="button"
-                    className={`${styles.ruleItem} ${rule.id === activeRuleId ? styles.active : ""}`}
+                    className={`${styles.ruleItem} ${provider.id === activeProviderId ? styles.active : ""}`}
                     onClick={() => {
-                      onSelect(rule.id)
-                      handleRuleClick(rule.id)
+                      onSelect(provider.id)
+                      handleProviderClick(provider.id)
                     }}
                   >
                     <div className={styles.ruleMainLine}>
-                      <span className={styles.ruleModel}>{rule.name}</span>
+                      <span className={styles.ruleModel}>{provider.name}</span>
                     </div>
                   </button>
                   <div className={styles.ruleHeaderRight}>
                     <div className={styles.ruleActionButtons}>
-                      {rule.id !== activeRuleId && (
+                      {provider.id !== activeProviderId && (
                         <button
                           type="button"
                           className={styles.activateIconButton}
-                          onClick={() => onActivate(rule.id)}
+                          onClick={() => onActivate(provider.id)}
                           title={t("servicePage.activateRule")}
-                          aria-label={`${t("servicePage.activateRule")}: ${rule.name}`}
-                          disabled={activatingRuleId === rule.id}
+                          aria-label={`${t("servicePage.activateRule")}: ${provider.name}`}
+                          disabled={activatingProviderId === provider.id}
                         >
                           <Play size={13} />
                         </button>
@@ -495,43 +514,43 @@ export const RuleList: React.FC<{
                       <button
                         type="button"
                         className={styles.editButton}
-                        onClick={() => handleRuleClick(rule.id)}
+                        onClick={() => handleProviderClick(provider.id)}
                         title={t("servicePage.editRule")}
-                        aria-label={`${t("servicePage.editRule")}: ${rule.name}`}
+                        aria-label={`${t("servicePage.editRule")}: ${provider.name}`}
                       >
                         <Pencil size={14} />
                       </button>
                       <button
                         type="button"
                         className={styles.deleteButton}
-                        onClick={() => onDelete(rule.id)}
+                        onClick={() => onDelete(provider.id)}
                         title={t("servicePage.deleteRule")}
-                        aria-label={`${t("servicePage.deleteRule")}: ${rule.name}`}
+                        aria-label={`${t("servicePage.deleteRule")}: ${provider.name}`}
                       >
                         <Trash2 size={14} />
                       </button>
                     </div>
                     <span className={styles.ruleDirection}>
-                      {t(`ruleProtocol.${rule.protocol}`)}
+                      {t(`ruleProtocol.${provider.protocol}`)}
                     </span>
                   </div>
                 </div>
                 {(() => {
-                  const badge = resolveQuotaBadge(rule)
-                  const cardStats = cardStatsByRuleId?.[rule.id]
+                  const badge = resolveQuotaBadge(provider)
+                  const cardStats = cardStatsByRuleId?.[provider.id]
                   return (
                     <div className={styles.ruleCardBottom}>
                       <div className={styles.ruleMetaLeft}>
-                        {rule.quota?.enabled && (
+                        {provider.quota?.enabled && (
                           <button
                             type="button"
                             className={styles.quotaRefreshButton}
-                            onClick={() => onRefreshQuota?.(rule.id)}
+                            onClick={() => onRefreshQuota?.(provider.id)}
                             title={t("ruleQuota.refresh")}
-                            aria-label={`${t("ruleQuota.refresh")}: ${rule.name}`}
-                            disabled={Boolean(quotaLoadingByRuleId?.[rule.id])}
+                            aria-label={`${t("ruleQuota.refresh")}: ${provider.name}`}
+                            disabled={Boolean(quotaLoadingByRuleId?.[provider.id])}
                           >
-                            {quotaLoadingByRuleId?.[rule.id] ? (
+                            {quotaLoadingByRuleId?.[provider.id] ? (
                               <Loader2 size={14} className={styles.spinner} />
                             ) : (
                               <RefreshCw size={14} />
@@ -554,6 +573,16 @@ export const RuleList: React.FC<{
                       </div>
                       <div className={styles.ruleTrendWrap}>
                         <div className={styles.ruleTrendInlineMeta}>
+                          {provider.cost?.enabled && (
+                            <span>
+                              {t("servicePage.miniCostConsumed", {
+                                value: formatCostConsumed(
+                                  cardStats?.totalCost ?? 0,
+                                  provider.cost?.currency || "USD"
+                                ),
+                              })}
+                            </span>
+                          )}
                           <span>
                             {t("servicePage.miniRequests")}:{" "}
                             {formatCompactRequest(cardStats?.requests ?? 0)}

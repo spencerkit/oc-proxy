@@ -154,6 +154,38 @@ pub fn default_rule_quota_config() -> RuleQuotaConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuleCostConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub input_price_per_m: f64,
+    #[serde(default)]
+    pub output_price_per_m: f64,
+    #[serde(default)]
+    pub cache_input_price_per_m: f64,
+    #[serde(default)]
+    pub cache_output_price_per_m: f64,
+    #[serde(default = "default_cost_currency")]
+    pub currency: String,
+}
+
+pub fn default_cost_currency() -> String {
+    "USD".to_string()
+}
+
+pub fn default_rule_cost_config() -> RuleCostConfig {
+    RuleCostConfig {
+        enabled: false,
+        input_price_per_m: 0.0,
+        output_price_per_m: 0.0,
+        cache_input_price_per_m: 0.0,
+        cache_output_price_per_m: 0.0,
+        currency: default_cost_currency(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Rule {
     pub id: String,
     pub name: String,
@@ -165,6 +197,8 @@ pub struct Rule {
     pub model_mappings: HashMap<String, String>,
     #[serde(default = "default_rule_quota_config")]
     pub quota: RuleQuotaConfig,
+    #[serde(default = "default_rule_cost_config")]
+    pub cost: RuleCostConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,9 +208,10 @@ pub struct Group {
     pub name: String,
     #[serde(default)]
     pub models: Vec<String>,
-    pub active_rule_id: Option<String>,
-    #[serde(default)]
-    pub rules: Vec<Rule>,
+    #[serde(rename = "activeRuleId", alias = "activeProviderId")]
+    pub active_provider_id: Option<String>,
+    #[serde(default, rename = "rules", alias = "providers")]
+    pub providers: Vec<Rule>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,6 +262,18 @@ pub struct TokenUsage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostSnapshot {
+    pub enabled: bool,
+    pub currency: String,
+    pub input_price_per_m: f64,
+    pub output_price_per_m: f64,
+    pub cache_input_price_per_m: f64,
+    pub cache_output_price_per_m: f64,
+    pub total_cost: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntryError {
     pub message: String,
     pub code: String,
@@ -260,6 +307,7 @@ pub struct LogEntry {
     pub forward_request_body: Option<serde_json::Value>,
     pub response_body: Option<serde_json::Value>,
     pub token_usage: Option<TokenUsage>,
+    pub cost_snapshot: Option<CostSnapshot>,
     pub http_status: Option<u16>,
     pub upstream_status: Option<u16>,
     pub duration_ms: u64,
@@ -321,6 +369,10 @@ pub struct HourlyStatsPoint {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    pub total_duration_ms: u64,
+    pub total_cost: f64,
+    pub input_tps: f64,
+    pub output_tps: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -336,12 +388,12 @@ pub struct StatsSummaryResult {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
-    pub rpm: f64,
-    pub input_tpm: f64,
-    pub output_tpm: f64,
-    pub peak_rpm: f64,
-    pub peak_input_tpm: f64,
-    pub peak_output_tpm: f64,
+    pub total_cost: f64,
+    pub cost_currency: Option<String>,
+    pub input_tps: f64,
+    pub output_tps: f64,
+    pub peak_input_tps: f64,
+    pub peak_output_tps: f64,
     pub comparison: Option<ComparisonSummary>,
     pub breakdowns: Option<StatsBreakdowns>,
     pub hourly: Vec<HourlyStatsPoint>,
@@ -353,9 +405,9 @@ pub struct StatsSummaryResult {
 pub struct ComparisonSummary {
     pub requests_delta_pct: f64,
     pub errors_delta_pct: f64,
-    pub rpm_delta_pct: f64,
-    pub input_tpm_delta_pct: f64,
-    pub output_tpm_delta_pct: f64,
+    pub total_cost_delta_pct: f64,
+    pub input_tps_delta_pct: f64,
+    pub output_tps_delta_pct: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -421,6 +473,7 @@ pub struct RuleCardStatsItem {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub tokens: u64,
+    pub total_cost: f64,
     pub hourly: Vec<RuleCardHourlyPoint>,
 }
 

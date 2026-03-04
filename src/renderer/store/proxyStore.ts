@@ -85,6 +85,68 @@ const STATUS_POLL_INTERVAL = 3000
 const LOGS_POLL_INTERVAL = 3000
 const MAX_LOGS = 100
 const quotaKey = (groupId: string, ruleId: string) => `${groupId}:${ruleId}`
+const ACTIVE_GROUP_STORAGE_KEY = "ai-open-router.activeGroupId"
+
+const readPersistedActiveGroupId = (): string | null => {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_GROUP_STORAGE_KEY)
+    const value = raw?.trim()
+    return value ? value : null
+  } catch {
+    return null
+  }
+}
+
+const persistActiveGroupId = (groupId: string | null) => {
+  if (typeof window === "undefined") return
+  try {
+    if (groupId?.trim()) {
+      window.localStorage.setItem(ACTIVE_GROUP_STORAGE_KEY, groupId)
+      return
+    }
+    window.localStorage.removeItem(ACTIVE_GROUP_STORAGE_KEY)
+  } catch {}
+}
+
+function normalizeGroup(group: Partial<Group> & Pick<Group, "id" | "name">): Group {
+  const providers = group.providers ?? group.rules ?? []
+  const activeProviderId = group.activeProviderId ?? group.activeRuleId ?? null
+  return {
+    ...group,
+    providers,
+    activeProviderId,
+    rules: providers,
+    activeRuleId: activeProviderId,
+    models: group.models ?? [],
+  }
+}
+
+function normalizeConfig(config: ProxyConfig): ProxyConfig {
+  return {
+    ...config,
+    groups: (config.groups ?? []).map(group =>
+      normalizeGroup(group as Partial<Group> & Pick<Group, "id" | "name">)
+    ),
+  }
+}
+
+function buildSaveConfigPayload(config: ProxyConfig): ProxyConfig {
+  return {
+    ...config,
+    groups: (config.groups ?? []).map(group => {
+      const providers = group.providers ?? group.rules ?? []
+      const activeProviderId = group.activeProviderId ?? group.activeRuleId ?? null
+      return {
+        id: group.id,
+        name: group.name,
+        models: group.models ?? [],
+        providers,
+        activeProviderId,
+      } as Group
+    }),
+  }
+}
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -114,7 +176,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   ruleQuotas: {},
   ruleCardStatsByRuleKey: {},
   quotaLoadingRuleKeys: {},
-  activeGroupId: null,
+  activeGroupId: readPersistedActiveGroupId(),
   loading: false,
   error: null,
   statusIntervalId: null,
@@ -131,11 +193,12 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
 
       console.log("[Store] Fetching config and status...")
       // Fetch initial config and status in parallel
-      const [config, status, logsStats] = await Promise.all([
+      const [rawConfig, status, logsStats] = await Promise.all([
         ipc.getConfig(),
         ipc.getStatus(),
         ipc.getLogsStatsSummary(undefined, undefined, undefined, "rule", false),
       ])
+      const config = normalizeConfig(rawConfig)
 
       console.log("[Store] Config received:", config)
       console.log("[Store] Status received:", status)
@@ -220,10 +283,10 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
     try {
       set({ loading: true, error: null })
 
-      const result = await ipc.saveConfig(config)
+      const result = await ipc.saveConfig(buildSaveConfigPayload(normalizeConfig(config)))
 
       set({
-        config: result.config,
+        config: normalizeConfig(result.config),
         status: result.status,
         loading: false,
       })
@@ -289,7 +352,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
 
       if (!result.canceled && result.config && result.status) {
         set({
-          config: result.config,
+          config: normalizeConfig(result.config),
           status: result.status,
           loading: false,
         })
@@ -318,7 +381,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
 
       if (!result.canceled && result.config && result.status) {
         set({
-          config: result.config,
+          config: normalizeConfig(result.config),
           status: result.status,
           loading: false,
         })
@@ -360,7 +423,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
       const result = await ipc.remoteRulesPull(force)
       if (result.config && result.status) {
         set({
-          config: result.config,
+          config: normalizeConfig(result.config),
           status: result.status,
         })
       }
@@ -390,6 +453,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    * Set the active group ID
    */
   setActiveGroupId: (groupId: string | null) => {
+    persistActiveGroupId(groupId)
     set({ activeGroupId: groupId })
   },
 

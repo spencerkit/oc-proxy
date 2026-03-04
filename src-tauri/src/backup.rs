@@ -46,7 +46,7 @@ mod tests {
     use super::{
         backup_default_file_name, create_groups_backup_payload, extract_groups_from_import_payload,
     };
-    use crate::models::{default_rule_quota_config, Group, Rule, RuleProtocol};
+    use crate::models::{default_rule_cost_config, default_rule_quota_config, Group, Rule, RuleProtocol};
     use chrono::DateTime;
     use serde_json::json;
     use std::collections::HashMap;
@@ -56,8 +56,8 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             models: vec![],
-            active_rule_id: None,
-            rules: vec![Rule {
+            active_provider_id: None,
+            providers: vec![Rule {
                 id: "r1".to_string(),
                 name: "rule-1".to_string(),
                 protocol: RuleProtocol::Anthropic,
@@ -66,6 +66,7 @@ mod tests {
                 default_model: "claude-3-7-sonnet".to_string(),
                 model_mappings: HashMap::new(),
                 quota: default_rule_quota_config(),
+                cost: default_rule_cost_config(),
             }],
         }
     }

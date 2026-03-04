@@ -135,7 +135,7 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
         .map_err(|e| format!("invalid config structure: {e}"))?;
 
     let groups = if let Some(raw_groups) = partial.groups {
-        serde_json::from_value(raw_groups).unwrap_or_default()
+        serde_json::from_value(raw_groups).map_err(|e| format!("invalid groups structure: {e}"))?
     } else {
         defaults.groups
     };

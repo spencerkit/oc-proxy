@@ -234,6 +234,7 @@ npm run ci
 ```
 
 发布流程请参考：`docs/release-process.md`
+数据库与本地持久化说明请参考：`docs/dev-database.md`
 
 ## 调试指南
 
@@ -301,7 +302,11 @@ npm run tauri:collect
 
 ## 配置与持久化
 
-首次启动会在应用数据目录生成 `config.json`。
+首次启动会在应用数据目录生成以下文件：
+
+- `config.json`：基础配置
+- `providers.sqlite`：分组与 Provider（原规则）配置
+- `request-stats.sqlite`：请求统计事件数据
 
 核心配置：
 - `server`：host、port、本地 Bearer 鉴权
@@ -309,12 +314,12 @@ npm run tauri:collect
 - `logging`：请求体记录与脱敏规则
 - `ui`：主题、语言、启动与托盘行为
 - `remoteGit`：远程同步配置
-- `groups[]`：id/name/models/rules/activeRuleId
+- `groups[]`：运行态存在；持久化以 `providers.sqlite` 为准
 
 数据行为：
 - 请求日志列表在内存中保存（默认最多 100 条）
-- 聚合统计持久化到应用数据目录（`request-stats.json`）
-- 统计保留周期为 90 天
+- 聚合统计基于 `request-stats.sqlite` 事件数据实时汇总
+- 统计数据当前默认持续保留（无自动过期清理）
 - 导入备份会覆盖当前全部分组与规则
 
 ## 安全说明

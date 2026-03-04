@@ -4,22 +4,34 @@
 
 use crate::config::migrator::migrate_config;
 use crate::config::schema::normalize_config;
-use crate::models::{default_config, validate_config, ProxyConfig};
+use crate::models::{default_config, validate_config, Group, ProxyConfig};
+use chrono::Utc;
+use rusqlite::{params, Connection};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 #[derive(Clone)]
 pub struct ConfigStore {
     file_path: PathBuf,
+    groups_db_path: PathBuf,
+    groups_db: Arc<Mutex<Connection>>,
     config: Arc<RwLock<ProxyConfig>>,
     revision: Arc<AtomicU64>,
 }
 
 impl ConfigStore {
     pub fn new(file_path: PathBuf) -> Self {
+        let groups_db_path = file_path.with_file_name("providers.sqlite");
+        let groups_db = Connection::open(&groups_db_path).unwrap_or_else(|_| {
+            Connection::open_in_memory()
+                .expect("open in-memory sqlite connection for config should not fail")
+        });
         Self {
             file_path,
+            groups_db_path,
+            groups_db: Arc::new(Mutex::new(groups_db)),
             config: Arc::new(RwLock::new(default_config())),
             revision: Arc::new(AtomicU64::new(0)),
         }
@@ -30,9 +42,16 @@ impl ConfigStore {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("create config dir failed: {e}"))?;
         }
+        if let Some(parent) = self.groups_db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create groups db dir failed: {e}"))?;
+        }
+        self.reopen_groups_db()?;
+        self.initialize_groups_db()?;
 
         if !self.file_path.exists() {
             let defaults = default_config();
+            self.save_groups_to_db(&defaults.groups)?;
             self.write_file(&defaults)?;
             self.set_in_memory(defaults);
             return Ok(());
@@ -44,10 +63,17 @@ impl ConfigStore {
         let parsed = serde_json::from_str::<serde_json::Value>(&raw)
             .unwrap_or_else(|_| serde_json::json!({}));
         let migrated = migrate_config(parsed)?;
-        let normalized = normalize_config(migrated)?;
+        let mut normalized = normalize_config(migrated)?;
+        let groups_from_db = self.load_groups_from_db()?;
+        if groups_from_db.is_empty() {
+            self.save_groups_to_db(&normalized.groups)?;
+        } else {
+            normalized.groups = groups_from_db;
+        }
 
         if let Err(err) = validate_config(&normalized) {
             let defaults = default_config();
+            self.save_groups_to_db(&defaults.groups)?;
             self.write_file(&defaults)?;
             self.set_in_memory(defaults);
             return Err(format!("config invalid, reset to default: {err}"));
@@ -66,6 +92,7 @@ impl ConfigStore {
         let migrated = migrate_config(next_config)?;
         let normalized = normalize_config(migrated)?;
         validate_config(&normalized)?;
+        self.save_groups_to_db(&normalized.groups)?;
         self.write_file(&normalized)?;
         self.set_in_memory(normalized.clone());
         Ok(normalized)
@@ -73,15 +100,114 @@ impl ConfigStore {
 
     pub fn save_config(&self, next_config: ProxyConfig) -> Result<ProxyConfig, String> {
         validate_config(&next_config)?;
+        self.save_groups_to_db(&next_config.groups)?;
         self.write_file(&next_config)?;
         self.set_in_memory(next_config.clone());
         Ok(next_config)
     }
 
     fn write_file(&self, cfg: &ProxyConfig) -> Result<(), String> {
-        let text = serde_json::to_string_pretty(cfg)
+        let mut storage_cfg = cfg.clone();
+        storage_cfg.groups = vec![];
+        let text = serde_json::to_string_pretty(&storage_cfg)
             .map_err(|e| format!("serialize config failed: {e}"))?;
         std::fs::write(&self.file_path, text).map_err(|e| format!("write config failed: {e}"))
+    }
+
+    fn initialize_groups_db(&self) -> Result<(), String> {
+        let conn = self
+            .groups_db
+            .lock()
+            .map_err(|_| "groups db lock poisoned".to_string())?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS group_records (
+                group_id TEXT PRIMARY KEY,
+                group_name TEXT NOT NULL,
+                models_json TEXT NOT NULL,
+                active_provider_id TEXT,
+                provider_ids_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS provider_records (
+                group_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                provider_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (group_id, provider_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_provider_records_group_id ON provider_records(group_id);",
+        )
+        .map_err(|e| format!("create groups db schema failed: {e}"))?;
+        Ok(())
+    }
+
+    fn reopen_groups_db(&self) -> Result<(), String> {
+        let next_conn = Connection::open(&self.groups_db_path)
+            .map_err(|e| format!("open groups db failed: {e}"))?;
+        let mut conn = self
+            .groups_db
+            .lock()
+            .map_err(|_| "groups db lock poisoned".to_string())?;
+        *conn = next_conn;
+        Ok(())
+    }
+
+    fn load_groups_from_db(&self) -> Result<Vec<Group>, String> {
+        let conn = self
+            .groups_db
+            .lock()
+            .map_err(|_| "groups db lock poisoned".to_string())?;
+        load_groups_from_relational_tables(&conn)
+    }
+
+    fn save_groups_to_db(&self, groups: &[Group]) -> Result<(), String> {
+        let mut conn = self
+            .groups_db
+            .lock()
+            .map_err(|_| "groups db lock poisoned".to_string())?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("begin groups transaction failed: {e}"))?;
+        tx.execute("DELETE FROM group_records", [])
+            .map_err(|e| format!("clear group_records failed: {e}"))?;
+        tx.execute("DELETE FROM provider_records", [])
+            .map_err(|e| format!("clear provider_records failed: {e}"))?;
+
+        let now = Utc::now().timestamp_millis();
+        for group in groups {
+            let models_json = serde_json::to_string(&group.models)
+                .map_err(|e| format!("serialize group models failed: {e}"))?;
+            let provider_ids: Vec<String> = group.providers.iter().map(|provider| provider.id.clone()).collect();
+            let provider_ids_json = serde_json::to_string(&provider_ids)
+                .map_err(|e| format!("serialize provider ids failed: {e}"))?;
+            tx.execute(
+                "INSERT INTO group_records(group_id, group_name, models_json, active_provider_id, provider_ids_json, updated_at)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    group.id,
+                    group.name,
+                    models_json,
+                    group.active_provider_id,
+                    provider_ids_json,
+                    now
+                ],
+            )
+            .map_err(|e| format!("insert group record failed: {e}"))?;
+
+            for provider in &group.providers {
+                let provider_json = serde_json::to_string(provider)
+                    .map_err(|e| format!("serialize provider failed: {e}"))?;
+                tx.execute(
+                    "INSERT INTO provider_records(group_id, provider_id, provider_json, updated_at)
+                     VALUES(?1, ?2, ?3, ?4)",
+                    params![group.id, provider.id, provider_json, now],
+                )
+                .map_err(|e| format!("insert provider record failed: {e}"))?;
+            }
+        }
+        tx.commit()
+            .map_err(|e| format!("commit groups transaction failed: {e}"))?;
+        Ok(())
     }
 
     fn set_in_memory(&self, cfg: ProxyConfig) {
@@ -101,5 +227,170 @@ impl ConfigStore {
 
     pub fn shared_revision(&self) -> Arc<AtomicU64> {
         self.revision.clone()
+    }
+}
+
+fn load_groups_from_relational_tables(conn: &Connection) -> Result<Vec<Group>, String> {
+    let mut provider_stmt = conn
+        .prepare("SELECT group_id, provider_id, provider_json FROM provider_records")
+        .map_err(|e| format!("prepare provider_records query failed: {e}"))?;
+    let provider_rows = provider_stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("query provider_records failed: {e}"))?;
+    let mut provider_map: HashMap<(String, String), crate::domain::entities::Rule> = HashMap::new();
+    for row in provider_rows {
+        let (group_id, provider_id, raw_json) =
+            row.map_err(|e| format!("read provider_records row failed: {e}"))?;
+        let provider = serde_json::from_str::<crate::domain::entities::Rule>(&raw_json)
+            .map_err(|e| format!("parse provider_json failed: {e}"))?;
+        provider_map.insert((group_id, provider_id), provider);
+    }
+
+    let mut group_stmt = conn
+        .prepare(
+            "SELECT group_id, group_name, models_json, active_provider_id, provider_ids_json
+             FROM group_records
+             ORDER BY rowid ASC",
+        )
+        .map_err(|e| format!("prepare group_records query failed: {e}"))?;
+    let group_rows = group_stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(|e| format!("query group_records failed: {e}"))?;
+
+    let mut groups = Vec::new();
+    for row in group_rows {
+        let (group_id, group_name, models_json, active_provider_id, provider_ids_json) =
+            row.map_err(|e| format!("read group_records row failed: {e}"))?;
+        let models = serde_json::from_str::<Vec<String>>(&models_json)
+            .map_err(|e| format!("parse models_json failed: {e}"))?;
+        let provider_ids = serde_json::from_str::<Vec<String>>(&provider_ids_json)
+            .map_err(|e| format!("parse provider_ids_json failed: {e}"))?;
+        let mut providers = Vec::new();
+        for provider_id in provider_ids {
+            if let Some(provider) = provider_map.get(&(group_id.clone(), provider_id.clone())) {
+                providers.push(provider.clone());
+            }
+        }
+        groups.push(Group {
+            id: group_id,
+            name: group_name,
+            models,
+            active_provider_id,
+            providers,
+        });
+    }
+    Ok(groups)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::entities::{default_rule_cost_config, default_rule_quota_config, Rule, RuleProtocol};
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    fn sample_group() -> Group {
+        Group {
+            id: "group-1".to_string(),
+            name: "group-1".to_string(),
+            models: vec!["gpt-4o-mini".to_string()],
+            active_provider_id: Some("provider-1".to_string()),
+            providers: vec![Rule {
+                id: "provider-1".to_string(),
+                name: "provider-1".to_string(),
+                protocol: RuleProtocol::Openai,
+                token: "test-token".to_string(),
+                api_address: "https://api.openai.com".to_string(),
+                default_model: "gpt-4o-mini".to_string(),
+                model_mappings: HashMap::new(),
+                quota: default_rule_quota_config(),
+                cost: default_rule_cost_config(),
+            }],
+        }
+    }
+
+    #[test]
+    fn initialize_imports_groups_from_config_file_into_sqlite() {
+        let temp_dir = std::env::temp_dir().join(format!("config-store-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let config_path = temp_dir.join("config.json");
+        let db_path = temp_dir.join("providers.sqlite");
+
+        let mut cfg = default_config();
+        cfg.groups = vec![sample_group()];
+        let raw = serde_json::to_string_pretty(&cfg).expect("serialize config");
+        std::fs::write(&config_path, raw).expect("write config");
+
+        let store = ConfigStore::new(config_path.clone());
+        store.initialize().expect("initialize config store");
+
+        let in_memory = store.get();
+        assert_eq!(in_memory.groups.len(), 1);
+        assert_eq!(in_memory.groups[0].providers.len(), 1);
+
+        let config_raw = std::fs::read_to_string(&config_path).expect("read config");
+        let config_json: serde_json::Value =
+            serde_json::from_str(&config_raw).expect("parse config json");
+        assert_eq!(
+            config_json.get("groups"),
+            Some(&serde_json::Value::Array(vec![]))
+        );
+
+        let conn = Connection::open(&db_path).expect("open providers sqlite");
+        let persisted_ids: String = conn
+            .query_row(
+                "SELECT provider_ids_json FROM group_records WHERE group_id = 'group-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query provider_ids_json");
+        let ids: Vec<String> = serde_json::from_str(&persisted_ids).expect("decode provider ids");
+        assert_eq!(ids, vec!["provider-1".to_string()]);
+        let provider_json: String = conn
+            .query_row(
+                "SELECT provider_json FROM provider_records WHERE group_id = 'group-1' AND provider_id = 'provider-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query provider json");
+        let provider: crate::domain::entities::Rule =
+            serde_json::from_str(&provider_json).expect("decode provider");
+        assert_eq!(provider.id, "provider-1");
+    }
+
+    #[test]
+    fn initialize_loads_groups_from_sqlite_when_config_groups_empty() {
+        let temp_dir = std::env::temp_dir().join(format!("config-store-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let config_path = temp_dir.join("config.json");
+
+        let mut cfg = default_config();
+        cfg.groups = vec![sample_group()];
+        let raw = serde_json::to_string_pretty(&cfg).expect("serialize config");
+        std::fs::write(&config_path, raw).expect("write config");
+
+        let first_store = ConfigStore::new(config_path.clone());
+        first_store.initialize().expect("first initialize");
+
+        let second_store = ConfigStore::new(config_path.clone());
+        second_store.initialize().expect("second initialize");
+        let loaded = second_store.get();
+        assert_eq!(loaded.groups.len(), 1);
+        assert_eq!(loaded.groups[0].id, "group-1");
+        assert_eq!(loaded.groups[0].providers[0].id, "provider-1");
     }
 }

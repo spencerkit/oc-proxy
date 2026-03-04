@@ -275,7 +275,7 @@ mod tests {
     use super::{
         MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS, NON_STREAM_REQUEST_TIMEOUT_MS,
     };
-    use crate::models::{default_rule_quota_config, Group, Rule, RuleProtocol};
+    use crate::models::{default_rule_cost_config, default_rule_quota_config, Group, Rule, RuleProtocol};
     use serde_json::{json, Value};
     use std::collections::HashMap;
 
@@ -312,7 +312,7 @@ mod tests {
         });
 
         let usage = extract_token_usage(&payload).expect("usage should exist");
-        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.input_tokens, 70);
         assert_eq!(usage.output_tokens, 20);
         assert_eq!(usage.cache_read_tokens, 30);
         assert_eq!(usage.cache_write_tokens, 5);
@@ -389,13 +389,14 @@ mod tests {
             default_model: "fallback".to_string(),
             model_mappings: mappings,
             quota: default_rule_quota_config(),
+            cost: default_rule_cost_config(),
         };
         let group = Group {
             id: "g1".to_string(),
             name: "Group".to_string(),
             models: vec!["m1".to_string()],
-            active_rule_id: Some("r1".to_string()),
-            rules: vec![rule.clone()],
+            active_provider_id: Some("r1".to_string()),
+            providers: vec![rule.clone()],
         };
 
         let model = resolve_target_model(&rule, &group.models, &json!({ "model": "m1" }));
@@ -413,13 +414,14 @@ mod tests {
             default_model: "fallback".to_string(),
             model_mappings: HashMap::new(),
             quota: default_rule_quota_config(),
+            cost: default_rule_cost_config(),
         };
         let group = Group {
             id: "g1".to_string(),
             name: "Group".to_string(),
             models: vec!["m1".to_string()],
-            active_rule_id: Some("r1".to_string()),
-            rules: vec![rule.clone()],
+            active_provider_id: Some("r1".to_string()),
+            providers: vec![rule.clone()],
         };
 
         let model = resolve_target_model(&rule, &group.models, &json!({ "model": "unknown" }));

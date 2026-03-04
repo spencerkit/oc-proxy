@@ -86,7 +86,7 @@ pub async fn fetch_rule_quota(
         .find(|g| g.id == group_id)
         .ok_or_else(|| format!("group not found: {group_id}"))?;
     let rule = group
-        .rules
+        .providers
         .iter()
         .find(|r| r.id == rule_id)
         .ok_or_else(|| format!("rule not found: {rule_id}"))?;
@@ -104,11 +104,11 @@ pub async fn fetch_group_quotas(
         .find(|g| g.id == group_id)
         .ok_or_else(|| format!("group not found: {group_id}"))?;
 
-    let Some(active_rule_id) = group.active_rule_id.as_deref() else {
+    let Some(active_rule_id) = group.active_provider_id.as_deref() else {
         return Ok(Vec::new());
     };
 
-    let Some(active_rule) = group.rules.iter().find(|r| r.id == active_rule_id) else {
+    let Some(active_rule) = group.providers.iter().find(|r| r.id == active_rule_id) else {
         return Ok(Vec::new());
     };
 

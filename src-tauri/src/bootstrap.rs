@@ -117,7 +117,7 @@ pub fn setup_app(app: &mut App, app_name: &str, app_version: &str) -> Result<(),
             None
         },
     );
-    let stats_path = app_data_dir.join("request-stats.json");
+    let stats_path = app_data_dir.join("request-stats.sqlite");
     let stats_store = StatsStore::new(stats_path);
     let _ = stats_store.initialize();
     let runtime = ProxyRuntime::new(

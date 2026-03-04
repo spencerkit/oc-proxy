@@ -82,14 +82,14 @@ export const GroupEditPage: React.FC = () => {
           ...item,
           name: name.trim(),
           models: nextModels,
-          rules: item.rules.map(rule => {
+          providers: item.providers.map(provider => {
             const nextMappings: Record<string, string> = {}
-            for (const [key, mapped] of Object.entries(rule.modelMappings || {})) {
+            for (const [key, mapped] of Object.entries(provider.modelMappings || {})) {
               if (!modelSet.has(key)) continue
               nextMappings[key] = mapped
             }
             return {
-              ...rule,
+              ...provider,
               modelMappings: nextMappings,
             }
           }),

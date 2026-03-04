@@ -459,7 +459,8 @@ fn extract_json_path<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
 mod tests {
     use super::{evaluate_expression, extract_json_path, parse_quota_payload};
     use crate::models::{
-        default_quota_low_threshold_percent, default_rule_quota_config, QuotaStatus, QuotaUnitType,
+        default_quota_low_threshold_percent, default_rule_cost_config, default_rule_quota_config,
+        QuotaStatus, QuotaUnitType,
         RuleQuotaResponseMapping,
     };
     use crate::models::{Rule, RuleProtocol};
@@ -483,6 +484,7 @@ mod tests {
             default_model: "gpt-4.1".to_string(),
             model_mappings: HashMap::new(),
             quota,
+            cost: default_rule_cost_config(),
         }
     }
 

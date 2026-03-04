@@ -5,7 +5,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import { Button, Input, JsonTreeView, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { useProxyStore } from "@/store"
-import type { ProxyConfig, Rule, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
+import type { Provider, ProxyConfig, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
 import { ipc } from "@/utils/ipc"
 import styles from "./RuleCreatePage.module.css"
 
@@ -51,6 +51,8 @@ const normalizeNumericInput = (raw: string) => {
   return `${normalized.slice(0, firstDot + 1)}${normalized.slice(firstDot + 1).replace(/\./g, "")}`
 }
 
+const COST_CURRENCY_OPTIONS = ["USD", "CNY", "EUR", "JPY", "HKD", "GBP", "SGD"] as const
+
 const buildQuotaConfig = ({
   enabled,
   provider,
@@ -76,12 +78,12 @@ const buildQuotaConfig = ({
   authHeader: string
   authScheme: string
   customHeaders: Record<string, string>
-  unitType: Rule["quota"]["unitType"]
+  unitType: Provider["quota"]["unitType"]
   lowThresholdPercent: number
   remainingExpr: string
   unitPath: string
   resetAtPath: string
-}): Rule["quota"] => ({
+}): Provider["quota"] => ({
   enabled,
   provider: provider.trim() || "custom",
   endpoint: endpoint.trim(),
@@ -130,7 +132,7 @@ const formatTokenQuotaValue = (value?: number | null): string => {
 }
 
 const formatQuotaPreviewByUnitType = (
-  unitType: Rule["quota"]["unitType"],
+  unitType: Provider["quota"]["unitType"],
   snapshot?: RuleQuotaSnapshot | null
 ): string => {
   if (!snapshot) return "-"
@@ -166,7 +168,7 @@ export const RuleCreatePage: React.FC = () => {
   const { showToast } = useLogs()
 
   const [name, setName] = useState("")
-  const [protocol, setProtocol] = useState<Rule["protocol"]>("anthropic")
+  const [protocol, setProtocol] = useState<Provider["protocol"]>("anthropic")
   const [token, setToken] = useState("")
   const [showToken, setShowToken] = useState(false)
   const [apiAddress, setApiAddress] = useState("")
@@ -182,7 +184,7 @@ export const RuleCreatePage: React.FC = () => {
   const [quotaAuthHeader, setQuotaAuthHeader] = useState("Authorization")
   const [quotaAuthScheme, setQuotaAuthScheme] = useState("Bearer")
   const [quotaHeadersText, setQuotaHeadersText] = useState("{}")
-  const [quotaUnitType, setQuotaUnitType] = useState<Rule["quota"]["unitType"]>("percentage")
+  const [quotaUnitType, setQuotaUnitType] = useState<Provider["quota"]["unitType"]>("percentage")
   const [quotaRemainingExpr, setQuotaRemainingExpr] = useState("")
   const quotaUnitPath = ""
   const [quotaResetAtPath, setQuotaResetAtPath] = useState("")
@@ -190,6 +192,12 @@ export const RuleCreatePage: React.FC = () => {
   const [quotaTestLoading, setQuotaTestLoading] = useState(false)
   const [quotaTestResult, setQuotaTestResult] = useState<RuleQuotaTestResult | null>(null)
   const [quotaTestFingerprint, setQuotaTestFingerprint] = useState<string | null>(null)
+  const [costEnabled, setCostEnabled] = useState(false)
+  const [inputPricePerM, setInputPricePerM] = useState("")
+  const [outputPricePerM, setOutputPricePerM] = useState("")
+  const [cacheInputPricePerM, setCacheInputPricePerM] = useState("")
+  const [cacheOutputPricePerM, setCacheOutputPricePerM] = useState("")
+  const [costCurrency, setCostCurrency] = useState("USD")
 
   const [errors, setErrors] = useState<{
     name?: string
@@ -392,7 +400,7 @@ export const RuleCreatePage: React.FC = () => {
     try {
       const result = await ipc.testRuleQuotaDraft(
         groupId,
-        name.trim() || "Draft Rule",
+        name.trim() || "Draft Provider",
         token,
         apiAddress,
         defaultModel,
@@ -435,7 +443,7 @@ export const RuleCreatePage: React.FC = () => {
       resetAtPath: quotaResetAtPath,
     })
 
-    const newRule: Rule = {
+    const newProvider: Provider = {
       id: crypto.randomUUID(),
       name: name.trim(),
       protocol,
@@ -448,6 +456,14 @@ export const RuleCreatePage: React.FC = () => {
           .filter(([key, value]) => key && value)
       ),
       quota: quotaConfig,
+      cost: {
+        enabled: costEnabled,
+        inputPricePerM: Number(inputPricePerM || "0"),
+        outputPricePerM: Number(outputPricePerM || "0"),
+        cacheInputPricePerM: Number(cacheInputPricePerM || "0"),
+        cacheOutputPricePerM: Number(cacheOutputPricePerM || "0"),
+        currency: costCurrency.trim() || "USD",
+      },
     }
 
     const newConfig: ProxyConfig = {
@@ -456,8 +472,8 @@ export const RuleCreatePage: React.FC = () => {
         if (group.id === groupId) {
           return {
             ...group,
-            rules: [...group.rules, newRule],
-            activeRuleId: group.activeRuleId ?? newRule.id,
+            providers: [...group.providers, newProvider],
+            activeProviderId: group.activeProviderId ?? newProvider.id,
           }
         }
         return group
@@ -816,7 +832,7 @@ export const RuleCreatePage: React.FC = () => {
                         className={styles.nativeSelect}
                         value={quotaUnitType}
                         onChange={e =>
-                          setQuotaUnitType(e.target.value as Rule["quota"]["unitType"])
+                          setQuotaUnitType(e.target.value as Provider["quota"]["unitType"])
                         }
                       >
                         <option value="percentage">{t("ruleForm.quotaUnitTypePercentage")}</option>
@@ -942,6 +958,95 @@ export const RuleCreatePage: React.FC = () => {
                       </div>
                     </div>
                   )}
+                </>
+              )}
+            </section>
+
+            <section className={styles.formSection}>
+              <h2 className={styles.sectionTitle}>{t("ruleForm.sectionCost")}</h2>
+              <div className={styles.switchRow}>
+                <div>
+                  <label htmlFor="cost-enabled">{t("ruleForm.costEnabled")}</label>
+                  <p className={styles.fieldHint}>{t("ruleForm.costEnabledHint")}</p>
+                </div>
+                <Switch id="cost-enabled" checked={costEnabled} onChange={setCostEnabled} />
+              </div>
+              {costEnabled && (
+                <>
+                  <div className={styles.formGroup}>
+                    <label htmlFor="cost-currency">{t("ruleForm.costCurrency")}</label>
+                    <select
+                      id="cost-currency"
+                      className={styles.nativeSelect}
+                      value={costCurrency}
+                      onChange={e => setCostCurrency(e.target.value)}
+                    >
+                      {!COST_CURRENCY_OPTIONS.includes(
+                        costCurrency as (typeof COST_CURRENCY_OPTIONS)[number]
+                      ) && <option value={costCurrency}>{costCurrency}</option>}
+                      {COST_CURRENCY_OPTIONS.map(currency => (
+                        <option key={currency} value={currency}>
+                          {currency}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.dualColumnRow}>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="cost-input">{t("ruleForm.costInputPerM")}</label>
+                      <Input
+                        id="cost-input"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.0001"
+                        value={inputPricePerM}
+                        onChange={e => setInputPricePerM(normalizeNumericInput(e.target.value))}
+                      />
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="cost-output">{t("ruleForm.costOutputPerM")}</label>
+                      <Input
+                        id="cost-output"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.0001"
+                        value={outputPricePerM}
+                        onChange={e => setOutputPricePerM(normalizeNumericInput(e.target.value))}
+                      />
+                    </div>
+                  </div>
+                  <div className={styles.dualColumnRow}>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="cost-cache-input">{t("ruleForm.costCacheInputPerM")}</label>
+                      <Input
+                        id="cost-cache-input"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.0001"
+                        value={cacheInputPricePerM}
+                        onChange={e =>
+                          setCacheInputPricePerM(normalizeNumericInput(e.target.value))
+                        }
+                      />
+                    </div>
+                    <div className={styles.formGroup}>
+                      <label htmlFor="cost-cache-output">{t("ruleForm.costCacheOutputPerM")}</label>
+                      <Input
+                        id="cost-cache-output"
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.0001"
+                        value={cacheOutputPricePerM}
+                        onChange={e =>
+                          setCacheOutputPricePerM(normalizeNumericInput(e.target.value))
+                        }
+                      />
+                    </div>
+                  </div>
                 </>
               )}
             </section>

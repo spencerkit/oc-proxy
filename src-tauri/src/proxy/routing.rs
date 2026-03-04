@@ -191,15 +191,15 @@ pub(super) fn refresh_route_index_if_needed(state: &ServiceState) -> Result<(), 
 /// Build a fast lookup table `group_id -> active route resolution`.
 ///
 /// The index carries three states so request handling can distinguish:
-/// - group exists with ready active rule,
-/// - group exists but no active rule configured,
-/// - group exists but active_rule_id points to a missing rule.
+/// - group exists with ready active provider,
+/// - group exists but no active provider configured,
+/// - group exists but active_provider_id points to a missing provider.
 pub(super) fn build_route_index(config: &ProxyConfig) -> RouteIndex {
     let mut index = HashMap::with_capacity(config.groups.len());
     for group in &config.groups {
-        let resolution = match group.active_rule_id.as_ref() {
+        let resolution = match group.active_provider_id.as_ref() {
             Some(active_rule_id) => {
-                match group.rules.iter().find(|rule| rule.id == *active_rule_id) {
+                match group.providers.iter().find(|rule| rule.id == *active_rule_id) {
                     Some(rule) => RouteResolution::Ready(ActiveRoute {
                         group_name: group.name.clone(),
                         group_models: group.models.clone(),
