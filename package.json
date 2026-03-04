@@ -22,6 +22,7 @@
     "test:ci": "npm run test:rust",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "mock:upstream": "node ./scripts/mock-upstream.js --host 127.0.0.1 --port 19001",
+    "screenshots:mock": "node ./scripts/capture-screenshots.js",
     "bench:proxy": "node ./scripts/benchmark-proxy.js --config ./scripts/benchmark.example.json",
     "bench:proxy:mock": "node ./scripts/run-benchmark-with-mock.js --config ./scripts/benchmark.example.json --output out/bench-report.json",
     "version:check": "node ./scripts/check-version-sync.js",
@@ -51,6 +52,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.3.0",
+    "playwright": "^1.58.2",
     "typescript": "^5.2.2",
     "vite": "^5.1.0"
   }
