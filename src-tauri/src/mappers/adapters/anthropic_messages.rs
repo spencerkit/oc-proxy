@@ -7,8 +7,13 @@ use super::super::canonical::{
     CanonicalRole, CanonicalTool, CanonicalToolCall, CanonicalToolChoice, CanonicalUsage,
     MapOptions,
 };
-use super::super::helpers::{flatten_anthropic_text, str_or_empty, to_tool_result_content};
+use super::super::helpers::{
+    extract_openai_usage_summary, flatten_anthropic_text, map_openai_finish_reason_to_anthropic_stop,
+    str_or_empty, to_tool_result_content,
+};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use uuid::Uuid;
 
 fn non_null(body: &Value, key: &str) -> Option<Value> {
     body.get(key).filter(|v| !v.is_null()).cloned()
@@ -155,6 +160,582 @@ fn push_text_block(out: &mut Vec<Value>, text: &str) {
     if !text.is_empty() {
         out.push(json!({ "type": "text", "text": text }));
     }
+}
+
+#[derive(Clone)]
+enum ActiveBlock {
+    Text { block_index: usize },
+    Tool { tool_index: usize, block_index: usize },
+}
+
+#[derive(Clone)]
+struct ToolState {
+    block_index: usize,
+    id: String,
+    name: String,
+    started: bool,
+}
+
+enum AccumulatedContentBlock {
+    Text { text: String },
+    ToolUse {
+        id: String,
+        name: String,
+        partial_input: String,
+    },
+}
+
+pub(crate) struct OpenaiChatToAnthropicStreamMapper {
+    request_model: String,
+    upstream_model: Option<String>,
+    upstream_id: Option<String>,
+    resolved_message_id: Option<String>,
+    resolved_model: Option<String>,
+    message_started: bool,
+    message_stopped: bool,
+    next_block_index: usize,
+    active_block: Option<ActiveBlock>,
+    tool_states: HashMap<usize, ToolState>,
+    accumulated_content: HashMap<usize, AccumulatedContentBlock>,
+    final_stop_reason: Option<String>,
+    final_usage: Option<Value>,
+}
+
+impl OpenaiChatToAnthropicStreamMapper {
+    pub(crate) fn new(request_model: &str) -> Self {
+        Self {
+            request_model: request_model.to_string(),
+            upstream_model: None,
+            upstream_id: None,
+            resolved_message_id: None,
+            resolved_model: None,
+            message_started: false,
+            message_stopped: false,
+            next_block_index: 0,
+            active_block: None,
+            tool_states: HashMap::new(),
+            accumulated_content: HashMap::new(),
+            final_stop_reason: None,
+            final_usage: None,
+        }
+    }
+
+    pub(crate) fn on_stream_payload(&mut self, parsed: &Value) -> Vec<(String, Value)> {
+        let mut out = Vec::new();
+        self.update_common_metadata(parsed);
+        if let Some(choices) = parsed.get("choices").and_then(|v| v.as_array()) {
+            for (i, choice) in choices.iter().enumerate() {
+                self.handle_choice_delta(choice, i, &mut out);
+            }
+        }
+        out
+    }
+
+    pub(crate) fn on_non_stream_payload(&mut self, parsed: &Value) -> Vec<(String, Value)> {
+        let mut out = Vec::new();
+        self.update_common_metadata(parsed);
+        self.ensure_message_start(&mut out);
+
+        if let Some(choices) = parsed.get("choices").and_then(|v| v.as_array()) {
+            for (i, choice) in choices.iter().enumerate() {
+                let choice_index = choice
+                    .get("index")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(i as u64) as usize;
+                if choice_index != 0 {
+                    continue;
+                }
+
+                if let Some(message) = choice.get("message").and_then(|v| v.as_object()) {
+                    if let Some(content) = message.get("content") {
+                        if let Some(text) = extract_openai_message_content_text(content) {
+                            self.emit_text_delta(&text, &mut out);
+                        }
+                    }
+                    if let Some(tool_calls) = message.get("tool_calls").and_then(|v| v.as_array()) {
+                        for (tc_i, tc) in tool_calls.iter().enumerate() {
+                            let normalized = normalize_openai_tool_call_arguments(tc);
+                            let tool_index = normalized
+                                .get("index")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(tc_i as u64)
+                                as usize;
+                            self.emit_tool_delta(tool_index, &normalized, &mut out);
+                        }
+                    }
+                }
+
+                self.handle_choice_delta(choice, i, &mut out);
+            }
+        }
+        out
+    }
+
+    pub(crate) fn on_done(&mut self) -> Vec<(String, Value)> {
+        self.emit_final_events()
+    }
+
+    pub(crate) fn finish(&mut self) -> Vec<(String, Value)> {
+        self.emit_final_events()
+    }
+
+    pub(crate) fn final_message_json(&self) -> Option<Value> {
+        self.build_final_message_json()
+    }
+
+    fn update_common_metadata(&mut self, parsed: &Value) {
+        if let Some(id) = parsed.get("id").and_then(|v| v.as_str()) {
+            self.upstream_id = Some(id.to_string());
+        }
+        if let Some(model) = parsed.get("model").and_then(|v| v.as_str()) {
+            self.upstream_model = Some(model.to_string());
+        }
+        if let Some(usage) = parsed.get("usage") {
+            if let Some(summary) = extract_openai_usage_summary(usage) {
+                self.final_usage = Some(json!({
+                    "input_tokens": summary.input_tokens,
+                    "output_tokens": summary.output_tokens,
+                    "cache_read_input_tokens": summary.cache_read_tokens,
+                    "cache_creation_input_tokens": summary.cache_write_tokens,
+                }));
+            }
+        }
+    }
+
+    fn handle_choice_delta(
+        &mut self,
+        choice: &Value,
+        default_index: usize,
+        out: &mut Vec<(String, Value)>,
+    ) {
+        let choice_index = choice
+            .get("index")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(default_index as u64) as usize;
+        if choice_index != 0 {
+            return;
+        }
+
+        if let Some(delta) = choice.get("delta").and_then(|v| v.as_object()) {
+            if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
+                self.emit_text_delta(content, out);
+            }
+            if let Some(tool_calls) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+                for (tc_i, tc) in tool_calls.iter().enumerate() {
+                    let tool_index = tc
+                        .get("index")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(tc_i as u64) as usize;
+                    self.emit_tool_delta(tool_index, tc, out);
+                }
+            }
+        }
+
+        if let Some(finish_reason) = choice.get("finish_reason").and_then(|v| v.as_str()) {
+            if !finish_reason.is_empty() {
+                self.final_stop_reason =
+                    Some(map_openai_finish_reason_to_anthropic_stop(finish_reason).to_string());
+                self.ensure_message_start(out);
+                self.close_active_block(out);
+            }
+        }
+    }
+
+    fn emit_text_delta(&mut self, content: &str, out: &mut Vec<(String, Value)>) {
+        if content.is_empty() {
+            return;
+        }
+
+        self.ensure_message_start(out);
+
+        if matches!(self.active_block, Some(ActiveBlock::Tool { .. })) {
+            self.close_active_block(out);
+        }
+
+        let block_index = match self.active_block.clone() {
+            Some(ActiveBlock::Text { block_index }) => block_index,
+            _ => {
+                let index = self.next_block_index;
+                self.next_block_index += 1;
+                self.accumulated_content
+                    .entry(index)
+                    .or_insert_with(|| AccumulatedContentBlock::Text {
+                        text: String::new(),
+                    });
+                out.push((
+                    "content_block_start".to_string(),
+                    json!({
+                        "type": "content_block_start",
+                        "index": index,
+                        "content_block": {
+                            "type": "text",
+                            "text": "",
+                        }
+                    }),
+                ));
+                self.active_block = Some(ActiveBlock::Text { block_index: index });
+                index
+            }
+        };
+        if let Some(AccumulatedContentBlock::Text { text }) =
+            self.accumulated_content.get_mut(&block_index)
+        {
+            text.push_str(content);
+        }
+
+        out.push((
+            "content_block_delta".to_string(),
+            json!({
+                "type": "content_block_delta",
+                "index": block_index,
+                "delta": {
+                    "type": "text_delta",
+                    "text": content,
+                }
+            }),
+        ));
+    }
+
+    fn emit_tool_delta(&mut self, tool_index: usize, chunk: &Value, out: &mut Vec<(String, Value)>) {
+        self.ensure_message_start(out);
+
+        if matches!(self.active_block, Some(ActiveBlock::Text { .. })) {
+            self.close_active_block(out);
+        }
+
+        if !self.tool_states.contains_key(&tool_index) {
+            let block_index = self.next_block_index;
+            self.next_block_index += 1;
+            self.tool_states.insert(
+                tool_index,
+                ToolState {
+                    block_index,
+                    id: format!("toolu_{}", Uuid::new_v4().simple()),
+                    name: "tool".to_string(),
+                    started: false,
+                },
+            );
+        }
+
+        {
+            let state = self
+                .tool_states
+                .get_mut(&tool_index)
+                .expect("tool state must exist");
+            if let Some(id) = chunk.get("id").and_then(|v| v.as_str()) {
+                if !id.is_empty() {
+                    state.id = id.to_string();
+                }
+            }
+            if let Some(name) = chunk
+                .get("function")
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.as_str())
+            {
+                if !name.is_empty() {
+                    state.name = name.to_string();
+                }
+            }
+        }
+
+        let (block_index, tool_id, tool_name, started) = {
+            let state = self
+                .tool_states
+                .get(&tool_index)
+                .expect("tool state must exist");
+            (
+                state.block_index,
+                state.id.clone(),
+                state.name.clone(),
+                state.started,
+            )
+        };
+        self.upsert_tool_content_block(block_index, &tool_id, &tool_name);
+
+        if !started {
+            if matches!(
+                self.active_block,
+                Some(ActiveBlock::Tool {
+                    tool_index: active_idx,
+                    ..
+                }) if active_idx != tool_index
+            ) {
+                self.close_active_block(out);
+            }
+
+            out.push((
+                "content_block_start".to_string(),
+                json!({
+                    "type": "content_block_start",
+                    "index": block_index,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": tool_name,
+                        "input": {},
+                    }
+                }),
+            ));
+            if let Some(state) = self.tool_states.get_mut(&tool_index) {
+                state.started = true;
+            }
+        }
+
+        self.active_block = Some(ActiveBlock::Tool {
+            tool_index,
+            block_index,
+        });
+
+        if let Some(arguments) = chunk
+            .get("function")
+            .and_then(|v| v.get("arguments"))
+            .and_then(|v| v.as_str())
+        {
+            if !arguments.is_empty() {
+                if let Some(AccumulatedContentBlock::ToolUse { partial_input, .. }) =
+                    self.accumulated_content.get_mut(&block_index)
+                {
+                    partial_input.push_str(arguments);
+                }
+                out.push((
+                    "content_block_delta".to_string(),
+                    json!({
+                        "type": "content_block_delta",
+                        "index": block_index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": arguments,
+                        }
+                    }),
+                ));
+            }
+        }
+    }
+
+    fn upsert_tool_content_block(&mut self, block_index: usize, id: &str, name: &str) {
+        match self.accumulated_content.get_mut(&block_index) {
+            Some(AccumulatedContentBlock::ToolUse {
+                id: tool_id,
+                name: tool_name,
+                ..
+            }) => {
+                *tool_id = id.to_string();
+                *tool_name = name.to_string();
+            }
+            Some(AccumulatedContentBlock::Text { .. }) | None => {
+                self.accumulated_content.insert(
+                    block_index,
+                    AccumulatedContentBlock::ToolUse {
+                        id: id.to_string(),
+                        name: name.to_string(),
+                        partial_input: String::new(),
+                    },
+                );
+            }
+        }
+    }
+
+    fn ensure_message_start(&mut self, out: &mut Vec<(String, Value)>) {
+        if self.message_started {
+            return;
+        }
+
+        let model = if self.request_model.is_empty() {
+            self.upstream_model
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string())
+        } else {
+            self.request_model.clone()
+        };
+        self.resolved_model = Some(model.clone());
+        let id = self
+            .upstream_id
+            .clone()
+            .unwrap_or_else(|| format!("msg_{}", Uuid::new_v4().simple()));
+        self.resolved_message_id = Some(id.clone());
+
+        out.push((
+            "message_start".to_string(),
+            json!({
+                "type": "message_start",
+                "message": {
+                    "id": id,
+                    "type": "message",
+                    "role": "assistant",
+                    "model": model,
+                    "content": [],
+                    "stop_reason": Value::Null,
+                    "stop_sequence": Value::Null,
+                    "usage": {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                    }
+                }
+            }),
+        ));
+        self.message_started = true;
+    }
+
+    fn close_active_block(&mut self, out: &mut Vec<(String, Value)>) {
+        let Some(active) = self.active_block.clone() else {
+            return;
+        };
+        let index = match active {
+            ActiveBlock::Text { block_index } => block_index,
+            ActiveBlock::Tool { block_index, .. } => block_index,
+        };
+
+        out.push((
+            "content_block_stop".to_string(),
+            json!({
+                "type": "content_block_stop",
+                "index": index,
+            }),
+        ));
+        self.active_block = None;
+    }
+
+    fn emit_final_events(&mut self) -> Vec<(String, Value)> {
+        let mut out = Vec::new();
+        if self.message_stopped || !self.message_started {
+            return out;
+        }
+
+        self.close_active_block(&mut out);
+
+        let stop_reason = self
+            .final_stop_reason
+            .clone()
+            .unwrap_or_else(|| "end_turn".to_string());
+        let usage = self.final_usage.clone().unwrap_or_else(|| {
+            json!({
+                "input_tokens": 0,
+                "output_tokens": 0,
+            })
+        });
+
+        out.push((
+            "message_delta".to_string(),
+            json!({
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": stop_reason,
+                    "stop_sequence": Value::Null,
+                },
+                "usage": usage,
+            }),
+        ));
+        out.push(("message_stop".to_string(), json!({ "type": "message_stop" })));
+        self.message_stopped = true;
+        out
+    }
+
+    fn build_final_message_json(&self) -> Option<Value> {
+        let id = self.resolved_message_id.as_ref()?;
+        let model = self.resolved_model.as_ref()?;
+        let mut sorted = self.accumulated_content.iter().collect::<Vec<_>>();
+        sorted.sort_by_key(|(index, _)| *index);
+
+        let content = sorted
+            .into_iter()
+            .filter_map(|(_, block)| match block {
+                AccumulatedContentBlock::Text { text } => (!text.is_empty()).then(|| {
+                    json!({
+                        "type": "text",
+                        "text": text,
+                    })
+                }),
+                AccumulatedContentBlock::ToolUse {
+                    id,
+                    name,
+                    partial_input,
+                } => {
+                    let input = if partial_input.is_empty() {
+                        json!({})
+                    } else {
+                        serde_json::from_str::<Value>(partial_input)
+                            .unwrap_or_else(|_| json!({ "raw": partial_input }))
+                    };
+                    Some(json!({
+                        "type": "tool_use",
+                        "id": id,
+                        "name": name,
+                        "input": input,
+                    }))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        Some(json!({
+            "id": id,
+            "type": "message",
+            "role": "assistant",
+            "model": model,
+            "content": content,
+            "stop_reason": self
+                .final_stop_reason
+                .clone()
+                .unwrap_or_else(|| "end_turn".to_string()),
+            "stop_sequence": Value::Null,
+            "usage": self.final_usage.clone().unwrap_or_else(|| {
+                json!({
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                })
+            }),
+        }))
+    }
+}
+
+fn extract_openai_message_content_text(content: &Value) -> Option<String> {
+    if let Some(text) = content.as_str() {
+        return (!text.is_empty()).then_some(text.to_string());
+    }
+
+    let Some(items) = content.as_array() else {
+        return None;
+    };
+
+    let mut merged = String::new();
+    for item in items {
+        if let Some(text) = item.as_str() {
+            merged.push_str(text);
+            continue;
+        }
+        if let Some(obj) = item.as_object() {
+            let text = obj
+                .get("text")
+                .or_else(|| obj.get("output_text"))
+                .or_else(|| obj.get("input_text"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            merged.push_str(text);
+        }
+    }
+
+    (!merged.is_empty()).then_some(merged)
+}
+
+fn normalize_openai_tool_call_arguments(tool_call: &Value) -> Value {
+    let mut normalized = tool_call.clone();
+    let args = normalized
+        .get("function")
+        .and_then(|f| f.get("arguments"))
+        .cloned();
+
+    if let Some(arguments) = args {
+        let as_string = arguments
+            .as_str()
+            .map(|v| v.to_string())
+            .or_else(|| serde_json::to_string(&arguments).ok())
+            .unwrap_or_default();
+        if normalized.get("function").is_none() || !normalized["function"].is_object() {
+            normalized["function"] = json!({});
+        }
+        normalized["function"]["arguments"] = json!(as_string);
+    }
+
+    normalized
 }
 
 pub fn encode_request(request: &CanonicalRequest) -> Value {
