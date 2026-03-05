@@ -12,14 +12,13 @@ use super::routing::{
     resolve_target_model, resolve_upstream_path, resolve_upstream_url, EntryEndpoint, ParsedPath,
     PathEntry, RouteResolution,
 };
-use super::stream_bridge::{create_stream_bridge, map_non_stream_response_via_bridge};
 use super::{
     ServiceState, MAX_REQUEST_BODY_BYTES, MAX_STREAM_LOG_BODY_BYTES,
     MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS, NON_STREAM_REQUEST_TIMEOUT_MS,
     STREAM_REQUEST_TIMEOUT_MS,
 };
-use crate::mappers::{map_request_by_surface, map_response_by_surface, MapperSurface};
 use crate::models::RuleProtocol;
+use crate::transformer::StreamContext;
 use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode};
@@ -360,6 +359,7 @@ pub(super) async fn handle_proxy_request(
         &request_body,
         strict_mode,
         &target_model,
+        &state,
     ) {
         Ok(v) => v,
         Err(msg) => {
@@ -491,13 +491,9 @@ pub(super) async fn handle_proxy_request(
         .to_lowercase();
 
     if upstream_ct.contains("text/event-stream") {
-        let source_surface = surface_from_rule_protocol(&target_protocol);
-        let target_surface = surface_from_entry(&entry);
-        let mut stream_bridge = if upstream_is_error {
-            None
-        } else {
-            create_stream_bridge(source_surface, target_surface, &requested_model)
-        };
+        // TODO: Implement streaming with new transformer architecture
+        let transformer = None::<()>;
+        let mut stream_ctx = StreamContext::new();
         let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(32);
         let stream_state = state.clone();
         let stream_trace_id = trace_id.clone();
@@ -538,11 +534,7 @@ pub(super) async fn handle_proxy_request(
                 match bytes_stream.try_next().await {
                     Ok(Some(bytes)) => {
                         usage_acc.consume_chunk(bytes.as_ref());
-                        let outgoing_chunks = if let Some(bridge) = stream_bridge.as_mut() {
-                            bridge.consume_chunk(bytes.as_ref())
-                        } else {
-                            vec![bytes]
-                        };
+                        let outgoing_chunks = vec![bytes];
 
                         for outgoing in outgoing_chunks {
                             if stream_capture_body && !stream_body_truncated {
@@ -581,26 +573,7 @@ pub(super) async fn handle_proxy_request(
             }
 
             if !stream_failed && !downstream_closed {
-                if let Some(bridge) = stream_bridge.as_mut() {
-                    let trailing = bridge.finish();
-                    for outgoing in trailing {
-                        if stream_capture_body && !stream_body_truncated {
-                            let remaining =
-                                MAX_STREAM_LOG_BODY_BYTES.saturating_sub(stream_body.len());
-                            if remaining == 0 {
-                                stream_body_truncated = true;
-                            } else if outgoing.len() <= remaining {
-                                stream_body.extend_from_slice(outgoing.as_ref());
-                            } else {
-                                stream_body.extend_from_slice(&outgoing.as_ref()[..remaining]);
-                                stream_body_truncated = true;
-                            }
-                        }
-                        if tx.send(Ok(outgoing)).await.is_err() {
-                            break;
-                        }
-                    }
-                }
+                // Transformer finalization removed - passthrough mode
             }
 
             let token_usage = usage_acc.into_token_usage();
@@ -826,7 +799,7 @@ pub(super) async fn handle_proxy_request(
         );
     }
 
-    let output_body = map_response_body(&entry, &target_protocol, &upstream_json, &requested_model);
+    let output_body = map_response_body(&entry, &target_protocol, &upstream_json, &requested_model, &state);
 
     let token_usage =
         extract_token_usage(&upstream_json).or_else(|| extract_token_usage(&output_body));
@@ -879,84 +852,25 @@ pub(super) async fn handle_proxy_request(
 ///   forwarded directly from upstream.
 /// - For `messages -> responses`, stream is forced to false for compatibility.
 pub(super) fn build_upstream_body(
-    entry: &PathEntry,
-    target_protocol: &RuleProtocol,
+    _entry: &PathEntry,
+    _target_protocol: &RuleProtocol,
     request_body: &Value,
-    strict_mode: bool,
+    _strict_mode: bool,
     target_model: &str,
+    _state: &ServiceState,
 ) -> Result<Value, String> {
-    let source_surface = surface_from_entry(entry);
-    let target_surface = surface_from_rule_protocol(target_protocol);
-
-    if source_surface == target_surface {
-        return Ok(passthrough_with_model(request_body, target_model));
-    }
-
-    let mut mapped = map_request_by_surface(
-        source_surface,
-        target_surface,
-        request_body,
-        strict_mode,
-        target_model,
-    )?;
-    if mapped.is_object() {
-        mapped["model"] = json!(target_model);
-        if source_surface == MapperSurface::AnthropicMessages
-            && target_surface == MapperSurface::OpenaiResponses
-        {
-            let has_tools = mapped
-                .get("tools")
-                .and_then(|v| v.as_array())
-                .map(|arr| !arr.is_empty())
-                .unwrap_or(false);
-            let tool_choice_missing = mapped
-                .get("tool_choice")
-                .map(|v| v.is_null())
-                .unwrap_or(true);
-            if has_tools && tool_choice_missing {
-                mapped["tool_choice"] = json!("auto");
-            }
-            let parallel_tool_calls_missing = mapped
-                .get("parallel_tool_calls")
-                .map(|v| v.is_null())
-                .unwrap_or(true);
-            if has_tools && parallel_tool_calls_missing {
-                mapped["parallel_tool_calls"] = json!(true);
-            }
-            // TODO(protocol-compat): negotiate upstream capability and restore
-            // max_output_tokens forwarding when the responses endpoint supports it.
-            if let Some(obj) = mapped.as_object_mut() {
-                obj.remove("max_output_tokens");
-            }
-        }
-    }
-    Ok(mapped)
+    Ok(passthrough_with_model(request_body, target_model))
 }
 
 /// Map upstream response body back to the downstream entry surface.
 fn map_response_body(
-    entry: &PathEntry,
-    target_protocol: &RuleProtocol,
+    _entry: &PathEntry,
+    _target_protocol: &RuleProtocol,
     upstream_json: &Value,
-    request_model: &str,
+    _request_model: &str,
+    _state: &ServiceState,
 ) -> Value {
-    let source_surface = surface_from_rule_protocol(target_protocol);
-    let target_surface = surface_from_entry(entry);
-
-    if source_surface == target_surface {
-        return upstream_json.clone();
-    }
-
-    if let Some(mapped) = map_non_stream_response_via_bridge(
-        source_surface,
-        target_surface,
-        upstream_json,
-        request_model,
-    ) {
-        return mapped;
-    }
-
-    map_response_by_surface(source_surface, target_surface, upstream_json, request_model)
+    upstream_json.clone()
 }
 
 /// Resolves request timeout ms for this module's workflow.
@@ -978,23 +892,6 @@ pub(super) fn resolve_request_timeout_ms(
     NON_STREAM_REQUEST_TIMEOUT_MS
 }
 
-/// Convert parsed downstream endpoint into mapper surface enum.
-fn surface_from_entry(entry: &PathEntry) -> MapperSurface {
-    match entry.endpoint {
-        EntryEndpoint::Messages => MapperSurface::AnthropicMessages,
-        EntryEndpoint::ChatCompletions => MapperSurface::OpenaiChatCompletions,
-        EntryEndpoint::Responses => MapperSurface::OpenaiResponses,
-    }
-}
-
-/// Convert active rule protocol into mapper surface enum.
-fn surface_from_rule_protocol(protocol: &RuleProtocol) -> MapperSurface {
-    match protocol {
-        RuleProtocol::Anthropic => MapperSurface::AnthropicMessages,
-        RuleProtocol::Openai => MapperSurface::OpenaiResponses,
-        RuleProtocol::OpenaiCompletion => MapperSurface::OpenaiChatCompletions,
-    }
-}
 
 /// Preserve request object shape while enforcing resolved forwarded model.
 fn passthrough_with_model(request_body: &Value, target_model: &str) -> Value {

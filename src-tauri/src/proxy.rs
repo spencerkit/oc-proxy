@@ -17,7 +17,6 @@ mod net;
 mod observability;
 mod pipeline;
 mod routing;
-mod stream_bridge;
 
 const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
 const MAX_STREAM_LOG_BODY_BYTES: usize = 256 * 1024;
@@ -60,6 +59,7 @@ struct ServiceState {
     stats_store: StatsStore,
     metrics: Arc<observability::MetricsState>,
     client: Client,
+    transformer_registry: Arc<crate::transformer::registry::TransformerRegistry>,
 }
 
 impl ProxyRuntime {
@@ -114,6 +114,9 @@ impl ProxyRuntime {
         let (listener, bound_host) =
             net::bind_proxy_listener(&config.server.host, config.server.port).await?;
 
+        // Initialize transformer registry (simplified for ccNexus architecture)
+        let transformer_registry = Arc::new(crate::transformer::registry::TransformerRegistry::new());
+
         let (tx, rx) = oneshot::channel();
         let service_state = ServiceState {
             config: self.inner.config.clone(),
@@ -124,6 +127,7 @@ impl ProxyRuntime {
             stats_store: self.inner.stats_store.clone(),
             metrics: self.inner.metrics.clone(),
             client: self.inner.client.clone(),
+            transformer_registry,
         };
 
         let app = Router::new()
