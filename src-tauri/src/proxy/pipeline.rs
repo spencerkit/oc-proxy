@@ -399,10 +399,12 @@ pub(super) async fn handle_proxy_request(
         }
     };
 
+    let is_realtime_path = parsed_path.suffix.starts_with("/realtime");
     let stream = upstream_body
         .get("stream")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+        .unwrap_or(false)
+        || is_realtime_path;
     state.metrics.increment_request(stream);
 
     let upstream_headers = build_rule_headers(&target_protocol, &active_route.rule);
