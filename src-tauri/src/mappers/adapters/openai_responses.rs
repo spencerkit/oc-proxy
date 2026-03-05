@@ -1030,16 +1030,34 @@ impl OpenaiResponsesToAnthropicStreamMapper {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string();
+
+                            let block_index = self.next_block_index;
+                            self.next_block_index += 1;
+
                             self.output_index_to_tool_id
                                 .insert(output_index, call_id.clone());
                             self.tool_states.insert(
                                 call_id.clone(),
                                 ResponsesToolState {
-                                    id: call_id,
-                                    name,
+                                    id: call_id.clone(),
+                                    name: name.clone(),
                                     arguments: String::new(),
                                 },
                             );
+
+                            out.push((
+                                "content_block_start".to_string(),
+                                json!({
+                                    "type": "content_block_start",
+                                    "index": block_index,
+                                    "content_block": {
+                                        "type": "tool_use",
+                                        "id": call_id,
+                                        "name": name,
+                                        "input": {},
+                                    }
+                                }),
+                            ));
                         }
                     }
                 }
@@ -1054,6 +1072,19 @@ impl OpenaiResponsesToAnthropicStreamMapper {
                             if let Some(delta) = payload.get("delta").and_then(|v| v.as_str()) {
                                 if let Some(state) = self.tool_states.get_mut(call_id) {
                                     state.arguments.push_str(delta);
+
+                                    let block_index = output_index + 1;
+                                    out.push((
+                                        "content_block_delta".to_string(),
+                                        json!({
+                                            "type": "content_block_delta",
+                                            "index": block_index,
+                                            "delta": {
+                                                "type": "input_json_delta",
+                                                "partial_json": delta,
+                                            }
+                                        }),
+                                    ));
                                 }
                             }
                         }
