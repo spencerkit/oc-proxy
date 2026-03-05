@@ -120,6 +120,7 @@ pub fn decode_request(body: &Value, options: &MapOptions) -> Result<CanonicalReq
                 description: tool.get("description").filter(|v| !v.is_null()).cloned(),
                 input_schema: tool
                     .get("input_schema")
+                    .filter(|v| !v.is_null())
                     .cloned()
                     .unwrap_or_else(|| json!({"type": "object", "properties": {}})),
             })

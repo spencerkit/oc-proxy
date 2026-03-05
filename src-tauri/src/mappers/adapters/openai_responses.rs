@@ -372,7 +372,7 @@ pub fn encode_request(request: &CanonicalRequest) -> Value {
                     "type": "function",
                     "name": tool.name,
                     "description": tool.description.clone().unwrap_or(Value::Null),
-                    "parameters": tool.input_schema,
+                    "parameters": openai_chat_completions::strip_schema_field(&tool.input_schema),
                 })
             })
             .collect::<Vec<_>>());
