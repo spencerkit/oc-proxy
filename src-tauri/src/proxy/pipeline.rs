@@ -852,25 +852,95 @@ pub(super) async fn handle_proxy_request(
 ///   forwarded directly from upstream.
 /// - For `messages -> responses`, stream is forced to false for compatibility.
 pub(super) fn build_upstream_body(
-    _entry: &PathEntry,
-    _target_protocol: &RuleProtocol,
+    entry: &PathEntry,
+    target_protocol: &RuleProtocol,
     request_body: &Value,
     _strict_mode: bool,
     target_model: &str,
     _state: &ServiceState,
 ) -> Result<Value, String> {
-    Ok(passthrough_with_model(request_body, target_model))
+    use crate::transformer::convert::*;
+
+    let request_bytes = serde_json::to_vec(request_body)
+        .map_err(|e| format!("serialize request: {}", e))?;
+
+    // Determine conversion based on entry and target
+    let converted = match (entry.endpoint, target_protocol) {
+        // OpenAI Responses -> Claude Messages
+        (EntryEndpoint::Responses, RuleProtocol::Anthropic) => {
+            claude_openai_responses::openai_responses_to_claude(&request_bytes)?
+        }
+        // Claude Messages -> OpenAI Responses
+        (EntryEndpoint::Messages, RuleProtocol::Openai) => {
+            claude_openai_responses::claude_req_to_openai_responses(&request_bytes, target_model)?
+        }
+        // Claude Messages -> OpenAI Chat Completions
+        (EntryEndpoint::Messages, RuleProtocol::OpenaiCompletion) => {
+            claude_openai::claude_req_to_openai(&request_bytes, target_model)?
+        }
+        // OpenAI Chat -> Claude Messages
+        (EntryEndpoint::ChatCompletions, RuleProtocol::Anthropic) => {
+            // First convert to Claude, then serialize
+            let claude_bytes = openai_claude::openai_resp_to_claude(&request_bytes)?;
+            claude_bytes
+        }
+        // Same protocol, just update model
+        _ => {
+            return Ok(passthrough_with_model(request_body, target_model));
+        }
+    };
+
+    let mut result: Value = serde_json::from_slice(&converted)
+        .map_err(|e| format!("parse converted: {}", e))?;
+
+    // Ensure model is set
+    if result.is_object() {
+        result["model"] = json!(target_model);
+    }
+
+    Ok(result)
 }
 
 /// Map upstream response body back to the downstream entry surface.
 fn map_response_body(
-    _entry: &PathEntry,
-    _target_protocol: &RuleProtocol,
+    entry: &PathEntry,
+    target_protocol: &RuleProtocol,
     upstream_json: &Value,
     _request_model: &str,
     _state: &ServiceState,
 ) -> Value {
-    upstream_json.clone()
+    use crate::transformer::convert::*;
+
+    let response_bytes = match serde_json::to_vec(upstream_json) {
+        Ok(b) => b,
+        Err(_) => return upstream_json.clone(),
+    };
+
+    // Determine conversion based on entry and target
+    let converted = match (entry.endpoint, target_protocol) {
+        // Claude Messages -> OpenAI Responses (response)
+        (EntryEndpoint::Responses, RuleProtocol::Anthropic) => {
+            claude_openai_responses::claude_req_to_openai_responses(&response_bytes, "")
+        }
+        // OpenAI Responses -> Claude Messages (response)
+        (EntryEndpoint::Messages, RuleProtocol::Openai) => {
+            claude_openai_responses::openai_responses_to_claude(&response_bytes)
+        }
+        // OpenAI Chat -> Claude Messages (response)
+        (EntryEndpoint::Messages, RuleProtocol::OpenaiCompletion) => {
+            openai_claude::openai_resp_to_claude(&response_bytes)
+        }
+        // Claude Messages -> OpenAI Chat (response)
+        (EntryEndpoint::ChatCompletions, RuleProtocol::Anthropic) => {
+            openai_claude::openai_resp_to_claude(&response_bytes)
+        }
+        _ => return upstream_json.clone(),
+    };
+
+    match converted {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| upstream_json.clone()),
+        Err(_) => upstream_json.clone(),
+    }
 }
 
 /// Resolves request timeout ms for this module's workflow.
