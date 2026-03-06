@@ -19,7 +19,7 @@ use super::{
 };
 use crate::models::RuleProtocol;
 use crate::transformer::StreamContext;
-use crate::transformer::convert::{claude_openai_stream, claude_openai_responses_stream};
+use crate::transformer::convert::{claude_openai_stream, claude_openai_responses_stream, openai_chat_responses_stream};
 use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode};
@@ -30,6 +30,17 @@ use futures_util::TryStreamExt;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use uuid::Uuid;
+
+const MAX_SSE_PENDING_BYTES: usize = 2 * 1024 * 1024;
+
+#[derive(Clone, Copy)]
+enum StreamTransform {
+    None,
+    ClaudeToOpenAIChat,
+    ClaudeToOpenAIResponses,
+    ChatCompletionsToResponses,
+    ResponsesToChatCompletions,
+}
 
 /// Performs healthz.
 pub(super) async fn healthz(State(state): State<ServiceState>) -> Response {
@@ -341,6 +352,7 @@ pub(super) async fn handle_proxy_request(
                         "message": msg.clone(),
                     }
                 })),
+                None,
                 Some(400),
                 None,
                 None,
@@ -387,6 +399,7 @@ pub(super) async fn handle_proxy_request(
                         "message": msg.clone(),
                     }
                 })),
+                None,
                 Some(422),
                 None,
                 None,
@@ -468,6 +481,7 @@ pub(super) async fn handle_proxy_request(
                         "message": err_msg.clone(),
                     }
                 })),
+                None,
                 Some(502),
                 None,
                 None,
@@ -519,9 +533,11 @@ pub(super) async fn handle_proxy_request(
         let stream_upstream_body = upstream_body.clone();
         let stream_upstream_headers = upstream_headers_plain.clone();
         let stream_capture_body = capture_body;
+        let stream_debug_capture_body = cfg!(debug_assertions);
         let stream_upstream_status = upstream_status;
         let stream_upstream_is_error = upstream_is_error;
         let stream_started = started;
+        let stream_transform = select_stream_transform(stream_entry.endpoint, &stream_target_protocol);
         let mut stream_ctx_moved = stream_ctx;
 
         tokio::spawn(async move {
@@ -531,25 +547,58 @@ pub(super) async fn handle_proxy_request(
             let mut downstream_closed = false;
             let mut stream_body = Vec::<u8>::new();
             let mut stream_body_truncated = false;
+            let mut stream_debug_body = Vec::<u8>::new();
+            let mut sse_pending = Vec::<u8>::new();
 
             loop {
                 match bytes_stream.try_next().await {
                     Ok(Some(bytes)) => {
                         usage_acc.consume_chunk(bytes.as_ref());
-                        let outgoing_chunks = match (stream_entry.endpoint, stream_target_protocol.clone()) {
-                            (EntryEndpoint::Responses, RuleProtocol::Anthropic) => {
-                                match claude_openai_responses_stream::claude_stream_to_openai_responses(bytes.as_ref(), &mut stream_ctx_moved) {
-                                    Ok(converted) => vec![Bytes::from(converted)],
-                                    Err(_) => vec![bytes]
+                        let outgoing_chunks = match stream_transform {
+                            StreamTransform::None => vec![bytes],
+                            _ => {
+                                sse_pending.extend_from_slice(bytes.as_ref());
+                                if sse_pending.len() > MAX_SSE_PENDING_BYTES {
+                                    stream_failed = true;
+                                    let _ = tx
+                                        .send(Err(std::io::Error::new(
+                                            std::io::ErrorKind::Other,
+                                            "stream transform buffer overflow",
+                                        )))
+                                        .await;
+                                    break;
                                 }
-                            }
-                            (EntryEndpoint::ChatCompletions, RuleProtocol::Anthropic) => {
-                                match claude_openai_stream::claude_stream_to_openai(bytes.as_ref(), &mut stream_ctx_moved) {
-                                    Ok(converted) => vec![Bytes::from(converted)],
-                                    Err(_) => vec![bytes]
+
+                                let mut transformed_chunks = Vec::new();
+                                while let Some(event) = pop_sse_event(&mut sse_pending) {
+                                    match transform_sse_event(
+                                        stream_transform,
+                                        event.as_ref(),
+                                        &mut stream_ctx_moved,
+                                    ) {
+                                        Ok(converted) => {
+                                            if !converted.is_empty() {
+                                                transformed_chunks.push(Bytes::from(converted));
+                                            }
+                                        }
+                                        Err(_) => {
+                                            stream_failed = true;
+                                            let _ = tx
+                                                .send(Err(std::io::Error::new(
+                                                    std::io::ErrorKind::Other,
+                                                    "stream transform failed",
+                                                )))
+                                                .await;
+                                            break;
+                                        }
+                                    }
                                 }
+
+                                if stream_failed {
+                                    break;
+                                }
+                                transformed_chunks
                             }
-                            _ => vec![bytes]
                         };
 
                         for outgoing in outgoing_chunks {
@@ -565,6 +614,9 @@ pub(super) async fn handle_proxy_request(
                                     stream_body_truncated = true;
                                 }
                             }
+                            if stream_debug_capture_body {
+                                stream_debug_body.extend_from_slice(outgoing.as_ref());
+                            }
                             if tx.send(Ok(outgoing)).await.is_err() {
                                 downstream_closed = true;
                                 break;
@@ -574,7 +626,36 @@ pub(super) async fn handle_proxy_request(
                             break;
                         }
                     }
-                    Ok(None) => break,
+                    Ok(None) => {
+                        if !matches!(stream_transform, StreamTransform::None)
+                            && !sse_pending.is_empty()
+                        {
+                            let tail_event = std::mem::take(&mut sse_pending);
+                            match transform_sse_event(
+                                stream_transform,
+                                tail_event.as_ref(),
+                                &mut stream_ctx_moved,
+                            ) {
+                                Ok(converted) => {
+                                    if !converted.is_empty()
+                                        && tx.send(Ok(Bytes::from(converted))).await.is_err()
+                                    {
+                                        downstream_closed = true;
+                                    }
+                                }
+                                Err(_) => {
+                                    stream_failed = true;
+                                    let _ = tx
+                                        .send(Err(std::io::Error::new(
+                                            std::io::ErrorKind::Other,
+                                            "stream transform failed",
+                                        )))
+                                        .await;
+                                }
+                            }
+                        }
+                        break;
+                    }
                     Err(_) => {
                         stream_failed = true;
                         let _ = tx
@@ -612,6 +693,15 @@ pub(super) async fn handle_proxy_request(
             } else {
                 Some(json!({"stream": true}))
             };
+            let stream_debug_response_body = if stream_debug_capture_body {
+                Some(json!({
+                    "stream": true,
+                    "payload": String::from_utf8_lossy(&stream_debug_body).to_string(),
+                    "truncated": false,
+                }))
+            } else {
+                None
+            };
             let mut response_headers = response_headers_sse(&stream_trace_id);
             finalize_log(
                 &stream_state,
@@ -630,6 +720,7 @@ pub(super) async fn handle_proxy_request(
                 Some(stream_request_body),
                 Some(stream_upstream_body),
                 stream_response_body,
+                stream_debug_response_body,
                 if stream_failed {
                     Some(502)
                 } else if stream_upstream_is_error {
@@ -700,6 +791,7 @@ pub(super) async fn handle_proxy_request(
                         "message": err_msg.clone(),
                     }
                 })),
+                None,
                 Some(502),
                 Some(upstream_status),
                 Some(upstream_headers_plain.clone()),
@@ -751,6 +843,7 @@ pub(super) async fn handle_proxy_request(
                     },
                     "upstream_raw": upstream_text.chars().take(200).collect::<String>(),
                 })),
+                None,
                 Some(502),
                 Some(upstream_status),
                 Some(upstream_headers_plain.clone()),
@@ -796,6 +889,7 @@ pub(super) async fn handle_proxy_request(
             Some(request_body.clone()),
             Some(upstream_body.clone()),
             Some(upstream_json.clone()),
+            None,
             Some(upstream_status),
             Some(upstream_status),
             Some(upstream_headers_plain.clone()),
@@ -847,6 +941,7 @@ pub(super) async fn handle_proxy_request(
         Some(request_body),
         Some(upstream_body),
         Some(output_body),
+        None,
         Some(200),
         Some(upstream_status),
         Some(upstream_headers_plain),
@@ -900,6 +995,10 @@ pub(super) fn build_upstream_body(
             let claude_bytes = openai_claude::openai_resp_to_claude(&request_bytes)?;
             claude_bytes
         }
+        // OpenAI Responses -> OpenAI Chat Completions
+        (EntryEndpoint::Responses, RuleProtocol::OpenaiCompletion) => {
+            openai_chat_responses::openai_responses_req_to_chat(&request_bytes, target_model)?
+        }
         // Same protocol, just update model
         _ => {
             return Ok(passthrough_with_model(request_body, target_model));
@@ -949,6 +1048,10 @@ fn map_response_body(
         // Claude Messages -> OpenAI Chat (response)
         (EntryEndpoint::ChatCompletions, RuleProtocol::Anthropic) => {
             claude_openai_responses::claude_resp_to_openai_responses(&response_bytes)
+        }
+        // OpenAI Chat Completions -> OpenAI Responses (response)
+        (EntryEndpoint::Responses, RuleProtocol::OpenaiCompletion) => {
+            openai_chat_responses::openai_chat_resp_to_responses(&response_bytes)
         }
         _ => return upstream_json.clone(),
     };
@@ -1024,4 +1127,105 @@ async fn reject_and_log(
     );
 
     resp
+}
+
+fn select_stream_transform(
+    entry_endpoint: EntryEndpoint,
+    target_protocol: &RuleProtocol,
+) -> StreamTransform {
+    match (entry_endpoint, target_protocol) {
+        (EntryEndpoint::Responses, RuleProtocol::Anthropic) => {
+            StreamTransform::ClaudeToOpenAIResponses
+        }
+        (EntryEndpoint::ChatCompletions, RuleProtocol::Anthropic) => {
+            StreamTransform::ClaudeToOpenAIChat
+        }
+        (EntryEndpoint::ChatCompletions, RuleProtocol::Openai) => {
+            StreamTransform::ChatCompletionsToResponses
+        }
+        (EntryEndpoint::Responses, RuleProtocol::OpenaiCompletion) => {
+            StreamTransform::ResponsesToChatCompletions
+        }
+        _ => StreamTransform::None,
+    }
+}
+
+fn transform_sse_event(
+    transform: StreamTransform,
+    event: &[u8],
+    ctx: &mut StreamContext,
+) -> Result<Vec<u8>, String> {
+    match transform {
+        StreamTransform::None => Ok(event.to_vec()),
+        StreamTransform::ClaudeToOpenAIChat => claude_openai_stream::claude_stream_to_openai(event, ctx),
+        StreamTransform::ClaudeToOpenAIResponses => {
+            claude_openai_responses_stream::claude_stream_to_openai_responses(event, ctx)
+        }
+        StreamTransform::ChatCompletionsToResponses => {
+            openai_chat_responses_stream::openai_chat_stream_to_responses(event, ctx)
+        }
+        StreamTransform::ResponsesToChatCompletions => {
+            openai_chat_responses_stream::openai_responses_stream_to_chat(event, ctx)
+        }
+    }
+}
+
+fn pop_sse_event(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
+    let (delimiter_start, delimiter_len) = find_sse_delimiter(buffer.as_slice())?;
+    let tail = buffer.split_off(delimiter_start + delimiter_len);
+    let event = std::mem::replace(buffer, tail);
+    Some(event)
+}
+
+fn find_sse_delimiter(buffer: &[u8]) -> Option<(usize, usize)> {
+    let mut idx = 0;
+    while idx < buffer.len() {
+        if idx + 1 < buffer.len() && buffer[idx] == b'\n' && buffer[idx + 1] == b'\n' {
+            return Some((idx, 2));
+        }
+        if idx + 3 < buffer.len()
+            && buffer[idx] == b'\r'
+            && buffer[idx + 1] == b'\n'
+            && buffer[idx + 2] == b'\r'
+            && buffer[idx + 3] == b'\n'
+        {
+            return Some((idx, 4));
+        }
+        idx += 1;
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_sse_delimiter, pop_sse_event};
+
+    #[test]
+    fn pop_sse_event_handles_lf_delimiter() {
+        let mut buffer = b"event: one\ndata: {\"a\":1}\n\nrest".to_vec();
+        let event = pop_sse_event(&mut buffer).expect("event should exist");
+        assert_eq!(
+            String::from_utf8(event).expect("utf8"),
+            "event: one\ndata: {\"a\":1}\n\n"
+        );
+        assert_eq!(String::from_utf8(buffer).expect("utf8"), "rest");
+    }
+
+    #[test]
+    fn pop_sse_event_handles_crlf_delimiter() {
+        let mut buffer = b"event: one\r\ndata: {\"a\":1}\r\n\r\nnext".to_vec();
+        let event = pop_sse_event(&mut buffer).expect("event should exist");
+        assert_eq!(
+            String::from_utf8(event).expect("utf8"),
+            "event: one\r\ndata: {\"a\":1}\r\n\r\n"
+        );
+        assert_eq!(String::from_utf8(buffer).expect("utf8"), "next");
+    }
+
+    #[test]
+    fn pop_sse_event_returns_none_for_partial_event() {
+        let mut buffer = b"event: one\ndata: {\"a\":1}\n".to_vec();
+        assert!(pop_sse_event(&mut buffer).is_none());
+        assert_eq!(find_sse_delimiter(&buffer), None);
+    }
 }
