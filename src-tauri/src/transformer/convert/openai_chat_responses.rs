@@ -163,6 +163,14 @@ pub fn openai_responses_req_to_chat(resp_req: &[u8], model: &str) -> Result<Vec<
                 Some("message") => {
                     let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
 
+                    // Map developer role to user (many APIs don't support developer role)
+                    let chat_role = match role {
+                        "assistant" => "assistant",
+                        "system" => "system",
+                        "developer" => "user",  // Map developer to user
+                        _ => "user"
+                    };
+
                     // Extract text content
                     let content = if let Some(parts) = item.get("content").and_then(|c| c.as_array()) {
                         let texts: Vec<String> = parts.iter()
@@ -185,7 +193,7 @@ pub fn openai_responses_req_to_chat(resp_req: &[u8], model: &str) -> Result<Vec<
                     };
 
                     messages.push(json!({
-                        "role": role,
+                        "role": chat_role,
                         "content": content
                     }));
                 }

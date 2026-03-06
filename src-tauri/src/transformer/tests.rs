@@ -322,4 +322,37 @@ mod tests {
 
         assert_eq!(resp["usage"]["total_tokens"], 20);
     }
+
+    #[test]
+    fn test_responses_req_to_chat_maps_developer_role() {
+        let resp_req = json!({
+            "model": "gpt-4",
+            "input": [
+                {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "System instruction"}]},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Hello"}]},
+                {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "Another instruction"}]}
+            ]
+        });
+
+        let result = openai_chat_responses::openai_responses_req_to_chat(
+            serde_json::to_vec(&resp_req).unwrap().as_slice(),
+            "gpt-4"
+        );
+
+        assert!(result.is_ok());
+        let chat_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+
+        let messages = chat_req["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+
+        // developer role should be mapped to user
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "System instruction");
+
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "Hello");
+
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["content"], "Another instruction");
+    }
 }
