@@ -5,26 +5,12 @@ use super::common::parse_sse;
 use serde_json::{json, Value};
 
 pub fn claude_stream_to_openai_responses(event: &[u8], ctx: &mut StreamContext) -> Result<Vec<u8>, String> {
-    let text = String::from_utf8_lossy(event);
-
     let (event_type, json_data) = parse_sse(event);
     if json_data.is_empty() {
         return Ok(Vec::new());
     }
 
     let data: Value = serde_json::from_str(&json_data).map_err(|e| format!("parse: {}", e))?;
-
-    // Write debug log to file
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/oc-proxy-debug.log")
-    {
-        use std::io::Write;
-        let _ = writeln!(file, "\n=== Claude Stream Event ===");
-        let _ = writeln!(file, "Event type: {}", event_type);
-        let _ = writeln!(file, "Data: {}", json_data);
-    }
 
     let mut result = String::new();
 
@@ -314,19 +300,6 @@ pub fn claude_stream_to_openai_responses(event: &[u8], ctx: &mut StreamContext) 
             result.push_str("data: [DONE]\n\n");
         }
         _ => {}
-    }
-
-    // Write debug log for converted result
-    if !result.is_empty() {
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/tmp/oc-proxy-debug.log")
-        {
-            use std::io::Write;
-            let _ = writeln!(file, "\n=== Converted OpenAI Responses Stream ===");
-            let _ = writeln!(file, "{}", result);
-        }
     }
 
     Ok(result.into_bytes())

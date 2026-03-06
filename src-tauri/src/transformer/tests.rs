@@ -324,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn test_responses_req_to_chat_maps_developer_role() {
+    fn test_responses_req_to_chat_preserves_developer_role() {
         let resp_req = json!({
             "model": "gpt-4",
             "input": [
@@ -345,14 +345,98 @@ mod tests {
         let messages = chat_req["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 3);
 
-        // developer role should be mapped to user
-        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["role"], "developer");
         assert_eq!(messages[0]["content"], "System instruction");
 
         assert_eq!(messages[1]["role"], "user");
         assert_eq!(messages[1]["content"], "Hello");
 
-        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["role"], "developer");
         assert_eq!(messages[2]["content"], "Another instruction");
+    }
+
+    #[test]
+    fn test_responses_req_to_chat_with_string_input() {
+        let resp_req = json!({
+            "model": "gpt-4",
+            "input": "hello from responses",
+            "stream": true
+        });
+
+        let result = openai_chat_responses::openai_responses_req_to_chat(
+            serde_json::to_vec(&resp_req).unwrap().as_slice(),
+            "gpt-4"
+        );
+
+        assert!(result.is_ok());
+        let chat_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        let messages = chat_req["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "hello from responses");
+        assert_eq!(chat_req["stream"], true);
+    }
+
+    #[test]
+    fn test_responses_req_to_chat_groups_pending_tool_calls() {
+        let resp_req = json!({
+            "model": "gpt-4",
+            "input": [
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "run tools"}]},
+                {"type": "function_call", "call_id": "call_1", "name": "tool_a", "arguments": "{\"x\":1}"},
+                {"type": "function_call", "call_id": "call_2", "name": "tool_b", "arguments": "{\"y\":2}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "a_done"},
+                {"type": "function_call_output", "call_id": "call_2", "output": "b_done"}
+            ]
+        });
+
+        let result = openai_chat_responses::openai_responses_req_to_chat(
+            serde_json::to_vec(&resp_req).unwrap().as_slice(),
+            "gpt-4"
+        );
+
+        assert!(result.is_ok());
+        let chat_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        let messages = chat_req["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 4);
+
+        assert_eq!(messages[1]["role"], "assistant");
+        let tool_calls = messages[1]["tool_calls"].as_array().unwrap();
+        assert_eq!(tool_calls.len(), 2);
+        assert_eq!(tool_calls[0]["id"], "call_1");
+        assert_eq!(tool_calls[1]["id"], "call_2");
+
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "call_1");
+        assert_eq!(messages[3]["role"], "tool");
+        assert_eq!(messages[3]["tool_call_id"], "call_2");
+    }
+
+    #[test]
+    fn test_responses_req_to_chat_converts_custom_tool() {
+        let resp_req = json!({
+            "model": "gpt-4",
+            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+            "tools": [{
+                "type": "custom",
+                "name": "apply_patch",
+                "description": "Apply patch using lark grammar"
+            }],
+            "max_output_tokens": 256
+        });
+
+        let result = openai_chat_responses::openai_responses_req_to_chat(
+            serde_json::to_vec(&resp_req).unwrap().as_slice(),
+            "gpt-4"
+        );
+
+        assert!(result.is_ok());
+        let chat_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        let tools = chat_req["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["function"]["name"], "apply_patch");
+        assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
+        assert_eq!(chat_req["max_completion_tokens"], 256);
     }
 }

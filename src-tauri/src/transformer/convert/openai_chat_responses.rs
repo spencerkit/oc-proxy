@@ -147,6 +147,7 @@ pub fn openai_responses_req_to_chat(resp_req: &[u8], model: &str) -> Result<Vec<
         .map_err(|e| format!("parse: {}", e))?;
 
     let mut messages = Vec::new();
+    let mut pending_tool_calls = Vec::new();
 
     // Convert instructions to system message
     if let Some(instructions) = req.get("instructions").and_then(|i| i.as_str()) {
@@ -156,80 +157,56 @@ pub fn openai_responses_req_to_chat(resp_req: &[u8], model: &str) -> Result<Vec<
         }));
     }
 
-    // Process input items
-    if let Some(input) = req.get("input").and_then(|i| i.as_array()) {
-        for item in input {
-            match item.get("type").and_then(|t| t.as_str()) {
-                Some("message") => {
-                    let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
-
-                    // Map developer role to user (many APIs don't support developer role)
-                    let chat_role = match role {
-                        "assistant" => "assistant",
-                        "system" => "system",
-                        "developer" => "user",  // Map developer to user
-                        _ => "user"
-                    };
-
-                    // Extract text content
-                    let content = if let Some(parts) = item.get("content").and_then(|c| c.as_array()) {
-                        let texts: Vec<String> = parts.iter()
-                            .filter_map(|p| {
-                                if p.get("type").and_then(|t| t.as_str()) == Some("input_text") {
-                                    p.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
-                        if texts.len() == 1 {
-                            Value::String(texts.into_iter().next().unwrap())
-                        } else {
-                            Value::String(texts.join("\n"))
-                        }
-                    } else {
-                        Value::String(String::new())
-                    };
-
-                    messages.push(json!({
-                        "role": chat_role,
-                        "content": content
-                    }));
-                }
-                Some("function_call") => {
-                    let id = item.get("id").and_then(|i| i.as_str()).unwrap_or("");
-                    let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    let args = item.get("arguments").and_then(|a| a.as_str()).unwrap_or("{}");
-
-                    // Create assistant message with tool_calls
-                    messages.push(json!({
-                        "role": "assistant",
-                        "content": null,
-                        "tool_calls": [{
-                            "id": id,
+    match req.get("input") {
+        Some(Value::String(input_text)) => {
+            messages.push(json!({
+                "role": "user",
+                "content": input_text
+            }));
+        }
+        Some(Value::Array(input)) => {
+            for item in input {
+                match item.get("type").and_then(|t| t.as_str()) {
+                    Some("message") => {
+                        flush_pending_tool_calls(&mut messages, &mut pending_tool_calls);
+                        let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+                        messages.push(json!({
+                            "role": role,
+                            "content": extract_openai2_text(item.get("content"))
+                        }));
+                    }
+                    Some("function_call") => {
+                        let call_id = item
+                            .get("call_id")
+                            .or_else(|| item.get("id"))
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("");
+                        let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                        let args = item.get("arguments").and_then(|a| a.as_str()).unwrap_or("{}");
+                        pending_tool_calls.push(json!({
+                            "id": call_id,
                             "type": "function",
                             "function": {
                                 "name": name,
                                 "arguments": args
                             }
-                        }]
-                    }));
+                        }));
+                    }
+                    Some("function_call_output") => {
+                        flush_pending_tool_calls(&mut messages, &mut pending_tool_calls);
+                        let call_id = item.get("call_id").and_then(|c| c.as_str()).unwrap_or("");
+                        messages.push(json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": json_value_to_string(item.get("output"))
+                        }));
+                    }
+                    _ => {}
                 }
-                Some("function_call_output") => {
-                    let call_id = item.get("call_id").and_then(|c| c.as_str()).unwrap_or("");
-                    let output = item.get("output").and_then(|o| o.as_str()).unwrap_or("");
-
-                    // Create tool message
-                    messages.push(json!({
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": output
-                    }));
-                }
-                _ => {}
             }
+            flush_pending_tool_calls(&mut messages, &mut pending_tool_calls);
         }
+        _ => {}
     }
 
     let mut chat_req = json!({
@@ -241,18 +218,32 @@ pub fn openai_responses_req_to_chat(resp_req: &[u8], model: &str) -> Result<Vec<
     // Convert tools
     if let Some(tools) = req.get("tools").and_then(|t| t.as_array()) {
         let chat_tools: Vec<Value> = tools.iter().filter_map(|t| {
-            if t.get("type").and_then(|ty| ty.as_str()) == Some("function") {
-                Some(json!({
-                    "type": "function",
-                    "function": {
-                        "name": t.get("name")?,
-                        "description": t.get("description"),
-                        "parameters": t.get("parameters")?
-                    }
-                }))
-            } else {
-                None
-            }
+            let tool_type = t.get("type").and_then(|ty| ty.as_str())?;
+            let name = t.get("name").and_then(|n| n.as_str())?;
+            let description = t.get("description").cloned().unwrap_or(Value::Null);
+            let parameters = match tool_type {
+                "function" => t.get("parameters").cloned().unwrap_or_else(|| json!({})),
+                "custom" => json!({
+                    "type": "object",
+                    "properties": {
+                        "input": {
+                            "type": "string",
+                            "description": "The input for this tool"
+                        }
+                    },
+                    "required": ["input"]
+                }),
+                _ => return None,
+            };
+
+            Some(json!({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": parameters
+                }
+            }))
         }).collect();
 
         if !chat_tools.is_empty() {
@@ -262,10 +253,59 @@ pub fn openai_responses_req_to_chat(resp_req: &[u8], model: &str) -> Result<Vec<
 
     // Map max_output_tokens to max_completion_tokens
     if let Some(max_tokens) = req.get("max_output_tokens") {
-        chat_req["max_completion_tokens"] = max_tokens.clone();
+        let should_set = max_tokens
+            .as_i64()
+            .map(|v| v > 0)
+            .or_else(|| max_tokens.as_u64().map(|v| v > 0))
+            .unwrap_or(false);
+        if should_set {
+            chat_req["max_completion_tokens"] = max_tokens.clone();
+        }
     }
 
     serde_json::to_vec(&chat_req).map_err(|e| format!("serialize: {}", e))
+}
+
+fn flush_pending_tool_calls(messages: &mut Vec<Value>, pending_tool_calls: &mut Vec<Value>) {
+    if pending_tool_calls.is_empty() {
+        return;
+    }
+    let tool_calls = std::mem::take(pending_tool_calls);
+    messages.push(json!({
+        "role": "assistant",
+        "content": Value::Null,
+        "tool_calls": tool_calls
+    }));
+}
+
+fn extract_openai2_text(content: Option<&Value>) -> String {
+    let Some(content) = content else {
+        return String::new();
+    };
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| {
+                let part_type = p.get("type").and_then(|t| t.as_str());
+                if matches!(part_type, Some("input_text" | "output_text" | "text")) {
+                    p.get("text").and_then(|t| t.as_str()).map(|t| t.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+fn json_value_to_string(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(s)) => s.clone(),
+        Some(v) => serde_json::to_string(v).unwrap_or_default(),
+        None => String::new(),
+    }
 }
 
 /// Convert Responses response to Chat Completions response

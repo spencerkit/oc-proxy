@@ -10,6 +10,9 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
 
     // Handle [DONE] marker
     if json_data == "[DONE]" {
+        if ctx.finish_reason_sent {
+            return Ok(Vec::new());
+        }
         // Close any unclosed blocks
         let mut result = String::new();
 
@@ -34,6 +37,7 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
                 }
             });
             result.push_str(&format!("data: {}\n\n", serde_json::to_string(&evt2).unwrap()));
+            ctx.tool_block_started = false;
         }
 
         if ctx.content_block_started {
@@ -63,6 +67,7 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
                 }
             });
             result.push_str(&format!("data: {}\n\n", serde_json::to_string(&evt3).unwrap()));
+            ctx.content_block_started = false;
         }
 
         let evt = json!({
@@ -80,6 +85,7 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
         });
         result.push_str(&format!("data: {}\n\n", serde_json::to_string(&evt).unwrap()));
         result.push_str("data: [DONE]\n\n");
+        ctx.finish_reason_sent = true;
 
         return Ok(result.into_bytes());
     }
@@ -89,6 +95,13 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
     }
 
     let data: Value = serde_json::from_str(&json_data).map_err(|e| format!("parse: {}", e))?;
+    if let Some(err_msg) = data
+        .get("error")
+        .and_then(|err| err.get("message"))
+        .and_then(|m| m.as_str())
+    {
+        return Err(format!("upstream error: {err_msg}"));
+    }
     let mut result = String::new();
 
     // Extract message ID from chunk ID
@@ -113,8 +126,6 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
     // Process choices
     if let Some(choices) = data.get("choices").and_then(|c| c.as_array()) {
         for choice in choices {
-            let idx = choice.get("index").and_then(|i| i.as_i64()).unwrap_or(0) as i32;
-
             if let Some(delta) = choice.get("delta") {
                 // Auto-generate response.created event on first delta
                 if !ctx.message_start_sent {
@@ -140,14 +151,14 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
                     // Auto-generate message item added if not started
                     if !ctx.content_block_started {
                         ctx.content_block_started = true;
-                        ctx.content_index = idx;
+                        ctx.content_index = 0;
 
                         let evt1 = json!({
                             "type": "response.output_item.added",
-                            "output_index": idx,
+                            "output_index": ctx.content_index,
                             "item": {
                                 "type": "message",
-                                "id": format!("msg_{}_{}", ctx.message_id, idx),
+                                "id": format!("msg_{}_{}", ctx.message_id, ctx.content_index),
                                 "role": "assistant",
                                 "status": "in_progress",
                                 "content": []
@@ -157,7 +168,7 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
 
                         let evt2 = json!({
                             "type": "response.content_part.added",
-                            "output_index": idx,
+                            "output_index": ctx.content_index,
                             "content_index": 0,
                             "part": {"type": "output_text", "text": ""}
                         });
@@ -176,7 +187,7 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
                 // Handle tool_calls delta
                 if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
                     for tc in tool_calls {
-                        let tool_idx = tc.get("index").and_then(|i| i.as_i64()).unwrap_or(0) as i32;
+                        let tool_idx = tc.get("index").and_then(|i| i.as_i64()).unwrap_or(0) as i32 + 1;
 
                         // First chunk for this tool call - has id and function.name
                         if let (Some(id), Some(function)) = (tc.get("id"), tc.get("function")) {
@@ -249,6 +260,9 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
 
             // Handle finish_reason
             if let Some(finish_reason) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                if finish_reason.is_empty() || ctx.finish_reason_sent {
+                    continue;
+                }
                 // Close tool block if open
                 if ctx.tool_block_started {
                     let evt = json!({
@@ -326,6 +340,7 @@ pub fn openai_chat_stream_to_responses(event: &[u8], ctx: &mut StreamContext) ->
                 });
                 result.push_str(&format!("data: {}\n\n", serde_json::to_string(&evt).unwrap()));
                 result.push_str("data: [DONE]\n\n");
+                ctx.finish_reason_sent = true;
             }
         }
     }
@@ -505,4 +520,38 @@ pub fn openai_responses_stream_to_chat(event: &[u8], ctx: &mut StreamContext) ->
     }
 
     Ok(result.into_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::openai_chat_stream_to_responses;
+    use crate::transformer::types::StreamContext;
+
+    #[test]
+    fn chat_to_responses_stream_does_not_emit_duplicate_completed_on_done() {
+        let mut ctx = StreamContext::new();
+        ctx.model_name = "gpt-4".to_string();
+
+        let finish_event = br#"data: {"id":"chatcmpl_1","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}
+
+"#;
+        let first = openai_chat_stream_to_responses(finish_event, &mut ctx).expect("convert");
+        let first_text = String::from_utf8(first).expect("utf8");
+        assert!(first_text.contains("\"type\":\"response.completed\""));
+        assert!(first_text.contains("data: [DONE]"));
+
+        let done = b"data: [DONE]\n\n";
+        let second = openai_chat_stream_to_responses(done, &mut ctx).expect("convert");
+        assert!(second.is_empty());
+    }
+
+    #[test]
+    fn chat_to_responses_stream_surfaces_upstream_error() {
+        let mut ctx = StreamContext::new();
+        let err_event = br#"data: {"error":{"message":"upstream unavailable"}}
+
+"#;
+        let result = openai_chat_stream_to_responses(err_event, &mut ctx);
+        assert!(result.is_err());
+    }
 }

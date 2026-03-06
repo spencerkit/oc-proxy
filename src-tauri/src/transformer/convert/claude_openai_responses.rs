@@ -78,17 +78,6 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
     let req: Value = serde_json::from_slice(openai_req)
         .map_err(|e| format!("parse: {}", e))?;
 
-    // Write debug log to file
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/oc-proxy-debug.log")
-    {
-        use std::io::Write;
-        let _ = writeln!(file, "\n=== OpenAI Responses Request ===");
-        let _ = writeln!(file, "{}", serde_json::to_string_pretty(&req).unwrap());
-    }
-
     let mut claude_req = json!({
         "model": model,
         "max_tokens": 8192,
@@ -186,17 +175,6 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
 
     claude_req["messages"] = json!(messages);
 
-    // Write debug log to file
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/oc-proxy-debug.log")
-    {
-        use std::io::Write;
-        let _ = writeln!(file, "\n=== Converted Claude Request ===");
-        let _ = writeln!(file, "{}", serde_json::to_string_pretty(&claude_req).unwrap());
-    }
-
     if let Some(tools) = req.get("tools").and_then(|t| t.as_array()) {
         let claude_tools: Vec<Value> = tools.iter().filter_map(|t| {
             if t.get("type").and_then(|ty| ty.as_str()) == Some("function") {
@@ -220,17 +198,6 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
 pub fn claude_resp_to_openai_responses(claude_resp: &[u8]) -> Result<Vec<u8>, String> {
     let resp: Value = serde_json::from_slice(claude_resp)
         .map_err(|e| format!("parse: {}", e))?;
-
-    // Write debug log to file
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/oc-proxy-debug.log")
-    {
-        use std::io::Write;
-        let _ = writeln!(file, "\n=== Claude Response ===");
-        let _ = writeln!(file, "{}", serde_json::to_string_pretty(&resp).unwrap());
-    }
 
     let mut content = Vec::new();
     let mut stop_reason = "end_turn";
@@ -282,17 +249,6 @@ pub fn claude_resp_to_openai_responses(claude_resp: &[u8]) -> Result<Vec<u8>, St
             "output_tokens": resp.get("usage").and_then(|u| u.get("output_tokens")).unwrap_or(&json!(0))
         }
     });
-
-    // Write debug log to file
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/oc-proxy-debug.log")
-    {
-        use std::io::Write;
-        let _ = writeln!(file, "\n=== Converted OpenAI Responses Response ===");
-        let _ = writeln!(file, "{}", serde_json::to_string_pretty(&claude_resp).unwrap());
-    }
 
     serde_json::to_vec(&claude_resp).map_err(|e| format!("serialize: {}", e))
 }

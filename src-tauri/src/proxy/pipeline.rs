@@ -1141,10 +1141,10 @@ fn select_stream_transform(
             StreamTransform::ClaudeToOpenAIChat
         }
         (EntryEndpoint::ChatCompletions, RuleProtocol::Openai) => {
-            StreamTransform::ChatCompletionsToResponses
+            StreamTransform::ResponsesToChatCompletions
         }
         (EntryEndpoint::Responses, RuleProtocol::OpenaiCompletion) => {
-            StreamTransform::ResponsesToChatCompletions
+            StreamTransform::ChatCompletionsToResponses
         }
         _ => StreamTransform::None,
     }
@@ -1198,7 +1198,10 @@ fn find_sse_delimiter(buffer: &[u8]) -> Option<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_sse_delimiter, pop_sse_event};
+    use super::{
+        find_sse_delimiter, pop_sse_event, select_stream_transform, EntryEndpoint, StreamTransform,
+    };
+    use crate::models::RuleProtocol;
 
     #[test]
     fn pop_sse_event_handles_lf_delimiter() {
@@ -1227,5 +1230,17 @@ mod tests {
         let mut buffer = b"event: one\ndata: {\"a\":1}\n".to_vec();
         assert!(pop_sse_event(&mut buffer).is_none());
         assert_eq!(find_sse_delimiter(&buffer), None);
+    }
+
+    #[test]
+    fn select_stream_transform_maps_openai_cross_surface_correctly() {
+        assert!(matches!(
+            select_stream_transform(EntryEndpoint::Responses, &RuleProtocol::OpenaiCompletion),
+            StreamTransform::ChatCompletionsToResponses
+        ));
+        assert!(matches!(
+            select_stream_transform(EntryEndpoint::ChatCompletions, &RuleProtocol::Openai),
+            StreamTransform::ResponsesToChatCompletions
+        ));
     }
 }

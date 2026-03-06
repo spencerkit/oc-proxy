@@ -421,6 +421,11 @@ pub(super) fn log_simple(
     error: Option<LogEntryError>,
 ) {
     let capture_body = should_capture_body(state);
+    let response_body_for_log = if capture_body {
+        response_body.clone()
+    } else {
+        None
+    };
     let entry = LogEntry {
         timestamp: Utc::now().to_rfc3339(),
         trace_id,
@@ -445,7 +450,7 @@ pub(super) fn log_simple(
         response_headers: None,
         request_body: None,
         forward_request_body: None,
-        response_body: if capture_body { response_body } else { None },
+        response_body: response_body_for_log,
         token_usage: None,
         cost_snapshot: None,
         http_status,
@@ -453,7 +458,11 @@ pub(super) fn log_simple(
         duration_ms: 0,
         error,
     };
-    state.log_store.append(entry.clone());
+    let mut dev_entry = entry.clone();
+    dev_entry.response_body = response_body;
+    state
+        .log_store
+        .append_with_dev_entry(entry.clone(), Some(dev_entry));
     state.stats_store.append_log(&entry);
 }
 
@@ -477,6 +486,16 @@ pub(super) fn append_processing_log(
     forward_request_body: Option<Value>,
     capture_body: bool,
 ) {
+    let request_body_for_log = if capture_body {
+        request_body.clone()
+    } else {
+        None
+    };
+    let forward_request_body_for_log = if capture_body {
+        forward_request_body.clone()
+    } else {
+        None
+    };
     let entry = LogEntry {
         timestamp: timestamp.to_string(),
         trace_id: trace_id.to_string(),
@@ -504,12 +523,8 @@ pub(super) fn append_processing_log(
         forward_request_headers,
         upstream_response_headers: None,
         response_headers: None,
-        request_body: if capture_body { request_body } else { None },
-        forward_request_body: if capture_body {
-            forward_request_body
-        } else {
-            None
-        },
+        request_body: request_body_for_log,
+        forward_request_body: forward_request_body_for_log,
         response_body: None,
         token_usage: None,
         cost_snapshot: None,
@@ -518,7 +533,12 @@ pub(super) fn append_processing_log(
         duration_ms: 0,
         error: None,
     };
-    state.log_store.upsert_by_trace_id(entry);
+    let mut dev_entry = entry.clone();
+    dev_entry.request_body = request_body;
+    dev_entry.forward_request_body = forward_request_body;
+    state
+        .log_store
+        .upsert_by_trace_id_with_dev_entry(entry, Some(dev_entry));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -543,6 +563,7 @@ pub(super) fn finalize_log(
     request_body: Option<Value>,
     forward_request_body: Option<Value>,
     response_body: Option<Value>,
+    debug_response_body: Option<Value>,
     http_status: Option<u16>,
     upstream_status: Option<u16>,
     upstream_headers: Option<HashMap<String, String>>,
@@ -552,6 +573,23 @@ pub(super) fn finalize_log(
     status: &str,
     capture_body: bool,
 ) {
+    let request_body_for_log = if capture_body {
+        request_body.clone()
+    } else {
+        None
+    };
+    let forward_request_body_for_log = if capture_body {
+        forward_request_body.clone()
+    } else {
+        None
+    };
+    let response_body_for_log = if capture_body {
+        response_body.clone()
+    } else {
+        None
+    };
+    let debug_response_body_for_dev = debug_response_body.or_else(|| response_body.clone());
+
     let cost_snapshot = token_usage
         .as_ref()
         .map(|usage| build_cost_snapshot(rule, usage));
@@ -583,13 +621,9 @@ pub(super) fn finalize_log(
         forward_request_headers,
         upstream_response_headers: upstream_headers,
         response_headers,
-        request_body: if capture_body { request_body } else { None },
-        forward_request_body: if capture_body {
-            forward_request_body
-        } else {
-            None
-        },
-        response_body: if capture_body { response_body } else { None },
+        request_body: request_body_for_log,
+        forward_request_body: forward_request_body_for_log,
+        response_body: response_body_for_log,
         token_usage,
         cost_snapshot,
         http_status,
@@ -597,7 +631,13 @@ pub(super) fn finalize_log(
         duration_ms,
         error: None,
     };
-    state.log_store.upsert_by_trace_id(entry.clone());
+    let mut dev_entry = entry.clone();
+    dev_entry.request_body = request_body;
+    dev_entry.forward_request_body = forward_request_body;
+    dev_entry.response_body = debug_response_body_for_dev;
+    state
+        .log_store
+        .upsert_by_trace_id_with_dev_entry(entry.clone(), Some(dev_entry));
     state.stats_store.append_log(&entry);
 }
 
