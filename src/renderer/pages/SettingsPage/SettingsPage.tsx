@@ -50,6 +50,7 @@ export const SettingsPage: React.FC = () => {
 
   const [portText, setPortText] = useState("8080")
   const [strictMode, setStrictMode] = useState(false)
+  const [textToolCallFallbackEnabled, setTextToolCallFallbackEnabled] = useState(true)
   const [detailedLogs, setDetailedLogs] = useState(false)
   const [launchOnStartup, setLaunchOnStartup] = useState(false)
   const [closeToTray, setCloseToTray] = useState(true)
@@ -100,6 +101,7 @@ export const SettingsPage: React.FC = () => {
     })
     lastConfigPortRef.current = currentPort
     setStrictMode(config.compat.strictMode)
+    setTextToolCallFallbackEnabled(config.compat.textToolCallFallbackEnabled ?? true)
     setDetailedLogs(!!config.logging.captureBody)
     setLaunchOnStartup(config.ui.launchOnStartup)
     setCloseToTray(config.ui.closeToTray ?? true)
@@ -481,6 +483,30 @@ export const SettingsPage: React.FC = () => {
                       compat: {
                         ...current.compat,
                         strictMode: next,
+                      },
+                    })
+                  )
+                }}
+              />
+            </div>
+
+            <div className={styles.formGroupSwitch}>
+              <div className={styles.switchLabel}>
+                <label htmlFor="textToolCallFallbackEnabled">
+                  {t("settings.textToolCallFallbackEnabled")}
+                </label>
+                <p>{t("settings.textToolCallFallbackEnabledHint")}</p>
+              </div>
+              <Switch
+                id="textToolCallFallbackEnabled"
+                checked={textToolCallFallbackEnabled}
+                onChange={next => {
+                  setTextToolCallFallbackEnabled(next)
+                  void applyImmediateConfig(current =>
+                    buildImmediateConfig(current, {
+                      compat: {
+                        ...current.compat,
+                        textToolCallFallbackEnabled: next,
                       },
                     })
                   )

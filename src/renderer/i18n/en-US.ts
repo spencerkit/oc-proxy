@@ -105,6 +105,9 @@ export const enUS = {
     nonPortAutoApplyHint: "All settings except service port are applied immediately.",
     strictMode: "Strict Mode (fail fast on incompatible fields)",
     strictModeHint: "When enabled, incompatible protocol fields fail immediately.",
+    textToolCallFallbackEnabled: "Text Tool Call Fallback",
+    textToolCallFallbackEnabledHint:
+      "When enabled, placeholders like [Tool Call: Name({...})] can be converted to tool calls if the tool is declared in this request.",
     detailedLogs: "Detailed Logs (capture request/response bodies)",
     detailedLogsHint:
       "When disabled, request and response bodies are not stored in logs for better privacy and performance.",

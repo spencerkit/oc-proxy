@@ -1,7 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use crate::transformer::convert::{claude_openai, openai_claude, openai_chat_responses};
+    use crate::transformer::convert::{
+        claude_openai, claude_openai_responses, claude_openai_responses_stream,
+        openai_chat_responses, openai_claude,
+    };
+    use crate::transformer::types::StreamContext;
     use serde_json::json;
+    use std::collections::HashSet;
 
     #[test]
     fn test_claude_to_openai_request() {
@@ -58,6 +63,593 @@ mod tests {
         assert_eq!(claude_resp["content"][0]["type"], "text");
         assert_eq!(claude_resp["content"][0]["text"], "Hello! How can I help you?");
         assert_eq!(claude_resp["stop_reason"], "end_turn");
+    }
+
+    #[test]
+    fn test_claude_messages_to_responses_maps_tool_result_to_input_text() {
+        let claude_req = json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "run tool"}]},
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "call_1", "name": "list_files", "input": {"path": "."}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "file_a\\nfile_b"}]}
+            ],
+            "stream": true
+        });
+
+        let result = claude_openai_responses::claude_req_to_openai_responses(
+            serde_json::to_vec(&claude_req).unwrap().as_slice(),
+            "gpt-5.2",
+        );
+
+        assert!(result.is_ok());
+        let responses_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        let input = responses_req["input"].as_array().unwrap();
+
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+
+        assert_eq!(input[1]["type"], "message");
+        assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(input[1]["content"][0]["type"], "output_text");
+        let tool_call_text = input[1]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(tool_call_text.contains("[Tool Call: list_files("));
+        assert!(tool_call_text.contains("\"path\":\".\""));
+
+        assert_eq!(input[2]["type"], "message");
+        assert_eq!(input[2]["role"], "user");
+        assert_eq!(input[2]["content"][0]["type"], "input_text");
+        let text = input[2]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(text.contains("[Tool Result:"));
+        assert!(text.contains("file_a"));
+        assert!(text.contains("file_b"));
+
+        let serialized = serde_json::to_string(&responses_req).unwrap();
+        assert!(!serialized.contains("\"function_call_output\""));
+    }
+
+    #[test]
+    fn test_claude_messages_to_responses_maps_assistant_text_to_output_text() {
+        let claude_req = json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "I can help."}]}
+            ],
+            "stream": false
+        });
+
+        let result = claude_openai_responses::claude_req_to_openai_responses(
+            serde_json::to_vec(&claude_req).unwrap().as_slice(),
+            "gpt-5.2",
+        );
+
+        assert!(result.is_ok());
+        let responses_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        let input = responses_req["input"].as_array().unwrap();
+        assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(input[1]["content"][0]["type"], "output_text");
+        assert_eq!(input[1]["content"][0]["text"], "I can help.");
+    }
+
+    #[test]
+    fn test_claude_messages_to_responses_defaults_stream_to_true_when_missing_or_null() {
+        let missing_stream_req = json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]}
+            ]
+        });
+
+        let missing_result = claude_openai_responses::claude_req_to_openai_responses(
+            serde_json::to_vec(&missing_stream_req).unwrap().as_slice(),
+            "gpt-5.2",
+        )
+        .expect("convert missing stream");
+        let missing_json: serde_json::Value = serde_json::from_slice(&missing_result).unwrap();
+        assert_eq!(missing_json["stream"], true);
+
+        let null_stream_req = json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]}
+            ],
+            "stream": null
+        });
+
+        let null_result = claude_openai_responses::claude_req_to_openai_responses(
+            serde_json::to_vec(&null_stream_req).unwrap().as_slice(),
+            "gpt-5.2",
+        )
+        .expect("convert null stream");
+        let null_json: serde_json::Value = serde_json::from_slice(&null_result).unwrap();
+        assert_eq!(null_json["stream"], true);
+    }
+
+    #[test]
+    fn test_openai_responses_req_to_claude_accepts_output_text_message_parts() {
+        let openai_req = json!({
+            "model": "gpt-5.2",
+            "input": [
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "tool says hi"}]},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
+            ]
+        });
+
+        let result = claude_openai_responses::openai_responses_req_to_claude(
+            serde_json::to_vec(&openai_req).unwrap().as_slice(),
+            "claude-sonnet-4-6",
+        );
+
+        assert!(result.is_ok());
+        let claude_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        let messages = claude_req["messages"].as_array().unwrap();
+        assert_eq!(messages[0]["role"], "assistant");
+        assert_eq!(messages[0]["content"][0]["type"], "text");
+        assert_eq!(messages[0]["content"][0]["text"], "tool says hi");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"][0]["text"], "continue");
+    }
+
+    #[test]
+    fn test_claude_resp_to_openai_responses_maps_text_and_tool_use() {
+        let claude_resp = json!({
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Working on it"},
+                {"type": "tool_use", "id": "call_1", "name": "list_files", "input": {"path": "."}}
+            ],
+            "model": "claude-sonnet-4-6",
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 11, "output_tokens": 7}
+        });
+
+        let result = claude_openai_responses::claude_resp_to_openai_responses(
+            serde_json::to_vec(&claude_resp).unwrap().as_slice(),
+        );
+
+        assert!(result.is_ok());
+        let responses_resp: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        assert_eq!(responses_resp["object"], "response");
+        assert_eq!(responses_resp["status"], "completed");
+        assert_eq!(responses_resp["output"][0]["type"], "message");
+        assert_eq!(responses_resp["output"][0]["content"][0]["type"], "output_text");
+        assert_eq!(responses_resp["output"][0]["content"][0]["text"], "Working on it");
+        assert_eq!(responses_resp["output"][1]["type"], "function_call");
+        assert_eq!(responses_resp["output"][1]["call_id"], "call_1");
+        assert_eq!(responses_resp["output"][1]["name"], "list_files");
+        let args = responses_resp["output"][1]["arguments"].as_str().unwrap_or("");
+        assert!(args.contains("\"path\":\".\""));
+        assert_eq!(responses_resp["usage"]["input_tokens"], 11);
+        assert_eq!(responses_resp["usage"]["output_tokens"], 7);
+        assert_eq!(responses_resp["usage"]["total_tokens"], 18);
+    }
+
+    #[test]
+    fn test_claude_stream_to_openai_responses_propagates_upstream_error_event() {
+        let mut ctx = StreamContext::new();
+        let event = b"event: message_start\ndata: {\"type\":\"error\",\"error\":{\"message\":\"upstream boom\"}}\n\n";
+
+        let result = claude_openai_responses_stream::claude_stream_to_openai_responses(event, &mut ctx);
+        assert!(result.is_err());
+        let err = result.err().unwrap_or_default();
+        assert!(err.contains("upstream error"));
+        assert!(err.contains("upstream boom"));
+    }
+
+    #[test]
+    fn test_openai_responses_stream_to_claude_emits_text_flow() {
+        let mut ctx = StreamContext::new();
+        ctx.model_name = "claude-sonnet-4-6".to_string();
+
+        let created = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n";
+        let added = b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\"}}\n\n";
+        let delta = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"hello\"}\n\n";
+        let completed = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"output_tokens\":5}}}\n\n";
+        let done = b"data: [DONE]\n\n";
+
+        let mut out = Vec::new();
+        out.extend(claude_openai_responses_stream::openai_responses_stream_to_claude(created, &mut ctx).expect("created"));
+        out.extend(claude_openai_responses_stream::openai_responses_stream_to_claude(added, &mut ctx).expect("added"));
+        out.extend(claude_openai_responses_stream::openai_responses_stream_to_claude(delta, &mut ctx).expect("delta"));
+        out.extend(claude_openai_responses_stream::openai_responses_stream_to_claude(completed, &mut ctx).expect("completed"));
+
+        let s = String::from_utf8(out.clone()).expect("utf8");
+        assert!(s.contains("event: message_start"));
+        assert!(s.contains("\"type\":\"message_start\""));
+        assert!(s.contains("event: content_block_start"));
+        assert!(s.contains("\"type\":\"content_block_start\""));
+        assert!(s.contains("\"type\":\"text_delta\""));
+        assert!(s.contains("\"text\":\"hello\""));
+        assert!(s.contains("event: message_delta"));
+        assert!(s.contains("\"stop_reason\":\"end_turn\""));
+        assert!(s.contains("event: message_stop"));
+
+        let done_out = claude_openai_responses_stream::openai_responses_stream_to_claude(done, &mut ctx)
+            .expect("done");
+        assert!(done_out.is_empty());
+
+        let after_done = String::from_utf8(out).expect("utf8");
+        assert_eq!(after_done.matches("event: message_stop").count(), 1);
+    }
+
+    #[test]
+    fn test_openai_responses_resp_to_claude_text_tool_call_fallback_enabled() {
+        let openai_resp = json!({
+            "id": "resp_1",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "[Tool Call: Bash({\"command\":\"pwd\"})]"
+                }]
+            }],
+            "usage": {"input_tokens": 1, "output_tokens": 1}
+        });
+
+        let mut allowed = HashSet::new();
+        allowed.insert("Bash".to_string());
+        let options = claude_openai_responses::ResponsesToClaudeOptions {
+            text_tool_call_fallback_enabled: true,
+            allowed_tool_names: allowed,
+        };
+
+        let result = claude_openai_responses::openai_responses_resp_to_claude_with_options(
+            serde_json::to_vec(&openai_resp).unwrap().as_slice(),
+            &options,
+        )
+        .expect("convert");
+        let claude_resp: serde_json::Value = serde_json::from_slice(&result).expect("json");
+
+        assert_eq!(claude_resp["content"][0]["type"], "tool_use");
+        assert_eq!(claude_resp["content"][0]["name"], "Bash");
+        assert_eq!(claude_resp["content"][0]["input"]["command"], "pwd");
+        assert_eq!(claude_resp["stop_reason"], "tool_use");
+    }
+
+    #[test]
+    fn test_openai_responses_resp_to_claude_text_tool_call_fallback_with_prefix_text() {
+        let openai_resp = json!({
+            "id": "resp_1",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "先说明一下：\n[Tool Call: Bash({\"command\":\"pwd\"})]"
+                }]
+            }],
+            "usage": {"input_tokens": 1, "output_tokens": 1}
+        });
+
+        let mut allowed = HashSet::new();
+        allowed.insert("Bash".to_string());
+        let options = claude_openai_responses::ResponsesToClaudeOptions {
+            text_tool_call_fallback_enabled: true,
+            allowed_tool_names: allowed,
+        };
+
+        let result = claude_openai_responses::openai_responses_resp_to_claude_with_options(
+            serde_json::to_vec(&openai_resp).unwrap().as_slice(),
+            &options,
+        )
+        .expect("convert");
+        let claude_resp: serde_json::Value = serde_json::from_slice(&result).expect("json");
+
+        assert_eq!(claude_resp["content"][0]["type"], "tool_use");
+        assert_eq!(claude_resp["content"][0]["name"], "Bash");
+        assert_eq!(claude_resp["content"][0]["input"]["command"], "pwd");
+        assert_eq!(claude_resp["stop_reason"], "tool_use");
+    }
+
+    #[test]
+    fn test_openai_responses_resp_to_claude_text_tool_call_fallback_command_array_json() {
+        let openai_resp = json!({
+            "id": "resp_1",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": r#"{"command":["bash","-lc","pwd"],"timeout_ms":120000}"#
+                }]
+            }],
+            "usage": {"input_tokens": 1, "output_tokens": 1}
+        });
+
+        let mut allowed = HashSet::new();
+        allowed.insert("Bash".to_string());
+        let options = claude_openai_responses::ResponsesToClaudeOptions {
+            text_tool_call_fallback_enabled: true,
+            allowed_tool_names: allowed,
+        };
+
+        let result = claude_openai_responses::openai_responses_resp_to_claude_with_options(
+            serde_json::to_vec(&openai_resp).unwrap().as_slice(),
+            &options,
+        )
+        .expect("convert");
+        let claude_resp: serde_json::Value = serde_json::from_slice(&result).expect("json");
+
+        assert_eq!(claude_resp["content"][0]["type"], "tool_use");
+        assert_eq!(claude_resp["content"][0]["name"], "Bash");
+        assert_eq!(claude_resp["content"][0]["input"]["command"], "pwd");
+        assert_eq!(claude_resp["content"][0]["input"]["timeout"], 120000);
+        assert_eq!(claude_resp["stop_reason"], "tool_use");
+    }
+
+    #[test]
+    fn test_openai_responses_resp_to_claude_text_tool_call_fallback_respects_whitelist() {
+        let openai_resp = json!({
+            "id": "resp_1",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "[Tool Call: Bash({\"command\":\"pwd\"})]"
+                }]
+            }],
+            "usage": {"input_tokens": 1, "output_tokens": 1}
+        });
+
+        let mut allowed = HashSet::new();
+        allowed.insert("Read".to_string());
+        let options = claude_openai_responses::ResponsesToClaudeOptions {
+            text_tool_call_fallback_enabled: true,
+            allowed_tool_names: allowed,
+        };
+
+        let result = claude_openai_responses::openai_responses_resp_to_claude_with_options(
+            serde_json::to_vec(&openai_resp).unwrap().as_slice(),
+            &options,
+        )
+        .expect("convert");
+        let claude_resp: serde_json::Value = serde_json::from_slice(&result).expect("json");
+
+        assert_eq!(claude_resp["content"][0]["type"], "text");
+        assert_eq!(
+            claude_resp["content"][0]["text"],
+            "[Tool Call: Bash({\"command\":\"pwd\"})]"
+        );
+        assert_eq!(claude_resp["stop_reason"], "end_turn");
+    }
+
+    #[test]
+    fn test_openai_responses_resp_to_claude_text_tool_call_fallback_requires_valid_json() {
+        let openai_resp = json!({
+            "id": "resp_1",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "[Tool Call: Bash({command:pwd})]"
+                }]
+            }],
+            "usage": {"input_tokens": 1, "output_tokens": 1}
+        });
+
+        let mut allowed = HashSet::new();
+        allowed.insert("Bash".to_string());
+        let options = claude_openai_responses::ResponsesToClaudeOptions {
+            text_tool_call_fallback_enabled: true,
+            allowed_tool_names: allowed,
+        };
+
+        let result = claude_openai_responses::openai_responses_resp_to_claude_with_options(
+            serde_json::to_vec(&openai_resp).unwrap().as_slice(),
+            &options,
+        )
+        .expect("convert");
+        let claude_resp: serde_json::Value = serde_json::from_slice(&result).expect("json");
+
+        assert_eq!(claude_resp["content"][0]["type"], "text");
+        assert_eq!(claude_resp["content"][0]["text"], "[Tool Call: Bash({command:pwd})]");
+        assert_eq!(claude_resp["stop_reason"], "end_turn");
+    }
+
+    #[test]
+    fn test_openai_responses_stream_to_claude_text_tool_call_fallback_enabled() {
+        let mut ctx = StreamContext::new();
+        ctx.model_name = "claude-sonnet-4-6".to_string();
+        ctx.text_tool_call_fallback_enabled = true;
+        ctx.allowed_tool_names.insert("Bash".to_string());
+
+        let created =
+            "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n"
+                .to_string();
+        let added = "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\"}}\n\n".to_string();
+        let delta_payload = json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "delta": "[Tool Call: Bash({\"command\":\"pwd\"})]"
+        })
+        .to_string();
+        let delta = format!("event: response.output_text.delta\ndata: {delta_payload}\n\n");
+        let item_done = "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\",\"status\":\"completed\"}}\n\n".to_string();
+        let completed = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"output_tokens\":5}}}\n\n".to_string();
+
+        let mut out = Vec::new();
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                created.as_bytes(),
+                &mut ctx,
+            )
+            .expect("created"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                added.as_bytes(),
+                &mut ctx,
+            )
+            .expect("added"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                delta.as_bytes(),
+                &mut ctx,
+            )
+            .expect("delta"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                item_done.as_bytes(),
+                &mut ctx,
+            )
+            .expect("item_done"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                completed.as_bytes(),
+                &mut ctx,
+            )
+            .expect("completed"),
+        );
+
+        let s = String::from_utf8(out).expect("utf8");
+        assert!(s.contains("\"type\":\"tool_use\""));
+        assert!(s.contains("\"name\":\"Bash\""));
+        assert!(s.contains("\"type\":\"input_json_delta\""));
+        assert!(s.contains("\"stop_reason\":\"tool_use\""));
+        assert!(!s.contains("\"type\":\"text_delta\""));
+    }
+
+    #[test]
+    fn test_openai_responses_stream_to_claude_text_tool_call_fallback_command_array_json() {
+        let mut ctx = StreamContext::new();
+        ctx.model_name = "claude-sonnet-4-6".to_string();
+        ctx.text_tool_call_fallback_enabled = true;
+        ctx.allowed_tool_names.insert("Bash".to_string());
+
+        let created =
+            "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n"
+                .to_string();
+        let added = "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\"}}\n\n".to_string();
+        let delta_payload = json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "delta": r#"{"command":["bash","-lc","pwd"],"timeout_ms":120000}"#
+        })
+        .to_string();
+        let delta = format!("event: response.output_text.delta\ndata: {delta_payload}\n\n");
+        let item_done = "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\",\"status\":\"completed\"}}\n\n".to_string();
+        let completed = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"output_tokens\":5}}}\n\n".to_string();
+
+        let mut out = Vec::new();
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                created.as_bytes(),
+                &mut ctx,
+            )
+            .expect("created"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                added.as_bytes(),
+                &mut ctx,
+            )
+            .expect("added"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                delta.as_bytes(),
+                &mut ctx,
+            )
+            .expect("delta"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                item_done.as_bytes(),
+                &mut ctx,
+            )
+            .expect("item_done"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                completed.as_bytes(),
+                &mut ctx,
+            )
+            .expect("completed"),
+        );
+
+        let s = String::from_utf8(out).expect("utf8");
+        assert!(s.contains("\"type\":\"tool_use\""));
+        assert!(s.contains("\"name\":\"Bash\""));
+        assert!(s.contains("\"type\":\"input_json_delta\""));
+        assert!(s.contains("\\\"command\\\":\\\"pwd\\\""));
+        assert!(s.contains("\"stop_reason\":\"tool_use\""));
+        assert!(!s.contains("\"type\":\"text_delta\""));
+    }
+
+    #[test]
+    fn test_openai_responses_stream_to_claude_text_tool_call_fallback_with_prefix_text() {
+        let mut ctx = StreamContext::new();
+        ctx.model_name = "claude-sonnet-4-6".to_string();
+        ctx.text_tool_call_fallback_enabled = true;
+        ctx.allowed_tool_names.insert("Bash".to_string());
+
+        let created =
+            "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n"
+                .to_string();
+        let added = "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\"}}\n\n".to_string();
+        let delta_payload = json!({
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "delta": "先说明一下：\\n[Tool Call: Bash({\"command\":\"pwd\"})]"
+        })
+        .to_string();
+        let delta = format!("event: response.output_text.delta\ndata: {delta_payload}\n\n");
+        let item_done = "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\",\"status\":\"completed\"}}\n\n".to_string();
+        let completed = "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"output_tokens\":5}}}\n\n".to_string();
+
+        let mut out = Vec::new();
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                created.as_bytes(),
+                &mut ctx,
+            )
+            .expect("created"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                added.as_bytes(),
+                &mut ctx,
+            )
+            .expect("added"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                delta.as_bytes(),
+                &mut ctx,
+            )
+            .expect("delta"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                item_done.as_bytes(),
+                &mut ctx,
+            )
+            .expect("item_done"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                completed.as_bytes(),
+                &mut ctx,
+            )
+            .expect("completed"),
+        );
+
+        let s = String::from_utf8(out).expect("utf8");
+        assert!(s.contains("\"type\":\"tool_use\""));
+        assert!(s.contains("\"name\":\"Bash\""));
+        assert!(s.contains("\"type\":\"input_json_delta\""));
+        assert!(s.contains("\"stop_reason\":\"tool_use\""));
+        assert!(!s.contains("\"type\":\"text_delta\""));
     }
 
     #[test]

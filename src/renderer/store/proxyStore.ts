@@ -129,6 +129,10 @@ function normalizeGroup(group: Partial<Group> & Pick<Group, "id" | "name">): Gro
 function normalizeConfig(config: ProxyConfig): ProxyConfig {
   return {
     ...config,
+    compat: {
+      ...config.compat,
+      textToolCallFallbackEnabled: config.compat.textToolCallFallbackEnabled ?? true,
+    },
     groups: (config.groups ?? []).map(group =>
       normalizeGroup(group as Partial<Group> & Pick<Group, "id" | "name">)
     ),

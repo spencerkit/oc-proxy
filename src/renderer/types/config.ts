@@ -13,6 +13,7 @@ export interface ServerConfig {
  */
 export interface CompatConfig {
   strictMode: boolean
+  textToolCallFallbackEnabled?: boolean
 }
 
 /**

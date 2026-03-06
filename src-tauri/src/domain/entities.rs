@@ -19,6 +19,12 @@ pub struct ServerConfig {
 #[serde(rename_all = "camelCase")]
 pub struct CompatConfig {
     pub strict_mode: bool,
+    #[serde(default = "default_text_tool_call_fallback_enabled")]
+    pub text_tool_call_fallback_enabled: bool,
+}
+
+fn default_text_tool_call_fallback_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

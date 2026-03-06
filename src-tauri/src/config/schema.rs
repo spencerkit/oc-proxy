@@ -38,7 +38,10 @@ pub fn default_config() -> ProxyConfig {
             auth_enabled: false,
             local_bearer_token: String::new(),
         },
-        compat: CompatConfig { strict_mode: false },
+        compat: CompatConfig {
+            strict_mode: false,
+            text_tool_call_fallback_enabled: true,
+        },
         logging: LoggingConfig {
             level: "info".to_string(),
             capture_body: false,
@@ -92,6 +95,7 @@ struct PartialServerConfig {
 #[serde(rename_all = "camelCase")]
 struct PartialCompatConfig {
     strict_mode: Option<bool>,
+    text_tool_call_fallback_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -219,6 +223,11 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
                 .as_ref()
                 .and_then(|c| c.strict_mode)
                 .unwrap_or(defaults.compat.strict_mode),
+            text_tool_call_fallback_enabled: partial
+                .compat
+                .as_ref()
+                .and_then(|c| c.text_tool_call_fallback_enabled)
+                .unwrap_or(defaults.compat.text_tool_call_fallback_enabled),
         },
         logging: LoggingConfig {
             level: partial

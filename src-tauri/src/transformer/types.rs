@@ -2,6 +2,7 @@
 //! Reference: ccNexus/internal/transformer/types.go
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 // ============================================================================
 // OpenAI Types
@@ -213,6 +214,11 @@ pub struct StreamContext {
     pub current_tool_id: String,
     pub current_tool_name: String,
     pub tool_arguments: String,
+    pub text_tool_call_fallback_enabled: bool,
+    pub allowed_tool_names: HashSet<String>,
+    pub buffered_output_text: String,
+    pub buffered_output_index: Option<i32>,
+    pub fallback_tool_call_counter: i32,
 }
 
 impl StreamContext {
@@ -236,6 +242,11 @@ impl StreamContext {
             current_tool_id: String::new(),
             current_tool_name: String::new(),
             tool_arguments: String::new(),
+            text_tool_call_fallback_enabled: false,
+            allowed_tool_names: HashSet::new(),
+            buffered_output_text: String::new(),
+            buffered_output_index: None,
+            fallback_tool_call_counter: 0,
         }
     }
 }

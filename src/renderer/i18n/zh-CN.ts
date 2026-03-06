@@ -105,6 +105,9 @@ export const zhCN = {
     nonPortAutoApplyHint: "除服务端口外，其他设置修改后立即生效。",
     strictMode: "严格模式（不兼容字段直接报错）",
     strictModeHint: "开启后，协议不兼容字段将立即失败。",
+    textToolCallFallbackEnabled: "文本 Tool Call 兜底",
+    textToolCallFallbackEnabledHint:
+      "开启后，响应文本中类似 [Tool Call: Name({...})] 的占位符在工具已声明时会被转换为工具调用。",
     detailedLogs: "详细日志（记录请求/响应体）",
     detailedLogsHint: "关闭后将不再保存请求体与响应体日志，以提升隐私和性能。",
     launchOnStartup: "开机启动",

@@ -28,6 +28,7 @@ use axum::Json;
 use chrono::Utc;
 use futures_util::TryStreamExt;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -40,6 +41,7 @@ enum StreamTransform {
     ClaudeToOpenAIResponses,
     ChatCompletionsToResponses,
     ResponsesToChatCompletions,
+    ResponsesToClaudeMessages,
 }
 
 /// Performs healthz.
@@ -163,7 +165,13 @@ pub(super) async fn handle_proxy_request(
         return proxy_error_response(500, "proxy_error", &msg, None, "proxy", &trace_id);
     }
 
-    let (auth_enabled, expected_auth, capture_body, strict_mode) = match state.config.read() {
+    let (
+        auth_enabled,
+        expected_auth,
+        capture_body,
+        strict_mode,
+        text_tool_call_fallback_enabled,
+    ) = match state.config.read() {
         Ok(cfg) => {
             let expected = format!("Bearer {}", cfg.server.local_bearer_token);
             (
@@ -171,6 +179,7 @@ pub(super) async fn handle_proxy_request(
                 expected,
                 cfg.logging.capture_body,
                 cfg.compat.strict_mode,
+                cfg.compat.text_tool_call_fallback_enabled,
             )
         }
         Err(_) => {
@@ -325,6 +334,11 @@ pub(super) async fn handle_proxy_request(
         .unwrap_or(&active_route.rule.default_model)
         .to_string();
     let target_protocol = active_route.rule.protocol.clone();
+    let declared_tool_names = extract_declared_tool_names(&request_body);
+    let enable_text_tool_call_fallback = text_tool_call_fallback_enabled
+        && matches!(entry.endpoint, EntryEndpoint::Messages)
+        && matches!(target_protocol, RuleProtocol::Openai)
+        && !declared_tool_names.is_empty();
     let upstream_path = resolve_upstream_path(&target_protocol);
     let upstream_url = match resolve_upstream_url(&active_route.rule.api_address, upstream_path) {
         Ok(v) => v,
@@ -504,10 +518,18 @@ pub(super) async fn handle_proxy_request(
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
         .to_lowercase();
+    let sse_fallback_probe_enabled = stream
+        && !upstream_ct.contains("text/event-stream")
+        && !upstream_ct.contains("application/json")
+        && (upstream_ct.is_empty() || upstream_ct.contains("text/plain"));
 
-    if upstream_ct.contains("text/event-stream") {
+    if upstream_ct.contains("text/event-stream") || sse_fallback_probe_enabled {
         let mut stream_ctx = StreamContext::new();
         stream_ctx.model_name = target_model.clone();
+        if enable_text_tool_call_fallback {
+            stream_ctx.text_tool_call_fallback_enabled = true;
+            stream_ctx.allowed_tool_names = declared_tool_names.clone();
+        }
         let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(32);
         let stream_state = state.clone();
         let stream_trace_id = trace_id.clone();
@@ -539,6 +561,7 @@ pub(super) async fn handle_proxy_request(
         let stream_started = started;
         let stream_transform = select_stream_transform(stream_entry.endpoint, &stream_target_protocol);
         let mut stream_ctx_moved = stream_ctx;
+        let mut stream_probe_sse = sse_fallback_probe_enabled;
 
         tokio::spawn(async move {
             let mut bytes_stream = upstream_resp.bytes_stream();
@@ -553,6 +576,19 @@ pub(super) async fn handle_proxy_request(
             loop {
                 match bytes_stream.try_next().await {
                     Ok(Some(bytes)) => {
+                        if stream_probe_sse {
+                            stream_probe_sse = false;
+                            if !looks_like_sse_prelude(bytes.as_ref()) {
+                                stream_failed = true;
+                                let _ = tx
+                                    .send(Err(std::io::Error::new(
+                                        std::io::ErrorKind::Other,
+                                        "upstream stream probe failed: non-SSE payload",
+                                    )))
+                                    .await;
+                                break;
+                            }
+                        }
                         usage_acc.consume_chunk(bytes.as_ref());
                         let outgoing_chunks = match stream_transform {
                             StreamTransform::None => vec![bytes],
@@ -909,7 +945,15 @@ pub(super) async fn handle_proxy_request(
         );
     }
 
-    let output_body = map_response_body(&entry, &target_protocol, &upstream_json, &requested_model, &state);
+    let output_body = map_response_body(
+        &entry,
+        &target_protocol,
+        &upstream_json,
+        &requested_model,
+        &state,
+        &declared_tool_names,
+        enable_text_tool_call_fallback,
+    );
 
     let token_usage = merge_token_usage(
         extract_token_usage(&upstream_json),
@@ -1025,6 +1069,8 @@ fn map_response_body(
     upstream_json: &Value,
     _request_model: &str,
     _state: &ServiceState,
+    declared_tool_names: &HashSet<String>,
+    text_tool_call_fallback_enabled: bool,
 ) -> Value {
     use crate::transformer::convert::*;
 
@@ -1041,7 +1087,13 @@ fn map_response_body(
         }
         // OpenAI Responses -> Claude Messages (response)
         (EntryEndpoint::Messages, RuleProtocol::Openai) => {
-            claude_openai_responses::openai_responses_resp_to_claude(&response_bytes)
+            claude_openai_responses::openai_responses_resp_to_claude_with_options(
+                &response_bytes,
+                &claude_openai_responses::ResponsesToClaudeOptions {
+                    text_tool_call_fallback_enabled,
+                    allowed_tool_names: declared_tool_names.clone(),
+                },
+            )
         }
         // OpenAI Chat -> Claude Messages (response)
         (EntryEndpoint::Messages, RuleProtocol::OpenaiCompletion) => {
@@ -1095,6 +1147,36 @@ fn merge_token_usage(
             },
         }),
     }
+}
+
+fn extract_declared_tool_names(request_body: &Value) -> HashSet<String> {
+    let mut names = HashSet::new();
+    let Some(tools) = request_body.get("tools").and_then(|v| v.as_array()) else {
+        return names;
+    };
+
+    for tool in tools {
+        if let Some(name) = tool.get("name").and_then(|v| v.as_str()) {
+            let trimmed = name.trim();
+            if !trimmed.is_empty() {
+                names.insert(trimmed.to_string());
+            }
+            continue;
+        }
+
+        if let Some(name) = tool
+            .get("function")
+            .and_then(|f| f.get("name"))
+            .and_then(|v| v.as_str())
+        {
+            let trimmed = name.trim();
+            if !trimmed.is_empty() {
+                names.insert(trimmed.to_string());
+            }
+        }
+    }
+
+    names
 }
 
 /// Resolves request timeout ms for this module's workflow.
@@ -1178,6 +1260,9 @@ fn select_stream_transform(
         (EntryEndpoint::ChatCompletions, RuleProtocol::Openai) => {
             StreamTransform::ResponsesToChatCompletions
         }
+        (EntryEndpoint::Messages, RuleProtocol::Openai) => {
+            StreamTransform::ResponsesToClaudeMessages
+        }
         (EntryEndpoint::Responses, RuleProtocol::OpenaiCompletion) => {
             StreamTransform::ChatCompletionsToResponses
         }
@@ -1201,6 +1286,9 @@ fn transform_sse_event(
         }
         StreamTransform::ResponsesToChatCompletions => {
             openai_chat_responses_stream::openai_responses_stream_to_chat(event, ctx)
+        }
+        StreamTransform::ResponsesToClaudeMessages => {
+            claude_openai_responses_stream::openai_responses_stream_to_claude(event, ctx)
         }
     }
 }
@@ -1231,10 +1319,26 @@ fn find_sse_delimiter(buffer: &[u8]) -> Option<(usize, usize)> {
     None
 }
 
+fn looks_like_sse_prelude(chunk: &[u8]) -> bool {
+    if chunk.is_empty() {
+        return false;
+    }
+
+    let probe_len = chunk.len().min(256);
+    let mut probe = String::from_utf8_lossy(&chunk[..probe_len]).to_string();
+    if let Some(stripped) = probe.strip_prefix('\u{feff}') {
+        probe = stripped.to_string();
+    }
+    let trimmed = probe.trim_start_matches(|c: char| c.is_whitespace());
+    let lowered = trimmed.to_ascii_lowercase();
+    lowered.starts_with("event:") || lowered.starts_with("data:") || lowered.starts_with(':')
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        find_sse_delimiter, merge_token_usage, pop_sse_event, select_stream_transform,
+        find_sse_delimiter, looks_like_sse_prelude, merge_token_usage, pop_sse_event,
+        select_stream_transform,
         EntryEndpoint, StreamTransform,
     };
     use crate::models::{RuleProtocol, TokenUsage};
@@ -1269,6 +1373,20 @@ mod tests {
     }
 
     #[test]
+    fn looks_like_sse_prelude_accepts_event_or_data_lines() {
+        assert!(looks_like_sse_prelude(b"event: response.created\ndata: {}\n\n"));
+        assert!(looks_like_sse_prelude(b"  data: {\"type\":\"response.created\"}\n\n"));
+        assert!(looks_like_sse_prelude("\u{feff}event: ping\n\n".as_bytes()));
+    }
+
+    #[test]
+    fn looks_like_sse_prelude_rejects_non_sse_text() {
+        assert!(!looks_like_sse_prelude(b"{\"id\":\"resp_1\"}"));
+        assert!(!looks_like_sse_prelude(b"plain text"));
+        assert!(!looks_like_sse_prelude(b""));
+    }
+
+    #[test]
     fn select_stream_transform_maps_openai_cross_surface_correctly() {
         assert!(matches!(
             select_stream_transform(EntryEndpoint::Responses, &RuleProtocol::OpenaiCompletion),
@@ -1277,6 +1395,10 @@ mod tests {
         assert!(matches!(
             select_stream_transform(EntryEndpoint::ChatCompletions, &RuleProtocol::Openai),
             StreamTransform::ResponsesToChatCompletions
+        ));
+        assert!(matches!(
+            select_stream_transform(EntryEndpoint::Messages, &RuleProtocol::Openai),
+            StreamTransform::ResponsesToClaudeMessages
         ));
     }
 
