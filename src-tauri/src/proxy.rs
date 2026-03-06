@@ -333,6 +333,47 @@ mod tests {
     }
 
     #[test]
+    /// Extracts token usage prefers non-zero aliases when canonical fields are present but zero.
+    fn extract_token_usage_prefers_non_zero_aliases_over_zero_canonical_values() {
+        let payload = json!({
+            "usage": {
+                "input_tokens": 0,
+                "prompt_tokens": 3,
+                "output_tokens": 0,
+                "completion_tokens": 512,
+                "prompt_tokens_details": {
+                    "cached_tokens": 27352
+                }
+            }
+        });
+
+        let usage = extract_token_usage(&payload).expect("usage should exist");
+        assert_eq!(usage.input_tokens, 3);
+        assert_eq!(usage.output_tokens, 512);
+        assert_eq!(usage.cache_read_tokens, 27352);
+        assert_eq!(usage.cache_write_tokens, 0);
+    }
+
+    #[test]
+    /// Extracts token usage keeps canonical non-zero fields when aliases are also non-zero.
+    fn extract_token_usage_keeps_canonical_non_zero_fields_when_aliases_conflict() {
+        let payload = json!({
+            "usage": {
+                "input_tokens": 56,
+                "prompt_tokens": 78,
+                "output_tokens": 12,
+                "completion_tokens": 34
+            }
+        });
+
+        let usage = extract_token_usage(&payload).expect("usage should exist");
+        assert_eq!(usage.input_tokens, 56);
+        assert_eq!(usage.output_tokens, 12);
+        assert_eq!(usage.cache_read_tokens, 0);
+        assert_eq!(usage.cache_write_tokens, 0);
+    }
+
+    #[test]
     /// Extracts token usage reads message and delta usage payloads for this module's workflow.
     fn extract_token_usage_reads_message_and_delta_usage_payloads() {
         let message_payload = json!({

@@ -277,28 +277,46 @@ fn normalize_input_tokens(usage: &Value, raw_input_tokens: u64, cache_read_token
     }
 }
 
-/// Performs first u64.
+/// Return the first non-zero u64 among candidate fields; fall back to the first seen value.
+///
+/// This keeps canonical-field precedence while allowing alias fallback when canonical value is zero.
 fn first_u64(obj: &Value, fields: &[&str]) -> u64 {
+    let mut fallback: Option<u64> = None;
     for field in fields {
         if let Some(v) = obj.get(*field).and_then(|v| v.as_u64()) {
-            return v;
+            if fallback.is_none() {
+                fallback = Some(v);
+            }
+            if v > 0 {
+                return v;
+            }
         }
         if let Some(v) = obj
             .get("input_tokens_details")
             .and_then(|d| d.get(*field))
             .and_then(|v| v.as_u64())
         {
-            return v;
+            if fallback.is_none() {
+                fallback = Some(v);
+            }
+            if v > 0 {
+                return v;
+            }
         }
         if let Some(v) = obj
             .get("prompt_tokens_details")
             .and_then(|d| d.get(*field))
             .and_then(|v| v.as_u64())
         {
-            return v;
+            if fallback.is_none() {
+                fallback = Some(v);
+            }
+            if v > 0 {
+                return v;
+            }
         }
     }
-    0
+    fallback.unwrap_or(0)
 }
 
 /// Headers used for JSON responses emitted by local proxy.

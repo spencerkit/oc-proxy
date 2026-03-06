@@ -17,7 +17,7 @@ use super::{
     MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS, NON_STREAM_REQUEST_TIMEOUT_MS,
     STREAM_REQUEST_TIMEOUT_MS,
 };
-use crate::models::RuleProtocol;
+use crate::models::{RuleProtocol, TokenUsage};
 use crate::transformer::StreamContext;
 use crate::transformer::convert::{claude_openai_stream, claude_openai_responses_stream, openai_chat_responses_stream};
 use axum::body::{to_bytes, Body, Bytes};
@@ -911,8 +911,10 @@ pub(super) async fn handle_proxy_request(
 
     let output_body = map_response_body(&entry, &target_protocol, &upstream_json, &requested_model, &state);
 
-    let token_usage =
-        extract_token_usage(&upstream_json).or_else(|| extract_token_usage(&output_body));
+    let token_usage = merge_token_usage(
+        extract_token_usage(&upstream_json),
+        extract_token_usage(&output_body),
+    );
     if let Some(ref usage) = token_usage {
         state.metrics.add_token_usage(usage);
     }
@@ -1062,6 +1064,39 @@ fn map_response_body(
     }
 }
 
+fn merge_token_usage(
+    upstream_usage: Option<TokenUsage>,
+    output_usage: Option<TokenUsage>,
+) -> Option<TokenUsage> {
+    match (upstream_usage, output_usage) {
+        (None, None) => None,
+        (Some(upstream), None) => Some(upstream),
+        (None, Some(output)) => Some(output),
+        (Some(upstream), Some(output)) => Some(TokenUsage {
+            input_tokens: if upstream.input_tokens > 0 {
+                upstream.input_tokens
+            } else {
+                output.input_tokens
+            },
+            output_tokens: if upstream.output_tokens > 0 {
+                upstream.output_tokens
+            } else {
+                output.output_tokens
+            },
+            cache_read_tokens: if upstream.cache_read_tokens > 0 {
+                upstream.cache_read_tokens
+            } else {
+                output.cache_read_tokens
+            },
+            cache_write_tokens: if upstream.cache_write_tokens > 0 {
+                upstream.cache_write_tokens
+            } else {
+                output.cache_write_tokens
+            },
+        }),
+    }
+}
+
 /// Resolves request timeout ms for this module's workflow.
 pub(super) fn resolve_request_timeout_ms(
     stream: bool,
@@ -1199,9 +1234,10 @@ fn find_sse_delimiter(buffer: &[u8]) -> Option<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_sse_delimiter, pop_sse_event, select_stream_transform, EntryEndpoint, StreamTransform,
+        find_sse_delimiter, merge_token_usage, pop_sse_event, select_stream_transform,
+        EntryEndpoint, StreamTransform,
     };
-    use crate::models::RuleProtocol;
+    use crate::models::{RuleProtocol, TokenUsage};
 
     #[test]
     fn pop_sse_event_handles_lf_delimiter() {
@@ -1242,5 +1278,50 @@ mod tests {
             select_stream_transform(EntryEndpoint::ChatCompletions, &RuleProtocol::Openai),
             StreamTransform::ResponsesToChatCompletions
         ));
+    }
+
+    #[test]
+    fn merge_token_usage_falls_back_to_output_input_output_tokens() {
+        let upstream = TokenUsage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 30587,
+            cache_write_tokens: 0,
+        };
+        let output = TokenUsage {
+            input_tokens: 3,
+            output_tokens: 633,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        };
+
+        let merged = merge_token_usage(Some(upstream), Some(output)).expect("usage should exist");
+        assert_eq!(merged.input_tokens, 3);
+        assert_eq!(merged.output_tokens, 633);
+        assert_eq!(merged.cache_read_tokens, 30587);
+        assert_eq!(merged.cache_write_tokens, 0);
+    }
+
+    #[test]
+    fn merge_token_usage_keeps_upstream_non_zero_fields() {
+        let upstream = TokenUsage {
+            input_tokens: 120,
+            output_tokens: 45,
+            cache_read_tokens: 7,
+            cache_write_tokens: 2,
+        };
+        let output = TokenUsage {
+            input_tokens: 119,
+            output_tokens: 44,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        };
+
+        let merged = merge_token_usage(Some(upstream.clone()), Some(output))
+            .expect("usage should exist");
+        assert_eq!(merged.input_tokens, upstream.input_tokens);
+        assert_eq!(merged.output_tokens, upstream.output_tokens);
+        assert_eq!(merged.cache_read_tokens, upstream.cache_read_tokens);
+        assert_eq!(merged.cache_write_tokens, upstream.cache_write_tokens);
     }
 }
