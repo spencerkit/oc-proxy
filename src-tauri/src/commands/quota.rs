@@ -8,6 +8,7 @@ use crate::services::quota_service;
 use tauri::State;
 
 #[tauri::command]
+/// Performs quota get rule.
 pub async fn quota_get_rule(
     state: State<'_, SharedState>,
     group_id: String,
@@ -19,6 +20,7 @@ pub async fn quota_get_rule(
 }
 
 #[tauri::command]
+/// Performs quota get group.
 pub async fn quota_get_group(
     state: State<'_, SharedState>,
     group_id: String,
@@ -29,6 +31,7 @@ pub async fn quota_get_group(
 }
 
 #[tauri::command]
+/// Performs quota test draft.
 pub async fn quota_test_draft(
     state: State<'_, SharedState>,
     group_id: String,

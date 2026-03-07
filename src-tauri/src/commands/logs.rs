@@ -8,6 +8,7 @@ use serde_json::json;
 use tauri::State;
 
 #[tauri::command]
+/// Performs logs list.
 pub async fn logs_list(
     state: State<'_, SharedState>,
     max: Option<usize>,
@@ -16,12 +17,14 @@ pub async fn logs_list(
 }
 
 #[tauri::command]
+/// Performs logs clear.
 pub async fn logs_clear(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
     state.runtime.clear_logs();
     Ok(json!({ "ok": true }))
 }
 
 #[tauri::command]
+/// Performs logs stats summary.
 pub async fn logs_stats_summary(
     state: State<'_, SharedState>,
     hours: Option<u32>,
@@ -36,6 +39,7 @@ pub async fn logs_stats_summary(
 }
 
 #[tauri::command]
+/// Performs logs stats rule cards.
 pub async fn logs_stats_rule_cards(
     state: State<'_, SharedState>,
     group_id: String,
@@ -45,6 +49,7 @@ pub async fn logs_stats_rule_cards(
 }
 
 #[tauri::command]
+/// Performs logs stats clear.
 pub async fn logs_stats_clear(
     state: State<'_, SharedState>,
     before_epoch_ms: Option<i64>,

@@ -649,8 +649,44 @@ function startViteServer(host, port) {
         FORCE_COLOR: "1",
       },
       stdio: "pipe",
+      detached: process.platform !== "win32",
     }
   )
+}
+
+function waitForProcessExit(processRef, timeoutMs = 5000) {
+  return new Promise(resolve => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    const timer = setTimeout(finish, timeoutMs)
+    processRef.once("exit", () => {
+      clearTimeout(timer)
+      finish()
+    })
+    processRef.once("close", () => {
+      clearTimeout(timer)
+      finish()
+    })
+  })
+}
+
+async function stopViteServer(serverProcess) {
+  if (!serverProcess || serverProcess.killed) return
+  if (process.platform === "win32") {
+    serverProcess.kill("SIGTERM")
+    await waitForProcessExit(serverProcess)
+    return
+  }
+  try {
+    process.kill(-serverProcess.pid, "SIGTERM")
+  } catch {
+    serverProcess.kill("SIGTERM")
+  }
+  await waitForProcessExit(serverProcess)
 }
 
 async function captureScreenshots({ outputDir, baseUrl, host, port, keepServer }) {
@@ -666,7 +702,9 @@ async function captureScreenshots({ outputDir, baseUrl, host, port, keepServer }
 
   const ready = await waitForServer(baseUrl)
   if (!ready) {
-    if (serverProcess) serverProcess.kill("SIGTERM")
+    if (serverProcess) {
+      await stopViteServer(serverProcess)
+    }
     throw new Error(`dev server did not become ready: ${baseUrl}`)
   }
 
@@ -679,8 +717,15 @@ async function captureScreenshots({ outputDir, baseUrl, host, port, keepServer }
   const dataset = createMockDataset()
   const pages = [
     { route: "/", file: "service-page.png", readyText: "分组信息" },
+    { route: "/groups/alpha/edit", file: "group-edit-page.png", readyText: "编辑分组" },
+    {
+      route: "/groups/alpha/providers/rule-openai-main/edit",
+      file: "rule-edit-page.png",
+      readyText: "编辑 Provider",
+    },
     { route: "/settings", file: "settings-page.png", readyText: "服务设置" },
     { route: "/logs", file: "logs-page.png", readyText: "日志" },
+    { route: "/logs/trace-0001", file: "log-detail-page.png", readyText: "日志详情" },
   ]
 
   for (const item of pages) {
@@ -724,7 +769,7 @@ async function captureScreenshots({ outputDir, baseUrl, host, port, keepServer }
   await browser.close()
 
   if (serverProcess && !keepServer) {
-    serverProcess.kill("SIGTERM")
+    await stopViteServer(serverProcess)
   }
 }
 

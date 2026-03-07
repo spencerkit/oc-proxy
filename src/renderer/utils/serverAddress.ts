@@ -1,15 +1,18 @@
+/** Returns whether host is a wildcard bind address (0.0.0.0 / ::). */
 function isWildcardHost(host?: string): boolean {
   if (!host) return false
   const normalized = host.replace(/^\[|\]$/g, "").toLowerCase()
   return normalized === "0.0.0.0" || normalized === "::" || normalized === "::0"
 }
 
+/** Returns whether host points to local loopback interface. */
 function isLoopbackHost(host?: string): boolean {
   if (!host) return false
   const normalized = host.replace(/^\[|\]$/g, "").toLowerCase()
   return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost"
 }
 
+/** Parses raw address into URL, auto-prepending `http://` when missing. */
 function toHttpUrl(rawAddress: string): URL | null {
   try {
     const withProtocol = /^https?:\/\//i.test(rawAddress) ? rawAddress : `http://${rawAddress}`
@@ -19,6 +22,7 @@ function toHttpUrl(rawAddress: string): URL | null {
   }
 }
 
+/** Builds normalized base URL from host and port. */
 function buildBaseUrl(host: string, port: number): string {
   const parsedHost = host.replace(/^\[|\]$/g, "")
   const url = new URL("http://localhost")
@@ -30,6 +34,7 @@ function buildBaseUrl(host: string, port: number): string {
   return url.toString().replace(/\/+$/, "")
 }
 
+/** Normalizes a base URL and patches host/port defaults for local access. */
 function normalizeBaseUrl(rawAddress: string, fallbackPort: number): string | null {
   const parsed = toHttpUrl(rawAddress)
   if (!parsed) {
@@ -47,6 +52,7 @@ function normalizeBaseUrl(rawAddress: string, fallbackPort: number): string | nu
   return parsed.toString().replace(/\/+$/, "")
 }
 
+/** Deduplicates base URLs by normalized host+port key. */
 function dedupeBaseUrls(urls: string[]): string[] {
   const seen = new Set<string>()
   const deduped: string[] = []
@@ -74,6 +80,7 @@ export interface ResolveServerAddressParams {
   configPort?: number
 }
 
+/** Resolves candidate server base URLs from runtime status and config fallbacks. */
 export function resolveReachableServerBaseUrls(params: ResolveServerAddressParams): string[] {
   const fallbackPort = params.configPort ?? 8899
   const urls: string[] = []
@@ -103,11 +110,13 @@ export function resolveReachableServerBaseUrls(params: ResolveServerAddressParam
   return dedupeBaseUrls(urls)
 }
 
+/** Resolves the primary reachable server base URL used by UI links. */
 export function resolveReachableServerBaseUrl(params: ResolveServerAddressParams): string {
   const urls = resolveReachableServerBaseUrls(params)
   return urls[0] || buildBaseUrl("localhost", params.configPort ?? 8899)
 }
 
+/** Formats base URL for compact display text. */
 export function formatServerAddressForDisplay(baseUrl: string): string {
   const parsed = toHttpUrl(baseUrl)
   if (!parsed) {

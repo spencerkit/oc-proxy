@@ -10,6 +10,7 @@ use super::{
 use serde_json::{json, Value};
 
 #[test]
+/// Performs OpenAI request maps to Anthropic request.
 fn openai_request_maps_to_anthropic_request() {
     let input = json!({
         "model": "m1",
@@ -30,6 +31,7 @@ fn openai_request_maps_to_anthropic_request() {
 }
 
 #[test]
+/// Performs Anthropic request maps to OpenAI request.
 fn anthropic_request_maps_to_openai_request() {
     let input = json!({
         "model": "claude-x",
@@ -46,6 +48,7 @@ fn anthropic_request_maps_to_openai_request() {
 }
 
 #[test]
+/// Performs Anthropic request without stream defaults to stream true.
 fn anthropic_request_without_stream_defaults_to_stream_true() {
     let input = json!({
         "model": "claude-x",
@@ -58,6 +61,7 @@ fn anthropic_request_without_stream_defaults_to_stream_true() {
 }
 
 #[test]
+/// Performs Anthropic stream request enables OpenAI include usage option.
 fn anthropic_stream_request_enables_openai_include_usage_option() {
     let input = json!({
         "model": "claude-x",
@@ -72,6 +76,7 @@ fn anthropic_stream_request_enables_openai_include_usage_option() {
 }
 
 #[test]
+/// Performs Anthropic request maps to OpenAI responses request.
 fn anthropic_request_maps_to_openai_responses_request() {
     let input = json!({
         "model": "claude-x",
@@ -92,6 +97,7 @@ fn anthropic_request_maps_to_openai_responses_request() {
 }
 
 #[test]
+/// Performs Anthropic request maps tools and tool choice to responses shape.
 fn anthropic_request_maps_tools_and_tool_choice_to_responses_shape() {
     let input = json!({
         "model": "claude-x",
@@ -131,6 +137,7 @@ fn anthropic_request_maps_tools_and_tool_choice_to_responses_shape() {
 }
 
 #[test]
+/// Performs Anthropic tool IDs are normalized for OpenAI responses requests.
 fn anthropic_tool_ids_are_normalized_for_openai_responses_requests() {
     let out = map_anthropic_to_openai_responses_request(
         &json!({
@@ -194,6 +201,7 @@ fn anthropic_tool_ids_are_normalized_for_openai_responses_requests() {
 }
 
 #[test]
+/// Performs Anthropic tool arguments follow schema key aliases for responses requests.
 fn anthropic_tool_arguments_follow_schema_key_aliases_for_responses_requests() {
     let out = map_anthropic_to_openai_responses_request(
         &json!({
@@ -247,6 +255,7 @@ fn anthropic_tool_arguments_follow_schema_key_aliases_for_responses_requests() {
 }
 
 #[test]
+/// Performs Anthropic tool argument alias with ambiguous schema is not rewritten.
 fn anthropic_tool_argument_alias_with_ambiguous_schema_is_not_rewritten() {
     let out = map_anthropic_to_openai_responses_request(
         &json!({
@@ -301,6 +310,7 @@ fn anthropic_tool_argument_alias_with_ambiguous_schema_is_not_rewritten() {
 }
 
 #[test]
+/// Performs Anthropic system blocks map to string instructions.
 fn anthropic_system_blocks_map_to_string_instructions() {
     let input = json!({
         "model": "claude-x",
@@ -323,6 +333,7 @@ fn anthropic_system_blocks_map_to_string_instructions() {
 }
 
 #[test]
+/// Performs Anthropic response maps to OpenAI response.
 fn anthropic_response_maps_to_openai_response() {
     let input = json!({
         "id": "msg_1",
@@ -337,6 +348,7 @@ fn anthropic_response_maps_to_openai_response() {
 }
 
 #[test]
+/// Performs OpenAI response maps to Anthropic response.
 fn openai_response_maps_to_anthropic_response() {
     let input = json!({
         "id": "chat_1",
@@ -352,6 +364,7 @@ fn openai_response_maps_to_anthropic_response() {
 }
 
 #[test]
+/// Performs strict mode rejects unknown OpenAI fields.
 fn strict_mode_rejects_unknown_openai_fields() {
     let input = json!({
         "model": "m",
@@ -363,6 +376,7 @@ fn strict_mode_rejects_unknown_openai_fields() {
 }
 
 #[test]
+/// Performs responses input is normalized.
 fn responses_input_is_normalized() {
     let normalized = normalize_openai_request(
         "/v1/responses",
@@ -387,6 +401,7 @@ fn responses_input_is_normalized() {
 }
 
 #[test]
+/// Performs responses function call io is normalized to chat tool messages.
 fn responses_function_call_io_is_normalized_to_chat_tool_messages() {
     let normalized = normalize_openai_request(
         "/v1/responses",
@@ -419,6 +434,7 @@ fn responses_function_call_io_is_normalized_to_chat_tool_messages() {
 }
 
 #[test]
+/// Performs strict mode allows OpenAI system thinking context fields.
 fn strict_mode_allows_openai_system_thinking_context_fields() {
     let input = json!({
         "model": "m1",
@@ -435,6 +451,7 @@ fn strict_mode_allows_openai_system_thinking_context_fields() {
 }
 
 #[test]
+/// Performs strict mode allows Anthropic thinking context fields.
 fn strict_mode_allows_anthropic_thinking_context_fields() {
     let input = json!({
         "model": "claude-x",
@@ -449,6 +466,7 @@ fn strict_mode_allows_anthropic_thinking_context_fields() {
 }
 
 #[test]
+/// Performs chat response to responses keeps tool calls.
 fn chat_response_to_responses_keeps_tool_calls() {
     let mapped = map_openai_chat_to_responses(&json!({
         "id": "chatcmpl_1",
@@ -482,6 +500,7 @@ fn chat_response_to_responses_keeps_tool_calls() {
 }
 
 #[test]
+/// Performs OpenAI tool message maps to Anthropic tool result.
 fn openai_tool_message_maps_to_anthropic_tool_result() {
     let out = map_openai_to_anthropic_request(
         &json!({
@@ -520,6 +539,7 @@ fn openai_tool_message_maps_to_anthropic_tool_result() {
 }
 
 #[test]
+/// Performs Anthropic tool result maps to OpenAI tool message.
 fn anthropic_tool_result_maps_to_openai_tool_message() {
     let out = map_anthropic_to_openai_request(
         &json!({
@@ -557,6 +577,7 @@ fn anthropic_tool_result_maps_to_openai_tool_message() {
 }
 
 #[test]
+/// Performs OpenAI finish reason tool calls maps to Anthropic tool use.
 fn openai_finish_reason_tool_calls_maps_to_anthropic_tool_use() {
     let out = map_openai_to_anthropic_response(
         &json!({
@@ -571,6 +592,7 @@ fn openai_finish_reason_tool_calls_maps_to_anthropic_tool_use() {
 }
 
 #[test]
+/// Runs a unit test for the expected behavior contract.
 fn contract_openai_to_anthropic_request_snapshot() {
     let input: Value = serde_json::from_str(include_str!(
         "../contract_fixtures/mappers/openai_to_anthropic_request.input.json"
@@ -584,4 +606,110 @@ fn contract_openai_to_anthropic_request_snapshot() {
     let actual = map_openai_to_anthropic_request(&input, true, "claude-3-5-sonnet")
         .expect("mapping should succeed");
     assert_eq!(actual, expected);
+}
+
+#[test]
+/// Test that null parameters/input_schema are handled correctly
+
+#[test]
+/// Ensures OpenAI tool parameters drop top-level `$schema` metadata.
+fn openai_chat_tools_strip_schema_field() {
+    use super::MapperSurface;
+    use super::map_request_by_surface;
+
+    let anthropic_input = json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [{
+            "name": "test_tool",
+            "description": "A test tool",
+            "input_schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" }
+                }
+            }
+        }]
+    });
+
+    let out = map_request_by_surface(
+        MapperSurface::AnthropicMessages,
+        MapperSurface::OpenaiChatCompletions,
+        &anthropic_input,
+        true,
+        "gpt-4"
+    ).expect("mapping should succeed");
+
+    let parameters = &out["tools"][0]["function"]["parameters"];
+    assert_eq!(parameters["type"], "object");
+    assert!(
+        parameters.get("$schema").is_none(),
+        "top-level $schema should be removed, got: {}",
+        parameters
+    );
+}
+
+#[test]
+/// Test that null parameters/input_schema are handled correctly
+fn tool_null_parameters_handled_correctly() {
+    use super::MapperSurface;
+    use super::map_request_by_surface;
+    
+    // Test OpenAI format with null parameters
+    let openai_input = json!({
+        "model": "gpt-4",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "test_tool",
+                "description": "A test tool",
+                "parameters": null
+            }
+        }]
+    });
+    
+    let out = map_request_by_surface(
+        MapperSurface::OpenaiChatCompletions,
+        MapperSurface::OpenaiChatCompletions,
+        &openai_input,
+        true,
+        "gpt-4"
+    ).expect("mapping should succeed");
+    
+    let tools = out["tools"].as_array().expect("should have tools");
+    let tool = &tools[0];
+    let params = tool["function"]["parameters"].clone();
+    
+    // Should have default schema, not null
+    assert!(!params.is_null(), "parameters should not be null, got: {}", params);
+    assert_eq!(params["type"], "object");
+    
+    // Test Anthropic format with null input_schema -> OpenAI Chat
+    let anthropic_input = json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [{"role": "user", "content": "hello"}],
+        "tools": [{
+            "name": "test_tool",
+            "description": "A test tool", 
+            "input_schema": null
+        }]
+    });
+    
+    let out = map_request_by_surface(
+        MapperSurface::AnthropicMessages,
+        MapperSurface::OpenaiChatCompletions,
+        &anthropic_input,
+        true,
+        "claude-3-5-sonnet"
+    ).expect("mapping should succeed");
+    
+    let tools = out["tools"].as_array().expect("should have tools");
+    let tool = &tools[0];
+    let params = tool["function"]["parameters"].clone();
+    
+    // Should have default schema, not null
+    assert!(!params.is_null(), "parameters should not be null, got: {}", params);
+    assert_eq!(params["type"], "object");
 }

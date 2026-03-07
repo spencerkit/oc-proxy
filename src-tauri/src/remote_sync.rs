@@ -19,6 +19,7 @@ struct TempRepoGuard {
 }
 
 impl TempRepoGuard {
+    /// Performs new.
     fn new(path: PathBuf) -> Result<Self, String> {
         if path.exists() {
             std::fs::remove_dir_all(&path)
@@ -28,17 +29,20 @@ impl TempRepoGuard {
         Ok(Self { path })
     }
 
+    /// Performs path.
     fn path(&self) -> &Path {
         &self.path
     }
 }
 
 impl Drop for TempRepoGuard {
+    /// Performs drop.
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
+/// Performs authenticated repo URL.
 fn authenticated_repo_url(repo_url: &str, token: &str) -> Result<String, String> {
     let mut url =
         Url::parse(repo_url).map_err(|_| "remoteGit.repoUrl must be a valid URL".to_string())?;
@@ -61,6 +65,7 @@ fn authenticated_repo_url(repo_url: &str, token: &str) -> Result<String, String>
     Ok(url.to_string())
 }
 
+/// Performs require remote ready.
 fn require_remote_ready(remote: &RemoteGitConfig) -> Result<(), String> {
     if remote.repo_url.trim().is_empty() || remote.token.trim().is_empty() {
         return Err("Please configure remote repository info first".to_string());
@@ -71,6 +76,7 @@ fn require_remote_ready(remote: &RemoteGitConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// Inits repo for this module's workflow.
 fn init_repo(client: &impl GitClient, tmp_repo: &Path, auth_repo_url: &str) -> Result<(), String> {
     client.run_output(tmp_repo, &["init", "-q"], "git init failed")?;
     client.run_output(
@@ -91,6 +97,7 @@ fn init_repo(client: &impl GitClient, tmp_repo: &Path, auth_repo_url: &str) -> R
     Ok(())
 }
 
+/// Performs checkout branch.
 fn checkout_branch(
     client: &impl GitClient,
     tmp_repo: &Path,
@@ -124,6 +131,7 @@ fn checkout_branch(
     Ok(false)
 }
 
+/// Writes remote rules file for this module's workflow.
 fn write_remote_rules_file(tmp_repo: &Path, json_text: &str) -> Result<PathBuf, String> {
     let output_file = tmp_repo.join(REMOTE_RULES_FILE_PATH);
     if let Some(parent) = output_file.parent() {
@@ -135,6 +143,7 @@ fn write_remote_rules_file(tmp_repo: &Path, json_text: &str) -> Result<PathBuf, 
     Ok(output_file)
 }
 
+/// Performs pull groups JSON from remote with client.
 fn pull_groups_json_from_remote_with_client(
     client: &impl GitClient,
     app_data_dir: &Path,
@@ -155,6 +164,7 @@ fn pull_groups_json_from_remote_with_client(
     Ok(content)
 }
 
+/// Performs upload groups JSON to remote with client.
 fn upload_groups_json_to_remote_with_client(
     client: &impl GitClient,
     app_data_dir: &Path,
@@ -240,6 +250,7 @@ fn upload_groups_json_to_remote_with_client(
     })
 }
 
+/// Performs pull groups JSON from remote.
 pub fn pull_groups_json_from_remote(
     app_data_dir: &Path,
     remote: &RemoteGitConfig,
@@ -247,6 +258,7 @@ pub fn pull_groups_json_from_remote(
     pull_groups_json_from_remote_with_client(&RealGitClient, app_data_dir, remote)
 }
 
+/// Performs upload groups JSON to remote.
 pub fn upload_groups_json_to_remote(
     app_data_dir: &Path,
     remote: &RemoteGitConfig,
@@ -266,10 +278,12 @@ pub fn upload_groups_json_to_remote(
     )
 }
 
+/// Performs remote rules file path.
 pub fn remote_rules_file_path() -> &'static str {
     REMOTE_RULES_FILE_PATH
 }
 
+/// Returns whether the state has remote git binary.
 pub fn has_remote_git_binary() -> bool {
     let mut cmd = Command::new("git");
     cmd.arg("--version")
@@ -284,6 +298,7 @@ pub fn has_remote_git_binary() -> bool {
     cmd.status().map(|status| status.success()).unwrap_or(false)
 }
 
+/// Reads remote exported at for this module's workflow.
 pub fn read_remote_exported_at(repo_root: &Path) -> Result<Option<String>, String> {
     let file = repo_root.join(REMOTE_RULES_FILE_PATH);
     if !file.exists() {
@@ -299,12 +314,14 @@ pub fn read_remote_exported_at(repo_root: &Path) -> Result<Option<String>, Strin
         .map(|v| v.to_string()))
 }
 
+/// Parses ts.
 fn parse_ts(ts: &str) -> Option<DateTime<Utc>> {
     chrono::DateTime::parse_from_rfc3339(ts)
         .ok()
         .map(|dt| dt.with_timezone(&Utc))
 }
 
+/// Returns whether local older is true.
 fn is_local_older(local: Option<&str>, remote: Option<&str>) -> bool {
     match (local.and_then(parse_ts), remote.and_then(parse_ts)) {
         (Some(local_dt), Some(remote_dt)) => local_dt < remote_dt,
@@ -338,6 +355,7 @@ mod tests {
     }
 
     impl FakeGitClient {
+        /// Pushs output for this module's workflow.
         fn push_output(&self, args: &[&str], result: Result<&str, &str>) {
             let step = FakeStep {
                 expected_args: args.iter().map(|v| v.to_string()).collect(),
@@ -348,6 +366,7 @@ mod tests {
             self.steps.lock().expect("steps lock").push_back(step);
         }
 
+        /// Pushs status for this module's workflow.
         fn push_status(&self, args: &[&str], result: Result<Option<i32>, &str>) {
             let step = FakeStep {
                 expected_args: args.iter().map(|v| v.to_string()).collect(),
@@ -356,12 +375,14 @@ mod tests {
             self.steps.lock().expect("steps lock").push_back(step);
         }
 
+        /// Performs calls.
         fn calls(&self) -> Vec<Vec<String>> {
             self.calls.lock().expect("calls lock").clone()
         }
     }
 
     impl GitClient for FakeGitClient {
+        /// Performs run output.
         fn run_output(&self, _cwd: &Path, args: &[&str], context: &str) -> Result<String, String> {
             let args_vec = args.iter().map(|v| v.to_string()).collect::<Vec<_>>();
             self.calls
@@ -386,6 +407,7 @@ mod tests {
             }
         }
 
+        /// Performs run status code.
         fn run_status_code(
             &self,
             _cwd: &Path,
@@ -416,6 +438,7 @@ mod tests {
         }
     }
 
+    /// Performs sample remote.
     fn sample_remote() -> RemoteGitConfig {
         RemoteGitConfig {
             enabled: true,
@@ -425,6 +448,7 @@ mod tests {
         }
     }
 
+    /// Performs unique temp root.
     fn unique_temp_root(tag: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -437,6 +461,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs pull returns branch not found when fetch fails.
     fn pull_returns_branch_not_found_when_fetch_fails() {
         let fake = FakeGitClient::default();
         fake.push_output(&["init", "-q"], Ok(""));
@@ -464,6 +489,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs upload returns changed false when no diff.
     fn upload_returns_changed_false_when_no_diff() {
         let fake = FakeGitClient::default();
         fake.push_output(&["init", "-q"], Ok(""));
@@ -506,6 +532,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs upload commits and pushes when diff exists.
     fn upload_commits_and_pushes_when_diff_exists() {
         let fake = FakeGitClient::default();
         fake.push_output(&["init", "-q"], Ok(""));
@@ -557,6 +584,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs upload surfaces git context and stderr.
     fn upload_surfaces_git_context_and_stderr() {
         let fake = FakeGitClient::default();
         fake.push_output(&["init", "-q"], Ok(""));
@@ -592,6 +620,7 @@ mod tests {
     }
 
     #[test]
+    /// Runs a unit test for the expected behavior contract.
     fn contract_read_remote_exported_at_snapshot() {
         let root = unique_temp_root("contract-exported-at");
         std::fs::create_dir_all(&root).expect("create temp root");

@@ -5,10 +5,12 @@
 use std::net::{IpAddr, UdpSocket};
 use tokio::net::TcpListener;
 
+/// Performs normalized host.
 fn normalized_host(host: &str) -> &str {
     host.trim().trim_start_matches('[').trim_end_matches(']')
 }
 
+/// Performs format bind target.
 fn format_bind_target(host: &str, port: u16) -> String {
     if host.contains(':') {
         format!("[{host}]:{port}")
@@ -17,6 +19,7 @@ fn format_bind_target(host: &str, port: u16) -> String {
     }
 }
 
+/// Performs bind candidates.
 fn bind_candidates(host: &str) -> Vec<String> {
     let host = normalized_host(host);
     let mut candidates = match host {
@@ -30,6 +33,7 @@ fn bind_candidates(host: &str) -> Vec<String> {
     candidates
 }
 
+/// Performs public host for status.
 pub(super) fn public_host_for_status(bound_host: &str) -> String {
     match bound_host {
         "0.0.0.0" => "127.0.0.1".to_string(),
@@ -39,6 +43,7 @@ pub(super) fn public_host_for_status(bound_host: &str) -> String {
     }
 }
 
+/// Detects local ipv4 for this module's workflow.
 pub(super) fn detect_local_ipv4() -> Option<String> {
     // Use routing table resolution to infer the primary LAN IPv4 of this machine.
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
@@ -49,6 +54,7 @@ pub(super) fn detect_local_ipv4() -> Option<String> {
     }
 }
 
+/// Performs bind proxy listener.
 pub(super) async fn bind_proxy_listener(
     host: &str,
     port: u16,

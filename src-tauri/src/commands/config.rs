@@ -11,11 +11,13 @@ use serde_json::Value;
 use tauri::{AppHandle, State};
 
 #[tauri::command]
+/// IPC command: returns current in-memory proxy config.
 pub async fn config_get(state: State<'_, SharedState>) -> Result<ProxyConfig, String> {
     Ok(config_service::get_config(&state))
 }
 
 #[tauri::command]
+/// IPC command: validates and persists a new proxy config payload.
 pub async fn config_save(
     state: State<'_, SharedState>,
     app: AppHandle,
@@ -27,6 +29,7 @@ pub async fn config_save(
 }
 
 #[tauri::command]
+/// IPC command: exports groups backup to a user-selected file.
 pub async fn config_export_groups(
     state: State<'_, SharedState>,
     app: AppHandle,
@@ -37,6 +40,7 @@ pub async fn config_export_groups(
 }
 
 #[tauri::command]
+/// IPC command: exports groups backup into a selected folder path.
 pub async fn config_export_groups_folder(
     state: State<'_, SharedState>,
     app: AppHandle,
@@ -47,6 +51,7 @@ pub async fn config_export_groups_folder(
 }
 
 #[tauri::command]
+/// IPC command: exports groups backup JSON into clipboard.
 pub async fn config_export_groups_clipboard(
     state: State<'_, SharedState>,
     app: AppHandle,
@@ -57,6 +62,7 @@ pub async fn config_export_groups_clipboard(
 }
 
 #[tauri::command]
+/// IPC command: imports groups backup from a selected file.
 pub async fn config_import_groups(
     state: State<'_, SharedState>,
     app: AppHandle,
@@ -67,6 +73,7 @@ pub async fn config_import_groups(
 }
 
 #[tauri::command]
+/// IPC command: imports groups backup from raw JSON text.
 pub async fn config_import_groups_json(
     state: State<'_, SharedState>,
     json_text: String,

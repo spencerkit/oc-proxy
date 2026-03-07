@@ -10,18 +10,57 @@ import { ipc } from "./utils/ipc"
 import { resolveEffectiveLocale } from "./utils/locale"
 import "./styles.css"
 
+/** Reports renderer telemetry safely without breaking boot flow. */
+function reportRendererError(payload: {
+  kind: string
+  message: string
+  stack?: string
+  source?: string
+}) {
+  try {
+    ipc.reportRendererError(payload).catch(error => {
+      console.warn("[Main] reportRendererError rejected:", error)
+    })
+  } catch (error) {
+    console.warn("[Main] reportRendererError threw:", error)
+  }
+}
+
+/** Reports renderer ready state safely. */
+function reportRendererReady() {
+  try {
+    ipc.reportRendererReady().catch(error => {
+      console.warn("[Main] reportRendererReady rejected:", error)
+    })
+  } catch (error) {
+    console.warn("[Main] reportRendererReady threw:", error)
+  }
+}
+
 // 添加全局错误处理
 window.onerror = (message, source, lineno, colno, error) => {
   console.error("Global error:", { message, source, lineno, colno, error })
+  reportRendererError({
+    kind: "window.onerror",
+    message: String(message),
+    source: source ? `${source}:${lineno}:${colno}` : undefined,
+    stack: error instanceof Error ? error.stack : String(error ?? ""),
+  })
   return false
 }
 
 window.onunhandledrejection = event => {
   console.error("Unhandled promise rejection:", event.reason)
+  reportRendererError({
+    kind: "unhandledrejection",
+    message: String(event.reason ?? "unknown promise rejection"),
+    stack: event.reason instanceof Error ? event.reason.stack : undefined,
+  })
 }
 
 console.log("Renderer starting...")
 
+/** Resolves theme. */
 function resolveTheme(theme?: unknown): "light" | "dark" {
   if (theme === "light" || theme === "dark") {
     return theme
@@ -30,6 +69,7 @@ function resolveTheme(theme?: unknown): "light" | "dark" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
 }
 
+/** Resolves router. */
 function resolveRouter() {
   if (window.__TAURI__) {
     return HashRouter
@@ -83,6 +123,14 @@ async function init() {
   )
 
   console.log("[Main] React rendered")
+  reportRendererReady()
 }
 
-init().catch(console.error)
+init().catch(error => {
+  console.error(error)
+  reportRendererError({
+    kind: "bootstrap",
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  })
+})

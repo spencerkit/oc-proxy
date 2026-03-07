@@ -15,6 +15,7 @@ pub(crate) struct ParsedQuotaSnapshot {
     pub status: QuotaStatus,
 }
 
+/// Parses quota payload.
 pub(crate) fn parse_quota_payload(
     rule: &Rule,
     payload: &Value,
@@ -79,6 +80,7 @@ enum MappingSpec {
     Literal(Value),
 }
 
+/// Parses mapping spec.
 fn parse_mapping_spec(source: &Value) -> MappingSpec {
     match source {
         Value::Null => MappingSpec::Empty,
@@ -113,6 +115,7 @@ fn parse_mapping_spec(source: &Value) -> MappingSpec {
     }
 }
 
+/// Returns whether expression string is true.
 fn is_expression_string(source: &str) -> bool {
     if source.contains("path(") {
         return true;
@@ -127,6 +130,7 @@ fn is_expression_string(source: &str) -> bool {
     contains_operator
 }
 
+/// Performs evaluate mapping number.
 fn evaluate_mapping_number(source: &Value, payload: &Value) -> Result<Option<f64>, String> {
     match parse_mapping_spec(source) {
         MappingSpec::Empty => Ok(None),
@@ -136,6 +140,7 @@ fn evaluate_mapping_number(source: &Value, payload: &Value) -> Result<Option<f64
     }
 }
 
+/// Performs evaluate mapping string.
 fn evaluate_mapping_string(source: &Value, payload: &Value) -> Result<Option<String>, String> {
     match parse_mapping_spec(source) {
         MappingSpec::Empty => Ok(None),
@@ -145,6 +150,7 @@ fn evaluate_mapping_string(source: &Value, payload: &Value) -> Result<Option<Str
     }
 }
 
+/// Performs value to f64.
 fn value_to_f64(value: &Value) -> Option<f64> {
     if let Some(v) = value.as_f64() {
         return Some(v);
@@ -160,6 +166,7 @@ fn value_to_f64(value: &Value) -> Option<f64> {
     })
 }
 
+/// Performs value to string.
 fn value_to_string(value: &Value) -> Option<String> {
     match value {
         Value::Null => None,
@@ -170,6 +177,7 @@ fn value_to_string(value: &Value) -> Option<String> {
     }
 }
 
+/// Performs evaluate expression.
 fn evaluate_expression(expression: &str, payload: &Value) -> Result<f64, String> {
     let normalized = normalize_expression(expression);
     let mut parser = ExprParser::new(&normalized, payload);
@@ -187,6 +195,7 @@ fn evaluate_expression(expression: &str, payload: &Value) -> Result<f64, String>
     Ok(result)
 }
 
+/// Normalizes expression for this module's workflow.
 fn normalize_expression(raw: &str) -> String {
     if raw.contains("path(") {
         return raw.to_string();
@@ -225,6 +234,7 @@ struct ExprParser<'a> {
 }
 
 impl<'a> ExprParser<'a> {
+    /// Performs new.
     fn new(input: &'a str, payload: &'a Value) -> Self {
         Self {
             input,
@@ -233,10 +243,12 @@ impl<'a> ExprParser<'a> {
         }
     }
 
+    /// Parses expression.
     fn parse_expression(&mut self) -> Result<f64, String> {
         self.parse_add_sub()
     }
 
+    /// Parses add sub.
     fn parse_add_sub(&mut self) -> Result<f64, String> {
         let mut value = self.parse_mul_div()?;
         loop {
@@ -252,6 +264,7 @@ impl<'a> ExprParser<'a> {
         Ok(value)
     }
 
+    /// Parses mul div.
     fn parse_mul_div(&mut self) -> Result<f64, String> {
         let mut value = self.parse_unary()?;
         loop {
@@ -271,6 +284,7 @@ impl<'a> ExprParser<'a> {
         Ok(value)
     }
 
+    /// Parses unary.
     fn parse_unary(&mut self) -> Result<f64, String> {
         self.skip_whitespace();
         if self.consume_char('-') {
@@ -282,6 +296,7 @@ impl<'a> ExprParser<'a> {
         self.parse_primary()
     }
 
+    /// Parses primary.
     fn parse_primary(&mut self) -> Result<f64, String> {
         self.skip_whitespace();
         if self.consume_char('(') {
@@ -314,6 +329,7 @@ impl<'a> ExprParser<'a> {
         self.parse_number()
     }
 
+    /// Parses number.
     fn parse_number(&mut self) -> Result<f64, String> {
         self.skip_whitespace();
         let start = self.pos;
@@ -332,6 +348,7 @@ impl<'a> ExprParser<'a> {
             .map_err(|_| format!("invalid number in expression: {raw}"))
     }
 
+    /// Parses string literal.
     fn parse_string_literal(&mut self) -> Result<String, String> {
         let quote = self
             .peek_char()
@@ -359,6 +376,7 @@ impl<'a> ExprParser<'a> {
         Err("unterminated string literal in expression".to_string())
     }
 
+    /// Performs skip whitespace.
     fn skip_whitespace(&mut self) {
         while let Some(ch) = self.peek_char() {
             if ch.is_whitespace() {
@@ -369,6 +387,7 @@ impl<'a> ExprParser<'a> {
         }
     }
 
+    /// Performs peek IDentifier.
     fn peek_identifier(&self, expected: &str) -> bool {
         self.input
             .get(self.pos..)
@@ -376,6 +395,7 @@ impl<'a> ExprParser<'a> {
             .unwrap_or(false)
     }
 
+    /// Performs consume char.
     fn consume_char(&mut self, expected: char) -> bool {
         if self.peek_char() == Some(expected) {
             self.pos += expected.len_utf8();
@@ -385,11 +405,13 @@ impl<'a> ExprParser<'a> {
         }
     }
 
+    /// Performs peek char.
     fn peek_char(&self) -> Option<char> {
         self.input.get(self.pos..)?.chars().next()
     }
 }
 
+/// Extracts a JSON value by a simplified JSONPath expression.
 fn extract_json_path<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
     let chars: Vec<char> = path.chars().collect();
     if chars.first().copied() != Some('$') {
@@ -466,6 +488,7 @@ mod tests {
     use serde_json::{json, Value};
     use std::collections::HashMap;
 
+    /// Builds rule with mapping.
     fn build_rule_with_mapping(mapping: RuleQuotaResponseMapping) -> Rule {
         let mut quota = default_rule_quota_config();
         quota.enabled = true;
@@ -488,6 +511,7 @@ mod tests {
     }
 
     #[test]
+    /// Extracts JSON path reads nested and array paths for this module's workflow.
     fn extract_json_path_reads_nested_and_array_paths() {
         let payload = json!({
             "data": {
@@ -503,6 +527,7 @@ mod tests {
     }
 
     #[test]
+    /// Extracts JSON path returns none for missing path and bad index for this module's workflow.
     fn extract_json_path_returns_none_for_missing_path_and_bad_index() {
         let payload = json!({"data": {"items": [1]}});
         assert!(extract_json_path(&payload, "$.data.missing").is_none());
@@ -510,6 +535,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs evaluate expression supports inline path references.
     fn evaluate_expression_supports_inline_path_references() {
         let payload = json!({
             "data": {
@@ -524,6 +550,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs evaluate expression supports path function.
     fn evaluate_expression_supports_path_function() {
         let payload = json!({
             "data": {
@@ -540,6 +567,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs evaluate expression rejects invalid token and division by zero.
     fn evaluate_expression_rejects_invalid_token_and_division_by_zero() {
         let payload = json!({"x": 1});
         let err = evaluate_expression("1 + foo", &payload).expect_err("must fail");
@@ -550,6 +578,7 @@ mod tests {
     }
 
     #[test]
+    /// Performs evaluate expression rejects non finite result.
     fn evaluate_expression_rejects_non_finite_result() {
         let payload = json!({});
         let huge_number = format!("1{}", "0".repeat(400));
@@ -558,6 +587,7 @@ mod tests {
     }
 
     #[test]
+    /// Parses quota payload supports path mapping.
     fn parse_quota_payload_supports_path_mapping() {
         let rule = build_rule_with_mapping(RuleQuotaResponseMapping {
             remaining: json!("$.quota.remaining"),
@@ -583,6 +613,7 @@ mod tests {
     }
 
     #[test]
+    /// Parses quota payload supports expr mapping.
     fn parse_quota_payload_supports_expr_mapping() {
         let rule = build_rule_with_mapping(RuleQuotaResponseMapping {
             remaining: json!({
@@ -606,6 +637,7 @@ mod tests {
     }
 
     #[test]
+    /// Parses quota payload parses percentage and comma numbers.
     fn parse_quota_payload_parses_percentage_and_comma_numbers() {
         let mut rule = build_rule_with_mapping(RuleQuotaResponseMapping {
             remaining: json!("$.quota.remaining"),
@@ -625,6 +657,7 @@ mod tests {
     }
 
     #[test]
+    /// Parses quota payload status by unit type.
     fn parse_quota_payload_status_by_unit_type() {
         let mut percentage_rule = build_rule_with_mapping(RuleQuotaResponseMapping {
             remaining: json!("$.quota.remaining"),
@@ -653,6 +686,7 @@ mod tests {
     }
 
     #[test]
+    /// Parses quota payload threshold boundaries.
     fn parse_quota_payload_threshold_boundaries() {
         let mut rule = build_rule_with_mapping(RuleQuotaResponseMapping {
             remaining: json!("$.quota.remaining"),
@@ -677,6 +711,7 @@ mod tests {
     }
 
     #[test]
+    /// Runs a unit test for the expected behavior contract.
     fn contract_parse_quota_payload_snapshot() {
         let payload: Value = serde_json::from_str(include_str!(
             "../contract_fixtures/quota/parse_quota_payload.payload.json"

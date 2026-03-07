@@ -4,7 +4,10 @@
 
 use super::routing::{EntryProtocol, ParsedPath, PathEntry};
 use super::ServiceState;
-use axum::response::{IntoResponse, Response};
+use axum::{
+    http::HeaderMap,
+    response::{IntoResponse, Response},
+};
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -29,6 +32,7 @@ pub(super) struct MetricsState {
 }
 
 impl MetricsState {
+    /// Performs new.
     pub(super) fn new() -> Self {
         Self {
             requests: AtomicU64::new(0),
@@ -69,12 +73,14 @@ impl MetricsState {
         metrics
     }
 
+    /// Performs mark started.
     pub(super) fn mark_started(&self) {
         if let Ok(mut guard) = self.uptime_started_at.write() {
             *guard = Some(Utc::now().to_rfc3339());
         }
     }
 
+    /// Performs mark stopped.
     pub(super) fn mark_stopped(&self) {
         if let Ok(mut guard) = self.uptime_started_at.write() {
             *guard = None;
@@ -141,6 +147,7 @@ impl StreamTokenAccumulator {
         }
     }
 
+    /// Performs consume line.
     fn consume_line(&mut self, line: &str) {
         let Some(rest) = line.strip_prefix("data:") else {
             return;
@@ -241,6 +248,7 @@ pub(super) fn extract_token_usage(payload: &Value) -> Option<TokenUsage> {
     })
 }
 
+/// Normalizes input tokens for this module's workflow.
 fn normalize_input_tokens(usage: &Value, raw_input_tokens: u64, cache_read_tokens: u64) -> u64 {
     // OpenAI usage may report `input_tokens` including cached tokens.
     // Anthropic reports cache read separately from input.
@@ -269,6 +277,7 @@ fn normalize_input_tokens(usage: &Value, raw_input_tokens: u64, cache_read_token
     }
 }
 
+/// Performs first u64.
 fn first_u64(obj: &Value, fields: &[&str]) -> u64 {
     for field in fields {
         if let Some(v) = obj.get(*field).and_then(|v| v.as_u64()) {
@@ -329,17 +338,75 @@ pub(super) fn apply_headers(resp: &mut Response, headers: &HashMap<String, Strin
     }
 }
 
+/// Converts arbitrary header value bytes into safe log text.
+fn header_value_to_text(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+
+    const HEX: [char; 16] = [
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+    ];
+    let mut text = String::with_capacity(bytes.len() * 2 + 2);
+    text.push_str("0x");
+    for value in bytes {
+        text.push(HEX[(value >> 4) as usize]);
+        text.push(HEX[(value & 0x0f) as usize]);
+    }
+    text
+}
+
+/// Inserts or appends one header key/value for log map.
+fn merge_header_text(target: &mut HashMap<String, String>, key: String, value: String) {
+    if let Some(existing) = target.get_mut(&key) {
+        existing.push_str(", ");
+        existing.push_str(&value);
+    } else {
+        target.insert(key, value);
+    }
+}
+
+/// Convert downstream request headers into lowercase plain-string map for logging.
+pub(super) fn plain_downstream_headers(headers: &HeaderMap) -> HashMap<String, String> {
+    let mut plain = HashMap::new();
+    for (name, value) in headers {
+        merge_header_text(
+            &mut plain,
+            name.as_str().to_ascii_lowercase(),
+            header_value_to_text(value.as_bytes()),
+        );
+    }
+    plain
+}
+
 /// Convert upstream response headers into lowercase plain-string map for logging.
 pub(super) fn plain_headers(headers: &reqwest::header::HeaderMap) -> HashMap<String, String> {
-    headers
-        .iter()
-        .filter_map(|(k, v)| {
-            Some((
-                k.as_str().to_ascii_lowercase(),
-                v.to_str().ok()?.to_string(),
-            ))
-        })
-        .collect()
+    let mut plain = HashMap::new();
+    for (name, value) in headers {
+        merge_header_text(
+            &mut plain,
+            name.as_str().to_ascii_lowercase(),
+            header_value_to_text(value.as_bytes()),
+        );
+    }
+    plain
+}
+
+/// Formats entry protocol label.
+fn entry_protocol_text(protocol: EntryProtocol) -> String {
+    match protocol {
+        EntryProtocol::Openai => "openai".to_string(),
+        EntryProtocol::Anthropic => "anthropic".to_string(),
+    }
+}
+
+/// Formats downstream protocol label.
+fn downstream_protocol_text(protocol: &RuleProtocol) -> String {
+    match protocol {
+        RuleProtocol::Openai => "openai".to_string(),
+        RuleProtocol::OpenaiCompletion => "openai_completion".to_string(),
+        RuleProtocol::Anthropic => "anthropic".to_string(),
+    }
 }
 
 /// Append a simple log line for non-forwarding endpoints such as healthz/metrics.
@@ -391,12 +458,10 @@ pub(super) fn log_simple(
 }
 
 #[allow(clippy::too_many_arguments)]
-/// Append finalized request-chain log with full forwarding context.
-///
-/// This is called exactly once for successful flows and for handled error flows
-/// where request context is available.
-pub(super) fn finalize_log(
+/// Appends request-started log so UI can display request data before response arrives.
+pub(super) fn append_processing_log(
     state: &ServiceState,
+    timestamp: &str,
     trace_id: &str,
     method: &axum::http::Method,
     parsed_path: &ParsedPath,
@@ -406,6 +471,75 @@ pub(super) fn finalize_log(
     model: Option<&str>,
     forwarded_model: Option<&str>,
     forwarding_address: Option<&str>,
+    request_headers: Option<HashMap<String, String>>,
+    forward_request_headers: Option<HashMap<String, String>>,
+    request_body: Option<Value>,
+    forward_request_body: Option<Value>,
+    capture_body: bool,
+) {
+    let entry = LogEntry {
+        timestamp: timestamp.to_string(),
+        trace_id: trace_id.to_string(),
+        phase: "request_chain".to_string(),
+        status: "processing".to_string(),
+        method: method.as_str().to_string(),
+        request_path: format!("/oc/{}{}", parsed_path.group_id, parsed_path.suffix),
+        request_address: format!(
+            "{} /oc/{}{}",
+            method.as_str(),
+            parsed_path.group_id,
+            parsed_path.suffix
+        ),
+        client_address: None,
+        group_path: Some(parsed_path.group_id.clone()),
+        group_name: Some(group_name.to_string()),
+        rule_id: Some(rule.id.clone()),
+        direction: None,
+        entry_protocol: Some(entry_protocol_text(entry.protocol)),
+        downstream_protocol: Some(downstream_protocol_text(&rule.protocol)),
+        model: model.map(|value| value.to_string()),
+        forwarded_model: forwarded_model.map(|value| value.to_string()),
+        forwarding_address: forwarding_address.map(|value| value.to_string()),
+        request_headers,
+        forward_request_headers,
+        upstream_response_headers: None,
+        response_headers: None,
+        request_body: if capture_body { request_body } else { None },
+        forward_request_body: if capture_body {
+            forward_request_body
+        } else {
+            None
+        },
+        response_body: None,
+        token_usage: None,
+        cost_snapshot: None,
+        http_status: None,
+        upstream_status: None,
+        duration_ms: 0,
+        error: None,
+    };
+    state.log_store.upsert_by_trace_id(entry);
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Append finalized request-chain log with full forwarding context.
+///
+/// This is called exactly once for successful flows and for handled error flows
+/// where request context is available.
+pub(super) fn finalize_log(
+    state: &ServiceState,
+    timestamp: &str,
+    trace_id: &str,
+    method: &axum::http::Method,
+    parsed_path: &ParsedPath,
+    group_name: &str,
+    rule: &Rule,
+    entry: &PathEntry,
+    model: Option<&str>,
+    forwarded_model: Option<&str>,
+    forwarding_address: Option<&str>,
+    request_headers: Option<HashMap<String, String>>,
+    forward_request_headers: Option<HashMap<String, String>>,
     request_body: Option<Value>,
     forward_request_body: Option<Value>,
     response_body: Option<Value>,
@@ -423,7 +557,7 @@ pub(super) fn finalize_log(
         .map(|usage| build_cost_snapshot(rule, usage));
 
     let entry = LogEntry {
-        timestamp: Utc::now().to_rfc3339(),
+        timestamp: timestamp.to_string(),
         trace_id: trace_id.to_string(),
         phase: "request_chain".to_string(),
         status: status.to_string(),
@@ -440,20 +574,13 @@ pub(super) fn finalize_log(
         group_name: Some(group_name.to_string()),
         rule_id: Some(rule.id.clone()),
         direction: None,
-        entry_protocol: Some(match entry.protocol {
-            EntryProtocol::Openai => "openai".to_string(),
-            EntryProtocol::Anthropic => "anthropic".to_string(),
-        }),
-        downstream_protocol: Some(match rule.protocol {
-            RuleProtocol::Openai => "openai".to_string(),
-            RuleProtocol::OpenaiCompletion => "openai_completion".to_string(),
-            RuleProtocol::Anthropic => "anthropic".to_string(),
-        }),
+        entry_protocol: Some(entry_protocol_text(entry.protocol)),
+        downstream_protocol: Some(downstream_protocol_text(&rule.protocol)),
         model: model.map(|m| m.to_string()),
         forwarded_model: forwarded_model.map(|m| m.to_string()),
         forwarding_address: forwarding_address.map(|v| v.to_string()),
-        request_headers: None,
-        forward_request_headers: None,
+        request_headers,
+        forward_request_headers,
         upstream_response_headers: upstream_headers,
         response_headers,
         request_body: if capture_body { request_body } else { None },
@@ -470,10 +597,11 @@ pub(super) fn finalize_log(
         duration_ms,
         error: None,
     };
-    state.log_store.append(entry.clone());
+    state.log_store.upsert_by_trace_id(entry.clone());
     state.stats_store.append_log(&entry);
 }
 
+/// Builds cost snapshot.
 fn build_cost_snapshot(rule: &Rule, usage: &TokenUsage) -> CostSnapshot {
     let cost = &rule.cost;
     if !cost.enabled {
@@ -506,6 +634,7 @@ fn build_cost_snapshot(rule: &Rule, usage: &TokenUsage) -> CostSnapshot {
     }
 }
 
+/// Performs should capture body.
 fn should_capture_body(state: &ServiceState) -> bool {
     state
         .config
@@ -514,6 +643,7 @@ fn should_capture_body(state: &ServiceState) -> bool {
         .unwrap_or(false)
 }
 
+/// Performs proxy error response.
 pub(super) fn proxy_error_response(
     status_code: u16,
     code: &str,

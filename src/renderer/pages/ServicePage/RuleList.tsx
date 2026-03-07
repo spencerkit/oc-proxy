@@ -17,6 +17,7 @@ import type { Group, RuleCardStatsItem, RuleQuotaSnapshot } from "@/types"
 import { formatTokenMillions } from "@/utils/tokenFormat"
 import styles from "./ServicePage.module.css"
 
+/** Resolves currency prefix. */
 function resolveCurrencyPrefix(currency?: string): string {
   const normalized = currency?.trim().toUpperCase()
   if (!normalized) return "$"

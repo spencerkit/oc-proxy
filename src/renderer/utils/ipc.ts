@@ -19,10 +19,17 @@ import type {
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
 
-function getInvoke(): InvokeFn {
-  const invoke =
+/** Returns optional invoke function for best-effort telemetry calls. */
+function getOptionalInvoke(): InvokeFn | undefined {
+  return (
     (window.__TAURI__?.core?.invoke as InvokeFn | undefined) ??
     (window.__TAURI_INTERNALS__?.invoke as InvokeFn | undefined)
+  )
+}
+
+/** Implements invoke behavior. */
+function getInvoke(): InvokeFn {
+  const invoke = getOptionalInvoke()
   if (!invoke) {
     throw new Error("Tauri invoke is unavailable. Run this app inside Tauri runtime.")
   }
@@ -32,6 +39,27 @@ function getInvoke(): InvokeFn {
 export const ipc = {
   getAppInfo(): Promise<AppInfo> {
     return getInvoke()<AppInfo>("app_get_info")
+  },
+
+  reportRendererReady(): Promise<void> {
+    const invoke = getOptionalInvoke()
+    if (!invoke) {
+      return Promise.resolve()
+    }
+    return invoke<void>("app_renderer_ready")
+  },
+
+  reportRendererError(payload: {
+    kind: string
+    message: string
+    stack?: string
+    source?: string
+  }): Promise<void> {
+    const invoke = getOptionalInvoke()
+    if (!invoke) {
+      return Promise.resolve()
+    }
+    return invoke<void>("app_report_renderer_error", payload)
   },
 
   getStatus(): Promise<ProxyStatus> {

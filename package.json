@@ -1,6 +1,6 @@
 {
   "name": "ai-open-router",
-  "version": "0.2.4",
+  "version": "0.2.6",
   "description": "Desktop OpenAI <-> Anthropic compatible protocol router",
   "type": "commonjs",
   "scripts": {
@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "start": "cargo tauri dev",
     "tauri:dev": "cargo tauri dev",
+    "tauri:dev:fail": "AOR_DEBUG_FORCE_LOAD_FAILED_PAGE=1 cargo tauri dev",
     "tauri:collect": "bash ./scripts/collect-tauri-artifacts.sh",
     "tauri:build": "CARGO_TARGET_DIR=\"$PWD/dist/target\" cargo tauri build && npm run tauri:collect",
     "tauri:build:win": "CARGO_TARGET_DIR=\"$PWD/dist/target\" cargo tauri build --target x86_64-pc-windows-gnu && npm run tauri:collect",

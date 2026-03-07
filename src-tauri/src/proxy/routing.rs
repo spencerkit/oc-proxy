@@ -139,7 +139,7 @@ pub(super) fn resolve_upstream_url(
 
 /// Build outbound request headers for the selected upstream protocol.
 ///
-/// - Anthropic uses `x-api-key` + `anthropic-version`.
+/// - Anthropic uses `x-api-key` + `Anthropic-version`.
 /// - OpenAI surfaces use standard `Authorization: Bearer ...`.
 pub(super) fn build_rule_headers(protocol: &RuleProtocol, rule: &Rule) -> HashMap<String, String> {
     let mut headers = HashMap::new();
@@ -272,6 +272,7 @@ pub(super) fn resolve_target_model(
     rule.default_model.clone()
 }
 
+/// Finds the best matching group model pattern for a requested model string.
 fn find_group_model_match<'a>(group_models: &'a [String], requested: &str) -> Option<&'a str> {
     let mut best: Option<&str> = None;
     for model in group_models {
@@ -292,6 +293,7 @@ fn find_group_model_match<'a>(group_models: &'a [String], requested: &str) -> Op
     best
 }
 
+/// Returns whether model match is true.
 fn is_model_match(candidate: &str, requested: &str) -> bool {
     if candidate == requested {
         return true;
