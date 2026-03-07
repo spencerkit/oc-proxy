@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.6 - 2026-03-07
+### Features
+- feat(mapper): add OpenAI Responses to Anthropic Messages streaming conversion (f5342ba)
+- feat: show request logs early and backfill responses (302ac8e)
+- feat: harden webview boot failure fallback and diagnostics (15eb1e1)
+### Fixes
+- fix(mapper): emit content_block_delta events for tool arguments in responses->anthropic (92dc33d)
+- fix(proxy): remove forced stream=false for messages->responses route (ec3fd43)
+- fix(proxy): handle SSE responses regardless of stream parameter (86ea8d5)
+- fix(proxy): force streaming mode for /realtime endpoints (46f4085)
+- fix(mapper): add strip_schema_field to openai_chat_completions adapter (8eb37d5)
+- fix(logger): normalize tool schemas before forwarding (6059bb4)
+### Maintenance
+- other: Revert "chore(release): bump version to v0.3.0" (a332e12)
+- chore(release): bump version to v0.3.0 (1c45d73)
+- ci(release): upload only installer assets to avoid duplicate names (a0572de)
+- docs: add method-level comments and development flow documentation (731944c)
+- refactor: split stream bridge modules and align responses-completions bridges (ea43115)
+- refactor: move openai-chat to anthropic stream parsing into adapter (a2b5607)
+
 ## v0.2.4 - 2026-03-04
 ### Features
 - feat(logs): add date-based stats reset modal and chart tweaks (761cb03)

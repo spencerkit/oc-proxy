@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "ai-open-router-tauri"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "axum",
  "chrono",
