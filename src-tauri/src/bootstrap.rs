@@ -8,8 +8,8 @@ use crate::log_store::LogStore;
 use crate::models::AppInfo;
 use crate::proxy::ProxyRuntime;
 use crate::stats_store::StatsStore;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
@@ -142,7 +142,8 @@ fn encode_data_url_payload(raw: &str) -> String {
     let mut encoded = String::with_capacity(raw.len() * 2);
     for byte in raw.as_bytes() {
         let value = *byte;
-        let is_unreserved = value.is_ascii_alphanumeric() || matches!(value, b'-' | b'_' | b'.' | b'~');
+        let is_unreserved =
+            value.is_ascii_alphanumeric() || matches!(value, b'-' | b'_' | b'.' | b'~');
         if is_unreserved {
             encoded.push(value as char);
             continue;
@@ -275,7 +276,9 @@ fn show_renderer_load_failed_page(app: &AppHandle) {
                 }
             }
             Err(err) => {
-                eprintln!("[renderer][error] event=load_failed_page_url_parse_failed message={err}");
+                eprintln!(
+                    "[renderer][error] event=load_failed_page_url_parse_failed message={err}"
+                );
             }
         }
     }

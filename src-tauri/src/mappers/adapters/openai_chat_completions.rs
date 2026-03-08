@@ -590,11 +590,7 @@ impl OpenaiResponsesToChatStreamMapper {
     }
 
     /// Consumes one `responses` SSE JSON payload and emits chat-completions chunks.
-    pub(crate) fn on_stream_payload(
-        &mut self,
-        event: Option<&str>,
-        payload: &Value,
-    ) -> Vec<Value> {
+    pub(crate) fn on_stream_payload(&mut self, event: Option<&str>, payload: &Value) -> Vec<Value> {
         let mut out = Vec::new();
         self.update_common_metadata(payload);
         let event_name = self.resolve_event_name(event, payload);
@@ -736,25 +732,32 @@ impl OpenaiResponsesToChatStreamMapper {
 
     /// Updates shared metadata fields (id/model/created/usage) from incoming payload.
     fn update_common_metadata(&mut self, payload: &Value) {
-        if let Some(id) = payload
-            .get("id")
-            .and_then(|v| v.as_str())
-            .or_else(|| payload.get("response").and_then(|v| v.get("id")).and_then(|v| v.as_str()))
-        {
+        if let Some(id) = payload.get("id").and_then(|v| v.as_str()).or_else(|| {
+            payload
+                .get("response")
+                .and_then(|v| v.get("id"))
+                .and_then(|v| v.as_str())
+        }) {
             self.upstream_id = Some(id.to_string());
         }
-        if let Some(model) = payload
-            .get("model")
-            .and_then(|v| v.as_str())
-            .or_else(|| payload.get("response").and_then(|v| v.get("model")).and_then(|v| v.as_str()))
-        {
+        if let Some(model) = payload.get("model").and_then(|v| v.as_str()).or_else(|| {
+            payload
+                .get("response")
+                .and_then(|v| v.get("model"))
+                .and_then(|v| v.as_str())
+        }) {
             self.upstream_model = Some(model.to_string());
         }
         if let Some(created) = payload
             .get("created")
             .and_then(|v| v.as_i64())
             .or_else(|| payload.get("created_at").and_then(|v| v.as_i64()))
-            .or_else(|| payload.get("response").and_then(|v| v.get("created_at")).and_then(|v| v.as_i64()))
+            .or_else(|| {
+                payload
+                    .get("response")
+                    .and_then(|v| v.get("created_at"))
+                    .and_then(|v| v.as_i64())
+            })
         {
             self.upstream_created = Some(created);
         }
@@ -776,18 +779,16 @@ impl OpenaiResponsesToChatStreamMapper {
 
     /// Resolves event name from explicit SSE event header or payload `type`.
     fn resolve_event_name(&self, event: Option<&str>, payload: &Value) -> Option<String> {
-        event
-            .map(|v| v.to_string())
-            .or_else(|| payload.get("type").and_then(|v| v.as_str()).map(|v| v.to_string()))
+        event.map(|v| v.to_string()).or_else(|| {
+            payload
+                .get("type")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string())
+        })
     }
 
     /// Appends one chat-completions chunk object to output.
-    fn emit_chat_delta(
-        &self,
-        delta: Value,
-        finish_reason: Option<&str>,
-        out: &mut Vec<Value>,
-    ) {
+    fn emit_chat_delta(&self, delta: Value, finish_reason: Option<&str>, out: &mut Vec<Value>) {
         let mut choice = json!({
             "index": 0,
             "delta": delta,
@@ -919,9 +920,8 @@ impl OpenaiResponsesToChatStreamMapper {
             .and_then(|v| v.get("output"))
             .and_then(|v| v.as_array())
             .map(|arr| {
-                arr.iter().any(|item| {
-                    item.get("type").and_then(|v| v.as_str()) == Some("function_call")
-                })
+                arr.iter()
+                    .any(|item| item.get("type").and_then(|v| v.as_str()) == Some("function_call"))
             })
             .unwrap_or(false);
         if has_function_call || self.saw_tool_call {

@@ -485,9 +485,12 @@ pub fn decode_response(responses: &Value, request_model: &str) -> CanonicalRespo
             if item_type == "reasoning" {
                 if let Some(content_arr) = item.get("content").and_then(|v| v.as_array()) {
                     for content_item in content_arr {
-                        if content_item.get("type").and_then(|v| v.as_str()) == Some("reasoning_text") {
+                        if content_item.get("type").and_then(|v| v.as_str())
+                            == Some("reasoning_text")
+                        {
                             reasoning_text.push_str(
-                                content_item.get("reasoning")
+                                content_item
+                                    .get("reasoning")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or_default(),
                             );
@@ -1018,7 +1021,8 @@ impl OpenaiResponsesToAnthropicStreamMapper {
                             let output_index = payload
                                 .get("output_index")
                                 .and_then(|v| v.as_u64())
-                                .unwrap_or(0) as usize;
+                                .unwrap_or(0)
+                                as usize;
                             let call_id = item
                                 .get("call_id")
                                 .or_else(|| item.get("id"))
@@ -1096,13 +1100,15 @@ impl OpenaiResponsesToAnthropicStreamMapper {
                             self.final_usage = Some(usage.clone());
                         }
                         if let Some(status) = response.get("status").and_then(|v| v.as_str()) {
-                            self.final_stop_reason = Some(match status {
-                                "completed" => "end_turn",
-                                "incomplete" => "max_tokens",
-                                "failed" => "error",
-                                _ => "end_turn",
-                            }
-                            .to_string());
+                            self.final_stop_reason = Some(
+                                match status {
+                                    "completed" => "end_turn",
+                                    "incomplete" => "max_tokens",
+                                    "failed" => "error",
+                                    _ => "end_turn",
+                                }
+                                .to_string(),
+                            );
                         }
                     }
                 }
@@ -1156,7 +1162,10 @@ impl OpenaiResponsesToAnthropicStreamMapper {
     fn update_common_metadata(&mut self, payload: &Value) {
         if let Some(response) = payload.get("response") {
             if self.upstream_id.is_none() {
-                self.upstream_id = response.get("id").and_then(|v| v.as_str()).map(String::from);
+                self.upstream_id = response
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
             }
             if self.upstream_model.is_none() {
                 self.upstream_model = response

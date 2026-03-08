@@ -8,8 +8,8 @@ use super::super::canonical::{
     MapOptions,
 };
 use super::super::helpers::{
-    extract_openai_usage_summary, flatten_anthropic_text, map_openai_finish_reason_to_anthropic_stop,
-    str_or_empty, to_tool_result_content,
+    extract_openai_usage_summary, flatten_anthropic_text,
+    map_openai_finish_reason_to_anthropic_stop, str_or_empty, to_tool_result_content,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -166,8 +166,13 @@ fn push_text_block(out: &mut Vec<Value>, text: &str) {
 
 #[derive(Clone)]
 enum ActiveBlock {
-    Text { block_index: usize },
-    Tool { tool_index: usize, block_index: usize },
+    Text {
+        block_index: usize,
+    },
+    Tool {
+        tool_index: usize,
+        block_index: usize,
+    },
 }
 
 #[derive(Clone)]
@@ -179,7 +184,9 @@ struct ToolState {
 }
 
 enum AccumulatedContentBlock {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -368,11 +375,11 @@ impl OpenaiChatToAnthropicStreamMapper {
             _ => {
                 let index = self.next_block_index;
                 self.next_block_index += 1;
-                self.accumulated_content
-                    .entry(index)
-                    .or_insert_with(|| AccumulatedContentBlock::Text {
+                self.accumulated_content.entry(index).or_insert_with(|| {
+                    AccumulatedContentBlock::Text {
                         text: String::new(),
-                    });
+                    }
+                });
                 out.push((
                     "content_block_start".to_string(),
                     json!({
@@ -408,7 +415,12 @@ impl OpenaiChatToAnthropicStreamMapper {
     }
 
     /// Emits tool delta for this module's workflow.
-    fn emit_tool_delta(&mut self, tool_index: usize, chunk: &Value, out: &mut Vec<(String, Value)>) {
+    fn emit_tool_delta(
+        &mut self,
+        tool_index: usize,
+        chunk: &Value,
+        out: &mut Vec<(String, Value)>,
+    ) {
         self.ensure_message_start(out);
 
         if matches!(self.active_block, Some(ActiveBlock::Text { .. })) {
@@ -641,7 +653,10 @@ impl OpenaiChatToAnthropicStreamMapper {
                 "usage": usage,
             }),
         ));
-        out.push(("message_stop".to_string(), json!({ "type": "message_stop" })));
+        out.push((
+            "message_stop".to_string(),
+            json!({ "type": "message_stop" }),
+        ));
         self.message_stopped = true;
         out
     }

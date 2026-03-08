@@ -206,7 +206,10 @@ mod tests {
         assert!(combined.contains("chat.completion.chunk"), "{combined}");
         assert!(combined.contains("\"content\":\"hel\""), "{combined}");
         assert!(combined.contains("\"content\":\"lo\""), "{combined}");
-        assert!(combined.contains("\"finish_reason\":\"stop\""), "{combined}");
+        assert!(
+            combined.contains("\"finish_reason\":\"stop\""),
+            "{combined}"
+        );
         assert!(combined.contains("\"prompt_tokens\":10"), "{combined}");
         assert!(combined.contains("data: [DONE]"), "{combined}");
     }
@@ -235,7 +238,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join("");
 
-        assert!(combined.contains("event: response.output_text.delta"), "{combined}");
+        assert!(
+            combined.contains("event: response.output_text.delta"),
+            "{combined}"
+        );
         assert!(combined.contains("\"delta\":\"hello\""), "{combined}");
         assert!(combined.contains("event: response.completed"), "{combined}");
         assert!(combined.contains("\"object\":\"response\""), "{combined}");

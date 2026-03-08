@@ -12,6 +12,11 @@ mod request;
 mod response;
 mod response_engine;
 
+pub(crate) use adapters::anthropic_messages::OpenaiChatToAnthropicStreamMapper;
+pub(crate) use adapters::openai_chat_completions::OpenaiResponsesToChatStreamMapper;
+pub(crate) use adapters::openai_responses::{
+    OpenaiChatToResponsesStreamMapper, OpenaiResponsesToAnthropicStreamMapper,
+};
 #[allow(unused_imports)]
 pub use canonical::MapperSurface;
 pub use normalize::normalize_openai_request;
@@ -25,11 +30,6 @@ pub use request::{
 pub use response::{
     map_anthropic_to_openai_response, map_openai_chat_to_responses,
     map_openai_to_anthropic_response, map_response_by_surface,
-};
-pub(crate) use adapters::anthropic_messages::OpenaiChatToAnthropicStreamMapper;
-pub(crate) use adapters::openai_chat_completions::OpenaiResponsesToChatStreamMapper;
-pub(crate) use adapters::openai_responses::{
-    OpenaiChatToResponsesStreamMapper, OpenaiResponsesToAnthropicStreamMapper,
 };
 
 #[cfg(test)]

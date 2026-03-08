@@ -9,9 +9,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 /// Writes renderer diagnostics log line.
 fn log_renderer_event(level: &str, event: &str, window_label: &str, message: &str) {
-    eprintln!(
-        "[renderer][{level}] event={event} window={window_label} message={message}"
-    );
+    eprintln!("[renderer][{level}] event={event} window={window_label} message={message}");
 }
 
 #[tauri::command]
@@ -55,7 +53,12 @@ pub async fn app_renderer_ready(
     window: Window,
 ) -> Result<(), String> {
     state.set_renderer_ready(true);
-    log_renderer_event("info", "renderer_ready", window.label(), "renderer boot completed");
+    log_renderer_event(
+        "info",
+        "renderer_ready",
+        window.label(),
+        "renderer boot completed",
+    );
     Ok(())
 }
 
