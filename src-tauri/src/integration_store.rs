@@ -92,6 +92,7 @@ impl IntegrationStore {
             id: Uuid::new_v4().to_string(),
             kind,
             config_dir: normalized_dir,
+            config: None,
             created_at: now.clone(),
             updated_at: now,
         };
