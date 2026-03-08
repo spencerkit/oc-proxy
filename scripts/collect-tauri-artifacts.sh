@@ -27,10 +27,13 @@ for target_dir in "${TARGET_DIRS[@]}"; do
   for file in "${target_dir}"/release/bundle/deb/*.deb; do
     copy_artifact "${file}"
   done
-  for file in "${target_dir}"/*/release/bundle/nsis/*-setup.exe; do
+  for file in "${target_dir}"/release/bundle/nsis/*-setup.exe; do
     copy_artifact "${file}"
   done
-  for file in "${target_dir}"/*/release/ai-open-router-tauri.exe; do
+  for file in "${target_dir}"/*/*/release/bundle/nsis/*-setup.exe; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/ai-open-router-tauri.exe; do
     copy_artifact "${file}"
   done
   for file in "${target_dir}"/release/ai-open-router-tauri; do
