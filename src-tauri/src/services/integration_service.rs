@@ -2,7 +2,7 @@
 //! Service-layer operations for external client integrations.
 //! Handles target persistence and one-click write for Claude/Codex/OpenCode configs.
 
-use crate::api::dto::{AgentConfig, AgentConfigFile};
+use crate::api::dto::{AgentConfig, AgentConfigFile, WriteAgentConfigResult};
 use crate::app_state::SharedState;
 use crate::models::{
     IntegrationClientKind, IntegrationTarget, IntegrationWriteItem, IntegrationWriteResult,
@@ -816,4 +816,150 @@ fn parse_codex_config(root: &Map<String, Value>) -> AppResult<AgentConfig> {
         include_coauthored_by: None,
         skip_dangerous_mode_permission_prompt: None,
     })
+}
+
+
+/// Writes Agent configuration to file.
+pub fn write_agent_config(
+    state: &SharedState,
+    target_id: &str,
+    config: AgentConfig,
+) -> AppResult<WriteAgentConfigResult> {
+    use std::path::PathBuf;
+
+    let targets = state.integration_store.list();
+    let target = targets
+        .into_iter()
+        .find(|t| t.id == target_id)
+        .ok_or_else(|| AppError::not_found(format!("target not found: {}", target_id)))?;
+
+    let config_dir = PathBuf::from(&target.config_dir);
+
+    // Normalize WSL path
+    let config_dir = match normalize_wsl_path(&config_dir) {
+        Some(normalized) => normalized,
+        None => config_dir,
+    };
+
+    let file_path = match target.kind {
+        IntegrationClientKind::Claude => {
+            write_claude_full_config(&config_dir, &config)?
+        }
+        IntegrationClientKind::Opencode => {
+            write_opencode_full_config(&config_dir, &config)?
+        }
+        IntegrationClientKind::Codex => {
+            write_codex_full_config(&config_dir, &config)?
+        }
+    };
+
+    // Update stored config
+    let _ = state.integration_store.update_target_config(
+        target_id,
+        target.config_dir,
+        Some(config),
+    );
+
+    Ok(WriteAgentConfigResult {
+        ok: true,
+        target_id: target_id.to_string(),
+        file_path: file_path.to_string_lossy().to_string(),
+        message: None,
+    })
+}
+
+fn write_claude_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult<PathBuf> {
+    let file_path = config_dir.join("settings.json");
+    let mut root = read_json_like_object(&file_path)?;
+
+    // Write env
+    let env = ensure_child_object(&mut root, "env");
+    if let Some(url) = &config.url {
+        env.insert("ANTHROPIC_BASE_URL".to_string(), Value::String(url.clone()));
+    }
+    if let Some(token) = &config.api_token {
+        env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), Value::String(token.clone()));
+    }
+    if let Some(model) = &config.model {
+        env.insert("ANTHROPIC_MODEL".to_string(), Value::String(model.clone()));
+    }
+    if let Some(timeout) = config.timeout {
+        env.insert("API_TIMEOUT_MS".to_string(), Value::String(timeout.to_string()));
+    }
+
+    // Write behavior options
+    if let Some(enabled) = config.always_thinking_enabled {
+        root.insert("alwaysThinkingEnabled".to_string(), Value::Bool(enabled));
+    }
+    if let Some(enabled) = config.include_coauthored_by {
+        root.insert("includeCoAuthoredBy".to_string(), Value::Bool(enabled));
+    }
+    if let Some(enabled) = config.skip_dangerous_mode_permission_prompt {
+        root.insert("skipDangerousModePermissionPrompt".to_string(), Value::Bool(enabled));
+    }
+
+    write_json_object(&file_path, &root)?;
+    Ok(file_path)
+}
+
+fn write_opencode_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult<PathBuf> {
+    let file_path = resolve_opencode_config_path(config_dir)?;
+    let mut root = read_json_like_object(&file_path)?;
+
+    // Ensure provider structure
+    let provider = ensure_child_object(&mut root, "provider");
+    let aor_shared = ensure_child_object(provider, "aor_shared");
+    let options = ensure_child_object(aor_shared, "options");
+
+    if let Some(url) = &config.url {
+        options.insert("baseURL".to_string(), Value::String(url.clone()));
+    }
+    if let Some(timeout) = config.timeout {
+        options.insert("timeout".to_string(), Value::Number(timeout.into()));
+    }
+
+    // Write model at root level
+    if let Some(model) = &config.model {
+        root.insert("model".to_string(), Value::String(model.clone()));
+    }
+
+    write_json_object(&file_path, &root)?;
+    Ok(file_path)
+}
+
+fn write_codex_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult<PathBuf> {
+    let file_path = config_dir.join("config.toml");
+    let mut doc = read_toml_document(&file_path)?;
+
+    if !doc["model_providers"].is_table() {
+        doc["model_providers"] = Item::Table(Table::new());
+    }
+    if !doc["model_providers"]["aor_shared"].is_table() {
+        doc["model_providers"]["aor_shared"] = Item::Table(Table::new());
+    }
+
+    if let Some(url) = &config.url {
+        doc["model_providers"]["aor_shared"]["base_url"] = value(url);
+    }
+    if let Some(token) = &config.api_token {
+        doc["model_providers"]["aor_shared"]["api_key"] = value(token);
+    }
+    if let Some(model) = &config.model {
+        doc["model"] = value(model);
+    }
+
+    // Write to file
+    if let Some(parent) = file_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            AppError::external(format!("create codex config dir failed ({}): {e}", parent.display()))
+        })?;
+    }
+    let mut output = doc.to_string();
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    std::fs::write(&file_path, output).map_err(|e| {
+        AppError::external(format!("write codex config failed ({}): {e}", file_path.display()))
+    })?;
+    Ok(file_path)
 }

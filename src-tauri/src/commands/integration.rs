@@ -1,7 +1,7 @@
 //! Module Overview
 //! Tauri command handlers for external client integration workflows.
 
-use crate::api::dto::AgentConfigFile;
+use crate::api::dto::{AgentConfig, AgentConfigFile, WriteAgentConfigResult};
 use crate::app_state::SharedState;
 use crate::models::{IntegrationClientKind, IntegrationTarget, IntegrationWriteResult};
 use crate::services::integration_service;
@@ -146,4 +146,14 @@ pub async fn integration_read_agent_config(
     target_id: String,
 ) -> Result<AgentConfigFile, String> {
     integration_service::read_agent_config(&state, &target_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+/// Writes agent configuration to file.
+pub async fn integration_write_agent_config(
+    state: State<'_, SharedState>,
+    target_id: String,
+    config: AgentConfig,
+) -> Result<WriteAgentConfigResult, String> {
+    integration_service::write_agent_config(&state, &target_id, config).map_err(|e| e.to_string())
 }
