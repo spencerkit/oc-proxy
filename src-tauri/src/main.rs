@@ -22,6 +22,7 @@ mod remote_sync;
 mod services;
 mod stats_store;
 mod transformer;
+mod wsl;
 
 use commands::{
     app_get_info, app_get_status, app_read_clipboard_text, app_renderer_ready,

@@ -8,12 +8,31 @@ use crate::models::{
     ProxyConfig,
 };
 use crate::services::{AppError, AppResult};
+use crate::wsl;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::net::{Ipv4Addr, UdpSocket};
 use std::path::{Path, PathBuf};
 use toml_edit::{value, DocumentMut, Item, Table};
 use url::Url;
+
+/// Writes debug log to a file in app data directory.
+fn write_debug_log(message: &str) {
+    // Try to write to a log file in temp directory
+    if let Ok(log_dir) = std::env::var("LOCALAPPDATA") {
+        let log_dir = PathBuf::from(log_dir).join("art.shier.aiopenrouter");
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_path = log_dir.join("wsl-debug.log");
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+            let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+            let _ = writeln!(file, "[{}] {}", timestamp, message);
+        }
+    }
+    // Also print to stderr
+    eprintln!("{}", message);
+}
 
 /// Performs list targets.
 pub fn list_targets(state: &SharedState) -> Vec<IntegrationTarget> {
@@ -233,20 +252,89 @@ fn is_loopback_or_localhost_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
+fn is_wsl_path(path: &Path) -> bool {
+    wsl::is_wsl_path(path)
+}
+
+/// Writes content to a file, handling WSL paths by using WSL command.
+fn write_file_content(file_path: &Path, content: &str) -> AppResult<()> {
+    let file_path_str = file_path.to_string_lossy();
+    write_debug_log(&format!(
+        "write_file_content called with path: {}",
+        file_path_str
+    ));
+
+    if is_wsl_path(file_path) {
+        if let Some(resolved) = wsl::resolve_path(file_path) {
+            write_debug_log(&format!(
+                "Writing via WSL distro={}, path={}",
+                resolved.distro, resolved.linux_path
+            ));
+        }
+        wsl::write_file(file_path, content).map_err(|e| {
+            write_debug_log(&format!("ERROR: WSL write failed: {}", e));
+            AppError::external(format!(
+                "write WSL file failed ({}): {e}",
+                file_path.display()
+            ))
+        })?;
+        write_debug_log("Write successful!");
+        return Ok(());
+    }
+
+    write_debug_log("Non-WSL path, using std::fs");
+
+    // Normal file write for non-WSL paths
+    // Create parent directory if needed
+    if let Some(parent) = file_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::external(format!("create directory failed: {}", e)))?;
+    }
+
+    std::fs::write(file_path, content)
+        .map_err(|e| AppError::external(format!("write file failed: {}", e)))
+}
+
+fn normalize_wsl_path(path: &Path) -> Option<PathBuf> {
+    wsl::normalize_windows_path(path)
+}
+
 /// Writes one target entry URL by kind.
 fn write_target_entry(target: &IntegrationTarget, entry_url: &str) -> AppResult<PathBuf> {
-    let config_dir = PathBuf::from(target.config_dir.trim());
-    if !config_dir.exists() {
-        return Err(AppError::external(format!(
-            "config directory does not exist: {}",
-            config_dir.display()
-        )));
-    }
-    if !config_dir.is_dir() {
-        return Err(AppError::external(format!(
-            "config directory is not a folder: {}",
-            config_dir.display()
-        )));
+    write_debug_log(&format!(
+        "write_target_entry called, config_dir: {}",
+        target.config_dir
+    ));
+    let config_dir_raw = PathBuf::from(target.config_dir.trim());
+
+    // Try to normalize WSL path - convert \\?\UNC\wsl.localhost\ to \\wsl$\
+    let config_dir = match normalize_wsl_path(&config_dir_raw) {
+        Some(normalized) => {
+            write_debug_log(&format!("Normalized path to: {}", normalized.display()));
+            normalized
+        }
+        None => {
+            write_debug_log("Not a WSL path, using raw");
+            config_dir_raw.clone()
+        }
+    };
+
+    write_debug_log(&format!("Final config_dir: {}", config_dir.display()));
+
+    if !is_wsl_path(&config_dir) {
+        if !config_dir.exists() {
+            return Err(AppError::external(format!(
+                "config directory does not exist: {}",
+                config_dir.display()
+            )));
+        }
+
+        if !config_dir.is_dir() {
+            return Err(AppError::external(format!(
+                "config directory is not a folder: {}",
+                config_dir.display()
+            )));
+        }
     }
 
     match target.kind {
@@ -271,7 +359,7 @@ fn write_claude_settings(config_dir: &Path, entry_url: &str) -> AppResult<PathBu
 
 /// Writes OpenCode provider.aor_shared.options.baseURL.
 fn write_opencode_config(config_dir: &Path, entry_url: &str) -> AppResult<PathBuf> {
-    let file_path = resolve_opencode_config_path(config_dir);
+    let file_path = resolve_opencode_config_path(config_dir)?;
     let mut root = read_json_like_object(&file_path)?;
     let provider = ensure_child_object(&mut root, "provider");
     let aor_shared = ensure_child_object(provider, "aor_shared");
@@ -285,50 +373,83 @@ fn write_opencode_config(config_dir: &Path, entry_url: &str) -> AppResult<PathBu
 fn write_codex_config(config_dir: &Path, entry_url: &str) -> AppResult<PathBuf> {
     let file_path = config_dir.join("config.toml");
     let mut doc = read_toml_document(&file_path)?;
-    if !doc["model_providers"].is_table() {
-        doc["model_providers"] = Item::Table(Table::new());
-    }
-    if !doc["model_providers"]["aor_shared"].is_table() {
-        doc["model_providers"]["aor_shared"] = Item::Table(Table::new());
-    }
-    doc["model_providers"]["aor_shared"]["base_url"] = value(entry_url);
+    let model_providers = ensure_toml_table(doc.as_table_mut(), "model_providers");
+    let aor_shared = ensure_toml_table(model_providers, "aor_shared");
+    aor_shared["base_url"] = value(entry_url);
 
-    if let Some(parent) = file_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::external(format!(
-                "create codex config dir failed ({}): {e}",
-                parent.display()
-            ))
-        })?;
-    }
     let mut output = doc.to_string();
     if !output.ends_with('\n') {
         output.push('\n');
     }
-    std::fs::write(&file_path, output).map_err(|e| {
-        AppError::external(format!(
-            "write codex config failed ({}): {e}",
-            file_path.display()
-        ))
-    })?;
+
+    write_file_content(&file_path, &output)?;
     Ok(file_path)
 }
 
 /// Resolves OpenCode config file path.
-fn resolve_opencode_config_path(config_dir: &Path) -> PathBuf {
+fn resolve_opencode_config_path(config_dir: &Path) -> AppResult<PathBuf> {
     let jsonc = config_dir.join("opencode.jsonc");
+    if is_wsl_path(config_dir) {
+        if wsl::is_file(&jsonc).map_err(|e| {
+            AppError::external(format!(
+                "check WSL config file failed ({}): {e}",
+                jsonc.display()
+            ))
+        })? {
+            return Ok(jsonc);
+        }
+
+        let json = config_dir.join("opencode.json");
+        if wsl::is_file(&json).map_err(|e| {
+            AppError::external(format!(
+                "check WSL config file failed ({}): {e}",
+                json.display()
+            ))
+        })? {
+            return Ok(json);
+        }
+
+        return Ok(json);
+    }
+
     if jsonc.exists() {
-        return jsonc;
+        return Ok(jsonc);
     }
     let json = config_dir.join("opencode.json");
     if json.exists() {
-        return json;
+        return Ok(json);
     }
-    json
+    Ok(json)
 }
 
 /// Reads JSON or JSONC object from file.
 fn read_json_like_object(file_path: &Path) -> AppResult<Map<String, Value>> {
+    // For WSL paths, read via wsl command
+    if is_wsl_path(file_path) {
+        let Some(content) = read_file_via_wsl(file_path)? else {
+            return Ok(Map::new());
+        };
+        if content.trim().is_empty() {
+            return Ok(Map::new());
+        }
+        let parsed = serde_json::from_str::<Value>(&content)
+            .or_else(|_| json5::from_str::<Value>(&content))
+            .map_err(|e| {
+                AppError::validation(format!(
+                    "parse JSON config failed ({}): {e}",
+                    file_path.display()
+                ))
+            })?;
+        let Value::Object(map) = parsed else {
+            return Err(AppError::validation(format!(
+                "JSON config root must be object: {}",
+                file_path.display()
+            )));
+        };
+        return Ok(map);
+    }
+
+    // Normal read for non-WSL paths
     if !file_path.exists() {
         return Ok(Map::new());
     }
@@ -358,6 +479,23 @@ fn read_json_like_object(file_path: &Path) -> AppResult<Map<String, Value>> {
 
 /// Reads TOML document from file.
 fn read_toml_document(file_path: &Path) -> AppResult<DocumentMut> {
+    if is_wsl_path(file_path) {
+        let Some(content) = read_file_via_wsl(file_path)? else {
+            return Ok(DocumentMut::new());
+        };
+        if content.trim().is_empty() {
+            return Ok(DocumentMut::new());
+        }
+        return content.parse::<DocumentMut>().map_err(|e| {
+            AppError::validation(format!(
+                "parse TOML config failed ({}): {}",
+                file_path.display(),
+                e
+            ))
+        });
+    }
+
+    // Normal read for non-WSL paths
     if !file_path.exists() {
         return Ok(DocumentMut::new());
     }
@@ -373,6 +511,30 @@ fn read_toml_document(file_path: &Path) -> AppResult<DocumentMut> {
             file_path.display()
         ))
     })
+}
+
+/// Reads file content via WSL command.
+fn read_file_via_wsl(file_path: &Path) -> AppResult<Option<String>> {
+    if let Some(resolved) = wsl::resolve_path(file_path) {
+        write_debug_log(&format!(
+            "Reading via WSL distro={}, path={}",
+            resolved.distro, resolved.linux_path
+        ));
+    }
+
+    let content = wsl::read_file(file_path).map_err(|e| {
+        write_debug_log(&format!("ERROR: WSL read failed: {}", e));
+        AppError::external(format!(
+            "read WSL file failed ({}): {e}",
+            file_path.display()
+        ))
+    })?;
+    if let Some(ref content) = content {
+        write_debug_log(&format!("Read {} bytes", content.len()));
+    } else {
+        write_debug_log("WSL file not found");
+    }
+    Ok(content)
 }
 
 /// Ensures child key is a JSON object.
@@ -398,17 +560,34 @@ fn ensure_object(value: &mut Value) -> &mut Map<String, Value> {
 
 /// Writes JSON object to file.
 fn write_json_object(file_path: &Path, root: &Map<String, Value>) -> AppResult<()> {
-    if let Some(parent) = file_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::external(format!(
-                "create config dir failed ({}): {e}",
-                parent.display()
-            ))
-        })?;
-    }
     let text = serde_json::to_string_pretty(&Value::Object(root.clone()))
         .map_err(|e| AppError::internal(format!("serialize JSON failed: {e}")))?;
-    std::fs::write(file_path, text).map_err(|e| {
-        AppError::external(format!("write file failed ({}): {e}", file_path.display()))
-    })
+    write_file_content(file_path, &text)
+}
+
+fn ensure_toml_table<'a>(parent: &'a mut Table, key: &str) -> &'a mut Table {
+    let item = parent.entry(key).or_insert(Item::Table(Table::new()));
+    if !item.is_table() {
+        *item = Item::Table(Table::new());
+    }
+    item.as_table_mut()
+        .expect("table must exist after normalization")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_config_shape_can_be_created_from_empty_document() {
+        let mut doc = DocumentMut::new();
+        let model_providers = ensure_toml_table(doc.as_table_mut(), "model_providers");
+        let aor_shared = ensure_toml_table(model_providers, "aor_shared");
+        aor_shared["base_url"] = value("http://127.0.0.1:11434");
+
+        let output = doc.to_string();
+        assert!(output.contains("model_providers"));
+        assert!(output.contains("aor_shared"));
+        assert!(output.contains("base_url"));
+    }
 }

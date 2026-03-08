@@ -3,6 +3,7 @@
 //! Keeps selected config directories for Claude/Codex/OpenCode in local app data.
 
 use crate::models::{IntegrationClientKind, IntegrationTarget};
+use crate::wsl;
 use chrono::Utc;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -169,12 +170,29 @@ fn normalize_config_dir(raw: &str) -> Result<String, String> {
         return Err("config directory is required".to_string());
     }
     let path = PathBuf::from(trimmed);
+
+    if let Some(normalized) = wsl::normalize_windows_path(&path) {
+        if !wsl::exists(&normalized)
+            .map_err(|e| format!("check WSL config directory failed: {e}"))?
+        {
+            return Err(format!("config directory does not exist: {trimmed}"));
+        }
+        if !wsl::is_dir(&normalized)
+            .map_err(|e| format!("check WSL config directory failed: {e}"))?
+        {
+            return Err(format!("config directory is not a folder: {trimmed}"));
+        }
+        return Ok(normalized.to_string_lossy().to_string());
+    }
+
     if !path.exists() {
         return Err(format!("config directory does not exist: {trimmed}"));
     }
     if !path.is_dir() {
         return Err(format!("config directory is not a folder: {trimmed}"));
     }
+
     let normalized = std::fs::canonicalize(&path).unwrap_or(path);
+
     Ok(normalized.to_string_lossy().to_string())
 }

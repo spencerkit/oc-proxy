@@ -4,6 +4,7 @@
 use crate::app_state::SharedState;
 use crate::models::{IntegrationClientKind, IntegrationTarget, IntegrationWriteResult};
 use crate::services::integration_service;
+use crate::wsl;
 use serde_json::json;
 use std::path::PathBuf;
 use tauri::{AppHandle, State};
@@ -52,7 +53,11 @@ fn resolve_starting_directory(
 ) -> Option<PathBuf> {
     if let Some(dir) = initial_dir {
         let path = PathBuf::from(dir.trim());
-        if path.exists() {
+        if wsl::is_wsl_path(&path) {
+            if wsl::is_dir(&path).ok()? {
+                return wsl::normalize_windows_path(&path);
+            }
+        } else if path.exists() {
             return Some(path);
         }
     }
