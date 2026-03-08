@@ -19,14 +19,18 @@ pub struct ServerConfig {
 #[serde(rename_all = "camelCase")]
 pub struct CompatConfig {
     pub strict_mode: bool,
+    #[serde(default = "default_text_tool_call_fallback_enabled")]
+    pub text_tool_call_fallback_enabled: bool,
+}
+
+fn default_text_tool_call_fallback_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoggingConfig {
-    pub level: String,
     pub capture_body: bool,
-    pub redact_rules: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +40,8 @@ pub struct UiConfig {
     pub locale: String,
     pub locale_mode: String,
     pub launch_on_startup: bool,
+    #[serde(default = "crate::config::schema::default_auto_start_server")]
+    pub auto_start_server: bool,
     pub close_to_tray: bool,
     #[serde(default = "crate::config::schema::default_quota_auto_refresh_minutes")]
     pub quota_auto_refresh_minutes: u32,
@@ -361,6 +367,15 @@ pub struct RuleQuotaTestResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProviderModelTestResult {
+    pub ok: bool,
+    pub resolved_model: Option<String>,
+    pub raw_text: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StatsRuleOption {
     pub key: String,
     pub label: String,
@@ -481,6 +496,7 @@ pub struct RuleCardStatsItem {
     pub requests: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cache_tokens: u64,
     pub tokens: u64,
     pub total_cost: f64,
     pub hourly: Vec<RuleCardHourlyPoint>,

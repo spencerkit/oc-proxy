@@ -25,14 +25,15 @@ import type { ProxyConfig } from "@/types"
 export function useProxyConfig() {
   const config = useProxyStore(state => state.config)
   const saveConfig = useProxyStore(state => state.saveConfig)
-  const loading = useProxyStore(state => state.loading)
-  const error = useProxyStore(state => state.error)
+  const savingConfig = useProxyStore(state => state.savingConfig)
+  const error = useProxyStore(state => state.lastOperationError)
 
   return {
     config,
     saveConfig,
-    loading,
+    loading: savingConfig,
     error,
+    savingConfig,
   }
 }
 

@@ -156,4 +156,11 @@ mod tests {
         let err = validate_config(&cfg).expect_err("validation should fail");
         assert!(err.contains("ui.quotaAutoRefreshMinutes"));
     }
+
+    #[test]
+    /// Performs auto start server defaults to enabled.
+    fn auto_start_server_defaults_enabled() {
+        let cfg = default_config();
+        assert!(cfg.ui.auto_start_server);
+    }
 }

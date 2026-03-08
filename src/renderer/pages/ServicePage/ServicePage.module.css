@@ -32,6 +32,10 @@
   border-bottom: 1px solid var(--border);
 }
 
+.groupSearchBox {
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+
 .groupHeaderTitle {
   display: flex;
   align-items: center;
@@ -196,6 +200,51 @@
   border-radius: var(--radius-lg);
 }
 
+.guideCard {
+  display: grid;
+  gap: var(--sp-4);
+  min-height: 320px;
+  padding: var(--sp-6);
+  background:
+    radial-gradient(
+      circle at top right,
+      color-mix(in oklab, var(--accent) 12%, transparent),
+      transparent 34%
+    ),
+    var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.guideCard h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  color: var(--text-primary);
+}
+
+.guideSubtitle {
+  color: var(--text-secondary);
+  max-width: 720px;
+}
+
+.guideSteps {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.guideStep {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+
+.guideActions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
 /* Group Header */
 .groupHeader {
   background: var(--bg-raised);
@@ -291,6 +340,7 @@
 .groupActions {
   display: flex;
   gap: var(--sp-2);
+  flex-wrap: wrap;
 }
 
 /* ── Rule List ── */
@@ -342,7 +392,7 @@
 .ruleItems {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
 }
 
 .ruleItemContainer {
@@ -372,10 +422,25 @@
 }
 
 .ruleItemContainerActive {
-  background: var(--surface-selected);
-  border-color: var(--accent);
-  box-shadow: var(--shadow-sm);
-  border-left: 3px solid var(--accent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--success) 10%, var(--bg-raised)),
+    color-mix(in oklab, var(--success) 4%, var(--surface))
+  );
+  border-color: color-mix(in oklab, var(--success) 38%, var(--border));
+  box-shadow:
+    inset 3px 0 0 color-mix(in oklab, var(--success) 72%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--success) 16%, transparent),
+    var(--shadow-sm);
+}
+
+.ruleItemContainerActive:hover {
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--success) 13%, var(--bg-raised)),
+    color-mix(in oklab, var(--success) 6%, var(--surface-hover))
+  );
+  border-color: color-mix(in oklab, var(--success) 46%, var(--border));
 }
 
 .enabledCornerBadge {
@@ -389,33 +454,33 @@
   border-radius: var(--radius-full);
   font-size: 10px;
   font-weight: var(--weight-semibold);
-  color: var(--accent);
-  background: color-mix(in oklab, var(--accent) 14%, var(--bg-raised));
-  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  color: color-mix(in oklab, var(--success) 78%, black);
+  background: color-mix(in oklab, var(--success) 18%, var(--bg-raised));
+  border: 1px solid color-mix(in oklab, var(--success) 44%, transparent);
 }
 
 .ruleItem {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
   width: 100%;
   padding: 0 var(--sp-2);
-  background: transparent;
-  border: none;
   border-radius: var(--radius-sm);
-  cursor: pointer;
   text-align: left;
   transition: color var(--transition-fast);
   flex: 1;
   min-width: 0;
-  height: 32px;
+  min-height: 40px;
+  gap: 4px;
 }
 
 .ruleCardTop {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   width: 100%;
   gap: var(--sp-2);
-  min-height: 32px;
+  min-height: 40px;
 }
 
 .ruleCardBottom {
@@ -440,6 +505,7 @@
   align-items: center;
   gap: var(--sp-2);
   flex-shrink: 0;
+  overflow: visible;
 }
 
 .ruleHeaderRight {
@@ -448,6 +514,7 @@
   gap: var(--sp-2);
   margin-left: auto;
   flex-shrink: 0;
+  justify-content: flex-end;
 }
 
 .quotaBadge {
@@ -491,11 +558,6 @@
   background: var(--surface-active);
 }
 
-.ruleItem:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent-subtle);
-}
-
 .ruleModel {
   font-weight: var(--weight-medium);
   font-size: var(--text-sm);
@@ -504,14 +566,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
 }
 
-.ruleItem.active .ruleModel {
-  color: var(--accent);
-}
-
-.ruleMainLine {
+.ruleTitleLine {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
@@ -526,6 +584,7 @@
   padding: 2px var(--sp-2);
   border-radius: var(--radius-full);
   background: var(--surface-active);
+  flex-shrink: 0;
 }
 
 .ruleQuotaWrap {
@@ -607,6 +666,126 @@
   cursor: not-allowed;
 }
 
+.testIconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  position: relative;
+  opacity: 0;
+}
+
+.ruleItemContainer:hover .testIconButton {
+  opacity: 1;
+}
+
+.testIconButton:hover {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.testIconButton:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.testIconButton:focus-visible {
+  opacity: 1;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
+.editButton,
+.deleteButton,
+.testIconButton {
+  position: relative;
+}
+
+.editButton[data-tooltip]::after,
+.deleteButton[data-tooltip]::after,
+.testIconButton[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  z-index: 6;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--text-primary) 94%, var(--bg-raised));
+  color: var(--bg-base);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  opacity: 0;
+  transform: translate(-50%, -4px);
+  pointer-events: none;
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.editButton[data-tooltip]::before,
+.deleteButton[data-tooltip]::before,
+.testIconButton[data-tooltip]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 4px);
+  width: 8px;
+  height: 8px;
+  z-index: 5;
+  background: color-mix(in oklab, var(--text-primary) 94%, var(--bg-raised));
+  transform: translate(-50%, -2px) rotate(45deg);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.editButton[data-tooltip]:hover::after,
+.editButton[data-tooltip]:hover::before,
+.editButton[data-tooltip]:focus-visible::after,
+.editButton[data-tooltip]:focus-visible::before,
+.deleteButton[data-tooltip]:hover::after,
+.deleteButton[data-tooltip]:hover::before,
+.deleteButton[data-tooltip]:focus-visible::after,
+.deleteButton[data-tooltip]:focus-visible::before,
+.testIconButton[data-tooltip]:hover::after,
+.testIconButton[data-tooltip]:hover::before,
+.testIconButton[data-tooltip]:focus-visible::after,
+.testIconButton[data-tooltip]:focus-visible::before {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.editButton[data-tooltip]:hover::before,
+.editButton[data-tooltip]:focus-visible::before,
+.deleteButton[data-tooltip]:hover::before,
+.deleteButton[data-tooltip]:focus-visible::before,
+.testIconButton[data-tooltip]:hover::before,
+.testIconButton[data-tooltip]:focus-visible::before {
+  transform: translate(-50%, 0) rotate(45deg);
+}
+
+.editButton[data-tooltip]:hover::after,
+.editButton[data-tooltip]:focus-visible::after,
+.deleteButton[data-tooltip]:hover::after,
+.deleteButton[data-tooltip]:focus-visible::after,
+.testIconButton[data-tooltip]:hover::after,
+.testIconButton[data-tooltip]:focus-visible::after {
+  transform: translate(-50%, 0);
+}
+
 .spinner {
   animation: spin 0.85s linear infinite;
 }
@@ -622,13 +801,14 @@
 .ruleTrendInlineMeta {
   display: flex;
   align-items: flex-end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--sp-2);
   padding-bottom: 1px;
   font-size: 10px;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   line-height: 1;
-  white-space: nowrap;
 }
 
 .ruleMiniChart {
@@ -744,73 +924,15 @@
   }
 }
 
-/* ── Rule Detail ── */
-.ruleDetail {
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-5);
-}
-
-.ruleDetail h3 {
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-  margin-bottom: var(--sp-4);
-}
-
-.ruleInfo {
-  display: grid;
-  gap: var(--sp-2);
-}
-
-.ruleInfoItem {
+.noticeBar {
   display: flex;
-  align-items: flex-start;
-  gap: var(--sp-2);
-  font-size: var(--text-sm);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in oklab, var(--danger) 22%, var(--border));
+  background: color-mix(in oklab, var(--danger) 7%, var(--bg-raised));
   color: var(--text-secondary);
-}
-
-.label {
-  color: var(--text-tertiary);
-  min-width: 92px;
-}
-
-.ruleActions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: var(--sp-4);
-}
-
-.ruleDetailTitle {
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-  margin-bottom: var(--sp-4);
-}
-
-.ruleDetailRow {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-3);
-  padding: var(--sp-2) 0;
-}
-
-.ruleDetailLabel {
   font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  color: var(--text-secondary);
-  min-width: 100px;
-}
-
-.ruleDetailValue {
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  word-break: break-all;
 }
 
 /* ── Rule Form ── */
@@ -882,6 +1004,176 @@
   padding: var(--sp-2) 0;
 }
 
+.integrationModalContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.integrationModalHint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.integrationHiddenHint {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+.integrationEntryUrl {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--border));
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg-raised));
+  min-width: 0;
+}
+
+.integrationEntryUrl code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.integrationLoading {
+  padding: var(--sp-4);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border);
+  color: var(--text-tertiary);
+  text-align: center;
+  font-size: var(--text-sm);
+}
+
+.integrationSectionList {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.integrationSection {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.integrationSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.integrationSectionTitleWrap {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.integrationSectionTitleWrap h4 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.integrationSectionTitleWrap p {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+.integrationEmpty {
+  padding: var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.integrationTargetList {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.integrationTargetItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  border: 1px solid color-mix(in oklab, var(--border) 84%, transparent);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.integrationTargetLabel {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex: 1;
+}
+
+.integrationTargetLabel input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.integrationTargetPath {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  line-height: var(--leading-relaxed);
+  overflow-wrap: anywhere;
+}
+
+.integrationTargetPathWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.integrationTargetWriteDetail {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: var(--leading-relaxed);
+  overflow-wrap: anywhere;
+}
+
+.integrationModalActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.integrationSelectedCount {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.integrationModalActionsRight {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
 .modalContent .formGroup {
   margin-bottom: var(--sp-5);
 }
@@ -925,6 +1217,20 @@
     align-items: stretch;
   }
 
+  .integrationTargetItem {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .integrationModalActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .integrationModalActionsRight {
+    justify-content: flex-end;
+  }
+
   .entryUrl {
     flex-wrap: wrap;
   }
@@ -963,6 +1269,10 @@
   }
 
   .editButton {
+    opacity: 1;
+  }
+
+  .testIconButton {
     opacity: 1;
   }
 }

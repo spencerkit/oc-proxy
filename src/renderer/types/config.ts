@@ -13,16 +13,15 @@ export interface ServerConfig {
  */
 export interface CompatConfig {
   strictMode: boolean
+  textToolCallFallbackEnabled?: boolean
 }
 
 /**
  * Logging configuration interface
  */
 export interface LoggingConfig {
-  level: string
   // Controls whether request/response bodies are captured in logs.
   captureBody: boolean
-  redactRules: string[]
 }
 
 /**
@@ -37,6 +36,7 @@ export interface UIConfig {
   locale: LocaleCode
   localeMode: LocaleMode
   launchOnStartup: boolean
+  autoStartServer: boolean
   closeToTray: boolean
   quotaAutoRefreshMinutes: number
 }

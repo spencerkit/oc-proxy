@@ -3,7 +3,11 @@ import type {
   ClipboardTextResult,
   GroupBackupExportResult,
   GroupBackupImportResult,
+  IntegrationClientKind,
+  IntegrationTarget,
+  IntegrationWriteResult,
   LogEntry,
+  ProviderModelTestResult,
   ProxyConfig,
   ProxyStatus,
   RemoteRulesPullResult,
@@ -180,6 +184,61 @@ export const ipc = {
       ruleApiAddress: providerApiAddress,
       ruleDefaultModel: providerDefaultModel,
       quota,
+    })
+  },
+
+  testProviderModel(groupId: string, providerId: string): Promise<ProviderModelTestResult> {
+    return getInvoke()<ProviderModelTestResult>("provider_test_model", {
+      groupId,
+      providerId,
+    })
+  },
+
+  integrationListTargets(): Promise<IntegrationTarget[]> {
+    return getInvoke()<IntegrationTarget[]>("integration_list_targets")
+  },
+
+  integrationPickDirectory(
+    initialDir?: string,
+    kind?: IntegrationClientKind
+  ): Promise<string | null> {
+    const args: Record<string, unknown> = {}
+    if (typeof initialDir === "string" && initialDir.trim()) {
+      args.initialDir = initialDir
+    }
+    if (typeof kind === "string") {
+      args.kind = kind
+    }
+    return getInvoke()<string | null>("integration_pick_directory", args)
+  },
+
+  integrationAddTarget(kind: IntegrationClientKind, configDir: string): Promise<IntegrationTarget> {
+    return getInvoke()<IntegrationTarget>("integration_add_target", {
+      kind,
+      configDir,
+    })
+  },
+
+  integrationUpdateTarget(targetId: string, configDir: string): Promise<IntegrationTarget> {
+    return getInvoke()<IntegrationTarget>("integration_update_target", {
+      targetId,
+      configDir,
+    })
+  },
+
+  integrationRemoveTarget(targetId: string): Promise<{ ok: boolean; removed: boolean }> {
+    return getInvoke()<{ ok: boolean; removed: boolean }>("integration_remove_target", {
+      targetId,
+    })
+  },
+
+  integrationWriteGroupEntry(
+    groupId: string,
+    targetIds: string[]
+  ): Promise<IntegrationWriteResult> {
+    return getInvoke()<IntegrationWriteResult>("integration_write_group_entry", {
+      groupId,
+      targetIds,
     })
   },
 }

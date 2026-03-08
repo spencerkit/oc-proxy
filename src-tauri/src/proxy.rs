@@ -16,8 +16,7 @@ use tokio::task::JoinHandle;
 mod net;
 mod observability;
 mod pipeline;
-mod routing;
-mod stream_bridge;
+pub(crate) mod routing;
 
 const MAX_REQUEST_BODY_BYTES: usize = 10 * 1024 * 1024;
 const MAX_STREAM_LOG_BODY_BYTES: usize = 256 * 1024;
@@ -60,6 +59,7 @@ struct ServiceState {
     stats_store: StatsStore,
     metrics: Arc<observability::MetricsState>,
     client: Client,
+    transformer_registry: Arc<crate::transformer::registry::TransformerRegistry>,
 }
 
 impl ProxyRuntime {
@@ -114,6 +114,9 @@ impl ProxyRuntime {
         let (listener, bound_host) =
             net::bind_proxy_listener(&config.server.host, config.server.port).await?;
 
+        // Initialize transformer registry (simplified for ccNexus architecture)
+        let transformer_registry = Arc::new(crate::transformer::registry::TransformerRegistry::new());
+
         let (tx, rx) = oneshot::channel();
         let service_state = ServiceState {
             config: self.inner.config.clone(),
@@ -124,6 +127,7 @@ impl ProxyRuntime {
             stats_store: self.inner.stats_store.clone(),
             metrics: self.inner.metrics.clone(),
             client: self.inner.client.clone(),
+            transformer_registry,
         };
 
         let app = Router::new()
@@ -329,6 +333,47 @@ mod tests {
     }
 
     #[test]
+    /// Extracts token usage prefers non-zero aliases when canonical fields are present but zero.
+    fn extract_token_usage_prefers_non_zero_aliases_over_zero_canonical_values() {
+        let payload = json!({
+            "usage": {
+                "input_tokens": 0,
+                "prompt_tokens": 3,
+                "output_tokens": 0,
+                "completion_tokens": 512,
+                "prompt_tokens_details": {
+                    "cached_tokens": 27352
+                }
+            }
+        });
+
+        let usage = extract_token_usage(&payload).expect("usage should exist");
+        assert_eq!(usage.input_tokens, 3);
+        assert_eq!(usage.output_tokens, 512);
+        assert_eq!(usage.cache_read_tokens, 27352);
+        assert_eq!(usage.cache_write_tokens, 0);
+    }
+
+    #[test]
+    /// Extracts token usage keeps canonical non-zero fields when aliases are also non-zero.
+    fn extract_token_usage_keeps_canonical_non_zero_fields_when_aliases_conflict() {
+        let payload = json!({
+            "usage": {
+                "input_tokens": 56,
+                "prompt_tokens": 78,
+                "output_tokens": 12,
+                "completion_tokens": 34
+            }
+        });
+
+        let usage = extract_token_usage(&payload).expect("usage should exist");
+        assert_eq!(usage.input_tokens, 56);
+        assert_eq!(usage.output_tokens, 12);
+        assert_eq!(usage.cache_read_tokens, 0);
+        assert_eq!(usage.cache_write_tokens, 0);
+    }
+
+    #[test]
     /// Extracts token usage reads message and delta usage payloads for this module's workflow.
     fn extract_token_usage_reads_message_and_delta_usage_payloads() {
         let message_payload = json!({
@@ -393,7 +438,7 @@ mod tests {
     /// Resolves target model uses group and rule mapping for this module's workflow.
     fn resolve_target_model_uses_group_and_rule_mapping() {
         let mut mappings = HashMap::new();
-        mappings.insert("m1".to_string(), "gpt-x".to_string());
+        mappings.insert("sonnet".to_string(), "claude-sonnet-4-5".to_string());
         let rule = Rule {
             id: "r1".to_string(),
             name: "rule".to_string(),
@@ -408,13 +453,45 @@ mod tests {
         let group = Group {
             id: "g1".to_string(),
             name: "Group".to_string(),
-            models: vec!["m1".to_string()],
+            models: vec!["sonnet".to_string()],
             active_provider_id: Some("r1".to_string()),
             providers: vec![rule.clone()],
         };
 
-        let model = resolve_target_model(&rule, &group.models, &json!({ "model": "m1" }));
-        assert_eq!(model, "gpt-x");
+        let model = resolve_target_model(
+            &rule,
+            &group.models,
+            &json!({ "model": "claude-3-7-sonnet-20250219" }),
+        );
+        assert_eq!(model, "claude-sonnet-4-5");
+    }
+
+    #[test]
+    /// Resolves target model uses case-insensitive fuzzy group matching.
+    fn resolve_target_model_matches_group_model_fuzzily_case_insensitive() {
+        let mut mappings = HashMap::new();
+        mappings.insert("codex-mini".to_string(), "gpt-5-codex-mini".to_string());
+        let rule = Rule {
+            id: "r1".to_string(),
+            name: "rule".to_string(),
+            protocol: RuleProtocol::Openai,
+            token: "t".to_string(),
+            api_address: "https://api.example.com".to_string(),
+            default_model: "fallback".to_string(),
+            model_mappings: mappings,
+            quota: default_rule_quota_config(),
+            cost: default_rule_cost_config(),
+        };
+        let group = Group {
+            id: "g1".to_string(),
+            name: "Group".to_string(),
+            models: vec!["codex-mini".to_string()],
+            active_provider_id: Some("r1".to_string()),
+            providers: vec![rule.clone()],
+        };
+
+        let model = resolve_target_model(&rule, &group.models, &json!({ "model": "GPT-5-CODEX-MINI" }));
+        assert_eq!(model, "gpt-5-codex-mini");
     }
 
     #[test]
@@ -441,134 +518,6 @@ mod tests {
 
         let model = resolve_target_model(&rule, &group.models, &json!({ "model": "unknown" }));
         assert_eq!(model, "fallback");
-    }
-
-    #[test]
-    /// Builds upstream body passes through request shape with target model.
-    fn build_upstream_body_passes_through_request_shape_with_target_model() {
-        let entry = PathEntry {
-            protocol: EntryProtocol::Openai,
-            endpoint: EntryEndpoint::Responses,
-        };
-        let out = build_upstream_body(
-            &entry,
-            &RuleProtocol::Openai,
-            &json!({
-                "model": "gpt-4.1",
-                "input": "hello from responses"
-            }),
-            false,
-            "gpt-4.1",
-        )
-        .expect("mapping should succeed");
-
-        assert_eq!(out["model"], "gpt-4.1");
-        assert_eq!(out["input"], "hello from responses");
-    }
-
-    #[test]
-    /// Builds upstream body forces non stream for messages to responses.
-    fn build_upstream_body_forces_non_stream_for_messages_to_responses() {
-        let entry = PathEntry {
-            protocol: EntryProtocol::Anthropic,
-            endpoint: EntryEndpoint::Messages,
-        };
-        let out = build_upstream_body(
-            &entry,
-            &RuleProtocol::Openai,
-            &json!({
-                "model": "claude-3-5-sonnet",
-                "stream": true,
-                "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }]
-            }),
-            true,
-            "gpt-4.1",
-        )
-        .expect("mapping should succeed");
-
-        assert_eq!(out["model"], "gpt-4.1");
-        assert_eq!(out["stream"], true);
-        assert_eq!(out["input"][0]["type"], "message");
-    }
-
-    #[test]
-    /// Builds upstream body drops max output tokens for messages to responses.
-    fn build_upstream_body_drops_max_output_tokens_for_messages_to_responses() {
-        let entry = PathEntry {
-            protocol: EntryProtocol::Anthropic,
-            endpoint: EntryEndpoint::Messages,
-        };
-        let out = build_upstream_body(
-            &entry,
-            &RuleProtocol::Openai,
-            &json!({
-                "model": "claude-3-5-sonnet",
-                "max_tokens": 1234,
-                "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }]
-            }),
-            true,
-            "gpt-4.1",
-        )
-        .expect("mapping should succeed");
-
-        assert_eq!(out["model"], "gpt-4.1");
-        assert!(out.get("max_output_tokens").is_none());
-    }
-
-    #[test]
-    /// Builds upstream body sets auto tool choice for messages to responses when tools exist.
-    fn build_upstream_body_sets_auto_tool_choice_for_messages_to_responses_when_tools_exist() {
-        let entry = PathEntry {
-            protocol: EntryProtocol::Anthropic,
-            endpoint: EntryEndpoint::Messages,
-        };
-        let out = build_upstream_body(
-            &entry,
-            &RuleProtocol::Openai,
-            &json!({
-                "model": "claude-3-5-sonnet",
-                "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }],
-                "tools": [{
-                    "name": "Read",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": { "type": "string" }
-                        },
-                        "required": ["file_path"]
-                    }
-                }]
-            }),
-            true,
-            "gpt-4.1",
-        )
-        .expect("mapping should succeed");
-
-        assert_eq!(out["tool_choice"], "auto");
-        assert_eq!(out["parallel_tool_calls"], true);
-    }
-
-    #[test]
-    /// Builds upstream body defaults stream true when Anthropic stream missing.
-    fn build_upstream_body_defaults_stream_true_when_anthropic_stream_missing() {
-        let entry = PathEntry {
-            protocol: EntryProtocol::Anthropic,
-            endpoint: EntryEndpoint::Messages,
-        };
-        let out = build_upstream_body(
-            &entry,
-            &RuleProtocol::OpenaiCompletion,
-            &json!({
-                "model": "claude-3-5-sonnet",
-                "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hello" }] }]
-            }),
-            true,
-            "gpt-4.1",
-        )
-        .expect("mapping should succeed");
-
-        assert_eq!(out["model"], "gpt-4.1");
-        assert_eq!(out["stream"], true);
     }
 
     #[test]

@@ -31,7 +31,7 @@ export function useLogs() {
   const logs = useProxyStore(state => state.logs)
   const refreshLogs = useProxyStore(state => state.refreshLogs)
   const clearLogs = useProxyStore(state => state.clearLogs)
-  const error = useProxyStore(state => state.error)
+  const error = useProxyStore(state => state.logsError)
   const { showToast } = useToast()
 
   const showToastMessage = useCallback(
@@ -75,6 +75,7 @@ export function useLogsAutoRefresh() {
 
     // Set up interval for auto-refresh
     const intervalId = setInterval(() => {
+      if (document.visibilityState !== "visible") return
       refreshLogs()
     }, LOGS_REFRESH_INTERVAL)
 

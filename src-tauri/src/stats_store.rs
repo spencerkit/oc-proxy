@@ -299,11 +299,13 @@ impl StatsStore {
                     COUNT(*) AS requests,
                     SUM(input_tokens) AS input_tokens,
                     SUM(output_tokens) AS output_tokens,
+                    SUM(cache_read_tokens + cache_write_tokens) AS cache_tokens,
                     SUM(COALESCE(total_cost, 0)) AS total_cost
              FROM request_events
              WHERE ts_epoch_ms >= ?1 AND ts_epoch_ms < ?2
                AND group_id = ?3
                AND rule_id IS NOT NULL
+               AND errors = 0
              GROUP BY rule_id",
         ) {
             Ok(stmt) => stmt,
@@ -317,16 +319,17 @@ impl StatsStore {
                     row.get::<_, i64>(1)? as u64,
                     row.get::<_, i64>(2)? as u64,
                     row.get::<_, i64>(3)? as u64,
-                    row.get::<_, f64>(4)?,
+                    row.get::<_, i64>(4)? as u64,
+                    row.get::<_, f64>(5)?,
                 ))
             }) {
                 Ok(rows) => rows,
                 Err(_) => return vec![],
             };
 
-        let mut totals_map: BTreeMap<String, (u64, u64, u64, f64)> = BTreeMap::new();
+        let mut totals_map: BTreeMap<String, (u64, u64, u64, u64, f64)> = BTreeMap::new();
         for row in totals_rows.flatten() {
-            totals_map.insert(row.0, (row.1, row.2, row.3, row.4));
+            totals_map.insert(row.0, (row.1, row.2, row.3, row.4, row.5));
         }
 
         let mut hourly_stmt = match guard.prepare(
@@ -338,6 +341,7 @@ impl StatsStore {
              WHERE ts_epoch_ms >= ?1 AND ts_epoch_ms < ?2
                AND group_id = ?3
                AND rule_id IS NOT NULL
+               AND errors = 0
              GROUP BY rule_id, hour
              ORDER BY hour ASC",
         ) {
@@ -370,13 +374,14 @@ impl StatsStore {
         totals_map
             .into_iter()
             .map(
-                |(rule_id, (requests, input_tokens, output_tokens, total_cost))| {
+                |(rule_id, (requests, input_tokens, output_tokens, cache_tokens, total_cost))| {
                     RuleCardStatsItem {
                         group_id: normalized_group_id.to_string(),
                         rule_id: rule_id.clone(),
                         requests,
                         input_tokens,
                         output_tokens,
+                        cache_tokens,
                         tokens: input_tokens + output_tokens,
                         total_cost,
                         hourly: points.remove(&rule_id).unwrap_or_default(),
@@ -980,4 +985,106 @@ fn parse_ts(ts: &str) -> Option<DateTime<Utc>> {
     chrono::DateTime::parse_from_rfc3339(ts)
         .ok()
         .map(|dt| dt.with_timezone(&Utc))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_hour, StatsStore};
+    use chrono::{Duration, Utc};
+    use rusqlite::params;
+    use std::path::PathBuf;
+
+    fn new_test_store() -> StatsStore {
+        let store = StatsStore::new(PathBuf::new());
+        store.initialize().expect("stats store should initialize");
+        store
+    }
+
+    fn insert_event(
+        store: &StatsStore,
+        ts_epoch_ms: i64,
+        hour: &str,
+        group_id: &str,
+        rule_id: &str,
+        errors: i64,
+        input_tokens: i64,
+        output_tokens: i64,
+        cache_read_tokens: i64,
+        cache_write_tokens: i64,
+        total_cost: f64,
+    ) {
+        let conn = store.conn.lock().expect("stats sqlite lock should succeed");
+        conn.execute(
+            "INSERT INTO request_events (
+                ts_epoch_ms, hour, group_id, group_name, rule_id, errors,
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_cost
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                ts_epoch_ms,
+                hour,
+                group_id,
+                "Group One",
+                rule_id,
+                errors,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                total_cost,
+            ],
+        )
+        .expect("insert stats event should succeed");
+    }
+
+    #[test]
+    fn summarize_rule_cards_counts_only_successful_requests_and_exposes_cache_tokens() {
+        let store = new_test_store();
+        let success_ts = Utc::now() - Duration::minutes(30);
+        let success_hour = normalize_hour(&success_ts.to_rfc3339()).expect("hour should normalize");
+        insert_event(
+            &store,
+            success_ts.timestamp_millis(),
+            &success_hour,
+            "g1",
+            "rule-a",
+            0,
+            120,
+            80,
+            25,
+            5,
+            1.75,
+        );
+
+        let error_ts = Utc::now() - Duration::minutes(20);
+        let error_hour = normalize_hour(&error_ts.to_rfc3339()).expect("hour should normalize");
+        insert_event(
+            &store,
+            error_ts.timestamp_millis(),
+            &error_hour,
+            "g1",
+            "rule-a",
+            1,
+            999,
+            999,
+            99,
+            99,
+            9.99,
+        );
+
+        let items = store.summarize_rule_cards("g1", Some(24));
+        assert_eq!(items.len(), 1);
+
+        let item = &items[0];
+        assert_eq!(item.group_id, "g1");
+        assert_eq!(item.rule_id, "rule-a");
+        assert_eq!(item.requests, 1);
+        assert_eq!(item.input_tokens, 120);
+        assert_eq!(item.output_tokens, 80);
+        assert_eq!(item.tokens, 200);
+        assert_eq!(item.cache_tokens, 30);
+        assert!((item.total_cost - 1.75).abs() < f64::EPSILON);
+        assert_eq!(item.hourly.len(), 1);
+        assert_eq!(item.hourly[0].requests, 1);
+        assert_eq!(item.hourly[0].tokens, 200);
+    }
 }

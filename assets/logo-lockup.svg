@@ -1,0 +1,42 @@
+<svg width="1440" height="420" viewBox="0 0 1440 420" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="aFill" x1="34" y1="284" x2="176" y2="88" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B87333" />
+      <stop offset="1" stop-color="#DEA879" />
+    </linearGradient>
+    <linearGradient id="oStroke" x1="166" y1="120" x2="294" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7AC2A8" />
+      <stop offset="1" stop-color="#2D8B6F" />
+    </linearGradient>
+    <linearGradient id="routeFill" x1="58" y1="188" x2="284" y2="188" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF8F0" />
+      <stop offset="1" stop-color="#F0E4D7" />
+    </linearGradient>
+    <filter id="soft" x="0" y="0" width="320" height="340" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix" />
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha" />
+      <feOffset dy="10" />
+      <feGaussianBlur stdDeviation="14" />
+      <feComposite in2="hardAlpha" operator="out" />
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0431373 0 0 0 0 0.054902 0 0 0 0 0.0745098 0 0 0 0.18 0" />
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_0_1" />
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_0_1" result="shape" />
+    </filter>
+  </defs>
+
+  <g filter="url(#soft)">
+    <path d="M18 284L92 88C95 79 103 74 111 74H125C134 74 141 79 144 88L220 284H178L162 240H88L72 284H18ZM102 206H148L125 138L102 206Z" fill="url(#aFill)" />
+    <circle cx="230" cy="188" r="60" stroke="url(#oStroke)" stroke-width="32" />
+    <circle cx="36" cy="188" r="11" fill="url(#routeFill)" />
+    <rect x="52" y="170" width="178" height="36" rx="18" fill="url(#routeFill)" />
+    <path d="M210 146L284 188L210 230V146Z" fill="url(#routeFill)" />
+  </g>
+
+  <text x="356" y="104" fill="#B87333" font-size="24" font-weight="700" letter-spacing="4" font-family="JetBrains Mono, Consolas, monospace">AI ROUTING LAYER</text>
+  <text x="348" y="206" fill="#25313C" font-size="124" font-weight="700" font-family="Outfit, Arial, sans-serif">AI Open Router</text>
+  <text x="356" y="270" fill="#687384" font-size="34" font-weight="500" font-family="Outfit, Arial, sans-serif">One entry, many AI protocols.</text>
+  <path d="M356 318H992" stroke="#D7CEC4" stroke-width="6" stroke-linecap="round" />
+  <circle cx="356" cy="318" r="8" fill="#B87333" />
+  <circle cx="674" cy="318" r="8" fill="#D49A69" />
+  <circle cx="992" cy="318" r="8" fill="#2D8B6F" />
+</svg>

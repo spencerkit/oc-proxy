@@ -4,7 +4,7 @@
 
 use serde_json::{Map, Value};
 
-pub const CURRENT_CONFIG_VERSION: u32 = 2;
+pub const CURRENT_CONFIG_VERSION: u32 = 3;
 
 /// Migrates arbitrary config payload into the latest supported schema version.
 pub fn migrate_config(input: Value) -> Result<Value, String> {
@@ -20,6 +20,7 @@ pub fn migrate_config(input: Value) -> Result<Value, String> {
     while version < CURRENT_CONFIG_VERSION {
         root = match version {
             1 => migrate_v1_to_v2(root),
+            2 => migrate_v2_to_v3(root),
             _ => {
                 return Err(format!(
                     "missing migrator for configVersion {version} -> {}",
@@ -113,6 +114,25 @@ fn migrate_v1_to_v2(mut root: Value) -> Value {
     root
 }
 
+/// Applies v2 -> v3 migration defaults for service startup behavior.
+fn migrate_v2_to_v3(mut root: Value) -> Value {
+    let Some(obj) = root.as_object_mut() else {
+        return Value::Object(Map::new());
+    };
+
+    let ui = obj
+        .entry("ui".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Some(ui_obj) = ui.as_object_mut() {
+        if !ui_obj.contains_key("autoStartServer") {
+            ui_obj.insert("autoStartServer".to_string(), Value::Bool(true));
+        }
+    }
+
+    obj.insert("configVersion".to_string(), Value::Number(3u64.into()));
+    root
+}
+
 #[cfg(test)]
 mod tests {
     use super::{migrate_config, CURRENT_CONFIG_VERSION};
@@ -139,8 +159,9 @@ mod tests {
         }))
         .expect("migration should succeed");
 
-        assert_eq!(migrated["configVersion"], 2);
+        assert_eq!(migrated["configVersion"], 3);
         assert_eq!(migrated["ui"]["localeMode"], "manual");
+        assert_eq!(migrated["ui"]["autoStartServer"], true);
         assert_eq!(migrated["remoteGit"]["enabled"], true);
         assert_eq!(migrated["remoteGit"]["branch"], "main");
     }
@@ -160,12 +181,25 @@ mod tests {
     fn migrate_is_idempotent_on_current_version() {
         let input = json!({
             "configVersion": CURRENT_CONFIG_VERSION,
-            "ui": { "locale": "en-US", "localeMode": "auto" },
+            "ui": { "locale": "en-US", "localeMode": "auto", "autoStartServer": true },
             "remoteGit": { "enabled": false, "repoUrl": "", "token": "", "branch": "main" }
         });
         let migrated = migrate_config(input.clone()).expect("migration should succeed");
         assert_eq!(migrated["configVersion"], CURRENT_CONFIG_VERSION);
         assert_eq!(migrated["ui"]["localeMode"], "auto");
         assert_eq!(migrated["remoteGit"]["branch"], "main");
+    }
+
+    #[test]
+    /// Performs migrate v2 to v3 fills auto start server default.
+    fn migrate_v2_to_v3_fills_auto_start_server() {
+        let migrated = migrate_config(json!({
+            "configVersion": 2,
+            "ui": { "locale": "en-US", "localeMode": "auto" }
+        }))
+        .expect("migration should succeed");
+
+        assert_eq!(migrated["configVersion"], 3);
+        assert_eq!(migrated["ui"]["autoStartServer"], true);
     }
 }

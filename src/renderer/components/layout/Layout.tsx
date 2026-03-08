@@ -65,6 +65,11 @@ export interface LayoutProps {
    * Callback to stop the server
    */
   onStopServer?: () => void
+
+  /**
+   * Current server transition state
+   */
+  serverAction?: "starting" | "stopping" | null
 }
 
 /**
@@ -83,6 +88,7 @@ export const Layout: React.FC<LayoutProps> = ({
   serverAddress,
   onStartServer,
   onStopServer,
+  serverAction,
 }) => {
   const location = useLocation()
 
@@ -107,12 +113,13 @@ export const Layout: React.FC<LayoutProps> = ({
   return (
     <div className={styles.layout} data-testid={testId}>
       <Header
+        {...header}
         view={currentView}
         isRunning={isRunning}
         serverAddress={serverAddress}
+        serverAction={serverAction}
         onStartServer={onStartServer}
         onStopServer={onStopServer}
-        {...header}
       />
 
       <main className={styles.main}>

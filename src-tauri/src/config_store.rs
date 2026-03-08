@@ -7,7 +7,7 @@ use crate::config::schema::normalize_config;
 use crate::models::{default_config, validate_config, Group, ProxyConfig};
 use chrono::Utc;
 use rusqlite::{params, Connection};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -67,10 +67,12 @@ impl ConfigStore {
         let migrated = migrate_config(parsed)?;
         let mut normalized = normalize_config(migrated)?;
         let groups_from_db = self.load_groups_from_db()?;
-        if groups_from_db.is_empty() {
-            self.save_groups_to_db(&normalized.groups)?;
-        } else {
+        let groups_from_db_empty = groups_from_db.is_empty();
+        if !groups_from_db_empty {
             normalized.groups = groups_from_db;
+        }
+        if groups_from_db_empty {
+            self.save_groups_to_db(&normalized.groups)?;
         }
 
         if let Err(err) = validate_config(&normalized) {
@@ -250,8 +252,14 @@ impl ConfigStore {
 
 /// Loads groups from relational tables for this module's workflow.
 fn load_groups_from_relational_tables(conn: &Connection) -> Result<Vec<Group>, String> {
+    let provider_columns = table_columns(conn, "provider_records")?;
+    let provider_query = select_records_with_soft_delete_filter(
+        "SELECT group_id, provider_id, provider_json FROM provider_records",
+        &provider_columns,
+        None,
+    );
     let mut provider_stmt = conn
-        .prepare("SELECT group_id, provider_id, provider_json FROM provider_records")
+        .prepare(&provider_query)
         .map_err(|e| format!("prepare provider_records query failed: {e}"))?;
     let provider_rows = provider_stmt
         .query_map([], |row| {
@@ -271,12 +279,14 @@ fn load_groups_from_relational_tables(conn: &Connection) -> Result<Vec<Group>, S
         provider_map.insert((group_id, provider_id), provider);
     }
 
+    let group_columns = table_columns(conn, "group_records")?;
+    let group_query = select_records_with_soft_delete_filter(
+        "SELECT group_id, group_name, models_json, active_provider_id, provider_ids_json FROM group_records",
+        &group_columns,
+        Some("ORDER BY rowid ASC"),
+    );
     let mut group_stmt = conn
-        .prepare(
-            "SELECT group_id, group_name, models_json, active_provider_id, provider_ids_json
-             FROM group_records
-             ORDER BY rowid ASC",
-        )
+        .prepare(&group_query)
         .map_err(|e| format!("prepare group_records query failed: {e}"))?;
     let group_rows = group_stmt
         .query_map([], |row| {
@@ -313,6 +323,58 @@ fn load_groups_from_relational_tables(conn: &Connection) -> Result<Vec<Group>, S
         });
     }
     Ok(groups)
+}
+
+/// Collects table column names for this module's workflow.
+fn table_columns(conn: &Connection, table_name: &str) -> Result<HashSet<String>, String> {
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .map_err(|e| format!("prepare table info query failed for {table_name}: {e}"))?;
+    let column_rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|e| format!("query table info failed for {table_name}: {e}"))?;
+    let mut columns = HashSet::new();
+    for column_row in column_rows {
+        let column_name = column_row
+            .map_err(|e| format!("read table info row failed for {table_name}: {e}"))?;
+        columns.insert(column_name.to_ascii_lowercase());
+    }
+    Ok(columns)
+}
+
+/// Builds query SQL and applies soft-delete filters when legacy columns exist.
+fn select_records_with_soft_delete_filter(
+    base_query: &str,
+    columns: &HashSet<String>,
+    suffix: Option<&str>,
+) -> String {
+    let mut filters: Vec<&str> = Vec::new();
+    if columns.contains("is_deleted") {
+        filters.push("COALESCE(is_deleted, 0) = 0");
+    }
+    if columns.contains("deleted") {
+        filters.push("COALESCE(deleted, 0) = 0");
+    }
+    if columns.contains("deleted_at") {
+        filters.push("(deleted_at IS NULL OR CAST(deleted_at AS TEXT) = '' OR CAST(deleted_at AS TEXT) = '0')");
+    }
+    if columns.contains("active") {
+        filters.push("COALESCE(active, 1) = 1");
+    }
+    if columns.contains("is_active") {
+        filters.push("COALESCE(is_active, 1) = 1");
+    }
+
+    let mut query = base_query.to_string();
+    if !filters.is_empty() {
+        query.push_str(" WHERE ");
+        query.push_str(&filters.join(" AND "));
+    }
+    if let Some(suffix_clause) = suffix {
+        query.push(' ');
+        query.push_str(suffix_clause);
+    }
+    query
 }
 
 #[cfg(test)]
@@ -393,6 +455,7 @@ mod tests {
         let provider: crate::domain::entities::Rule =
             serde_json::from_str(&provider_json).expect("decode provider");
         assert_eq!(provider.id, "provider-1");
+
     }
 
     #[test]
@@ -416,5 +479,110 @@ mod tests {
         assert_eq!(loaded.groups.len(), 1);
         assert_eq!(loaded.groups[0].id, "group-1");
         assert_eq!(loaded.groups[0].providers[0].id, "provider-1");
+    }
+
+    #[test]
+    /// Initializes keeps groups empty on first run when no groups are configured.
+    fn initialize_keeps_groups_empty_when_no_groups_configured() {
+        let temp_dir = std::env::temp_dir().join(format!("config-store-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let config_path = temp_dir.join("config.json");
+
+        let store = ConfigStore::new(config_path.clone());
+        store.initialize().expect("initialize config store");
+        let cfg = store.get();
+        assert!(cfg.groups.is_empty());
+    }
+
+    #[test]
+    /// Keeps groups empty after manual deletion.
+    fn initialize_keeps_groups_empty_after_manual_group_deletion() {
+        let temp_dir = std::env::temp_dir().join(format!("config-store-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let config_path = temp_dir.join("config.json");
+
+        let first_store = ConfigStore::new(config_path.clone());
+        first_store.initialize().expect("first initialize");
+        let mut cfg = first_store.get();
+        cfg.groups.clear();
+        first_store.save_config(cfg).expect("save cleared groups");
+
+        let second_store = ConfigStore::new(config_path.clone());
+        second_store.initialize().expect("second initialize");
+        let cfg_after = second_store.get();
+        assert!(cfg_after.groups.is_empty());
+    }
+
+    #[test]
+    /// Loads groups from relational tables filters soft-deleted rows when legacy columns exist.
+    fn load_groups_from_relational_tables_filters_soft_deleted_rows() {
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        conn.execute_batch(
+            "CREATE TABLE group_records (
+                group_id TEXT PRIMARY KEY,
+                group_name TEXT NOT NULL,
+                models_json TEXT NOT NULL,
+                active_provider_id TEXT,
+                provider_ids_json TEXT NOT NULL,
+                is_deleted INTEGER DEFAULT 0
+            );
+            CREATE TABLE provider_records (
+                group_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                provider_json TEXT NOT NULL,
+                is_deleted INTEGER DEFAULT 0
+            );",
+        )
+        .expect("create tables");
+
+        let models_json = serde_json::to_string(&vec!["gpt-4o-mini"]).expect("serialize models");
+        let provider_ids_json =
+            serde_json::to_string(&vec!["provider-1".to_string()]).expect("serialize provider ids");
+        let provider_json =
+            serde_json::to_string(&sample_group().providers[0]).expect("serialize provider json");
+
+        conn.execute(
+            "INSERT INTO group_records(group_id, group_name, models_json, active_provider_id, provider_ids_json, is_deleted)
+             VALUES(?1, ?2, ?3, ?4, ?5, 0)",
+            params![
+                "group-active",
+                "group-active",
+                models_json.clone(),
+                Some("provider-1".to_string()),
+                provider_ids_json.clone()
+            ],
+        )
+        .expect("insert active group");
+        conn.execute(
+            "INSERT INTO group_records(group_id, group_name, models_json, active_provider_id, provider_ids_json, is_deleted)
+             VALUES(?1, ?2, ?3, ?4, ?5, 1)",
+            params![
+                "group-deleted",
+                "group-deleted",
+                models_json,
+                Some("provider-1".to_string()),
+                provider_ids_json
+            ],
+        )
+        .expect("insert deleted group");
+
+        conn.execute(
+            "INSERT INTO provider_records(group_id, provider_id, provider_json, is_deleted)
+             VALUES(?1, ?2, ?3, 0)",
+            params!["group-active", "provider-1", provider_json.clone()],
+        )
+        .expect("insert active provider");
+        conn.execute(
+            "INSERT INTO provider_records(group_id, provider_id, provider_json, is_deleted)
+             VALUES(?1, ?2, ?3, 1)",
+            params!["group-active", "provider-deleted", provider_json],
+        )
+        .expect("insert deleted provider");
+
+        let loaded = load_groups_from_relational_tables(&conn).expect("load groups");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "group-active");
+        assert_eq!(loaded[0].providers.len(), 1);
+        assert_eq!(loaded[0].providers[0].id, "provider-1");
     }
 }

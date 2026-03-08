@@ -5,6 +5,8 @@
 pub mod config_service;
 pub mod error;
 pub mod group_backup_service;
+pub mod integration_service;
+pub mod provider_service;
 pub mod quota_service;
 pub mod remote_rules_service;
 

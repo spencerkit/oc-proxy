@@ -2,6 +2,7 @@ import { Plus, Trash2 } from "lucide-react"
 import type React from "react"
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { shallow } from "zustand/shallow"
 import { Button, Input } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { useProxyStore } from "@/store"
@@ -13,7 +14,13 @@ export const GroupEditPage: React.FC = () => {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { showToast } = useLogs()
-  const { config, saveConfig } = useProxyStore()
+  const { config, saveConfig } = useProxyStore(
+    state => ({
+      config: state.config,
+      saveConfig: state.saveConfig,
+    }),
+    shallow
+  )
 
   const group = config?.groups.find(item => item.id === groupId)
 
@@ -138,13 +145,14 @@ export const GroupEditPage: React.FC = () => {
           </div>
 
           <div className={styles.formGroup}>
-            <label htmlFor="groupName">{t("servicePage.groupName")}</label>
+            <label htmlFor="groupName">{t("modal.groupNameLabel")}</label>
             <Input
               id="groupName"
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder={t("modal.groupNamePlaceholder")}
             />
+            <p className={styles.hint}>{t("groupEditPage.groupNameHint")}</p>
           </div>
         </div>
 
