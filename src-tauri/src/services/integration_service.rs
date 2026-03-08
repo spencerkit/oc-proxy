@@ -605,37 +605,38 @@ pub fn read_agent_config(
         .ok_or_else(|| AppError::not_found(format!("target not found: {}", target_id)))?;
 
     let config_dir = PathBuf::from(&target.config_dir);
-    let (file_path, content) = match target.kind {
+
+    // Normalize config_dir for WSL paths
+    let config_dir = match normalize_wsl_path(&config_dir) {
+        Some(normalized) => normalized,
+        None => config_dir,
+    };
+
+    let (file_path, root) = match target.kind {
         IntegrationClientKind::Claude => {
             let path = config_dir.join("settings.json");
-            let content = if path.exists() {
-                std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string())
-            } else {
-                "{}".to_string()
-            };
-            (path, content)
+            let root = read_json_like_object(&path).unwrap_or_else(|_| Map::new());
+            (path, root)
         }
         IntegrationClientKind::Codex => {
             let path = config_dir.join("config.toml");
-            let content = if path.exists() {
-                std::fs::read_to_string(&path).unwrap_or_else(|_| "".to_string())
-            } else {
-                "".to_string()
-            };
-            (path, content)
+            let doc = read_toml_document(&path).unwrap_or_else(|_| DocumentMut::new());
+            // Convert TOML document to JSON-like Map for parsing
+            let root = toml_to_map(&doc);
+            (path, root)
         }
         IntegrationClientKind::Opencode => {
             let path = resolve_opencode_config_path(&config_dir)?;
-            let content = if path.exists() {
-                std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string())
-            } else {
-                "{}".to_string()
-            };
-            (path, content)
+            let root = read_json_like_object(&path).unwrap_or_else(|_| Map::new());
+            (path, root)
         }
     };
 
-    let parsed_config = parse_agent_config(&target.kind, &content).ok();
+    // Serialize root back to string for content field
+    let content = serde_json::to_string(&Value::Object(root.clone()))
+        .unwrap_or_else(|_| "{}".to_string());
+
+    let parsed_config = parse_agent_config_from_map(&target.kind, &root).ok();
 
     Ok(AgentConfigFile {
         target_id: target.id,
@@ -647,12 +648,80 @@ pub fn read_agent_config(
     })
 }
 
+/// Converts TOML DocumentMut to a JSON-like Map.
+fn toml_to_map(doc: &DocumentMut) -> Map<String, Value> {
+    let mut map = Map::new();
+    for (key, item) in doc.as_table() {
+        map.insert(key.to_string(), toml_item_to_value(item));
+    }
+    map
+}
+
+fn toml_item_to_value(item: &toml_edit::Item) -> Value {
+    match item {
+        toml_edit::Item::None => Value::Null,
+        toml_edit::Item::Value(v) => toml_value_to_value(v),
+        toml_edit::Item::Table(t) => {
+            let mut map = Map::new();
+            for (k, v) in t {
+                map.insert(k.to_string(), toml_item_to_value(v));
+            }
+            Value::Object(map)
+        }
+        toml_edit::Item::ArrayOfTables(arr) => {
+            Value::Array(arr.iter().map(|t| {
+                let mut map = Map::new();
+                for (k, v) in t {
+                    map.insert(k.to_string(), toml_item_to_value(v));
+                }
+                Value::Object(map)
+            }).collect())
+        }
+    }
+}
+
+fn toml_value_to_value(v: &toml_edit::Value) -> Value {
+    match v {
+        toml_edit::Value::String(s) => Value::String(s.value().to_string()),
+        toml_edit::Value::Integer(i) => Value::Number((*i.value()).into()),
+        toml_edit::Value::Float(f) => {
+            serde_json::Number::from_f64(*f.value())
+                .map(Value::Number)
+                .unwrap_or(Value::Null)
+        }
+        toml_edit::Value::Boolean(b) => Value::Bool(*b.value()),
+        toml_edit::Value::Datetime(dt) => Value::String(dt.value().to_string()),
+        toml_edit::Value::Array(arr) => {
+            Value::Array(arr.iter().map(toml_value_to_value).collect())
+        }
+        toml_edit::Value::InlineTable(t) => {
+            let mut map = Map::new();
+            for (k, v) in t {
+                map.insert(k.to_string(), toml_value_to_value(v));
+            }
+            Value::Object(map)
+        }
+    }
+}
+
 /// Parses configuration file into AgentConfig.
 fn parse_agent_config(kind: &IntegrationClientKind, content: &str) -> AppResult<AgentConfig> {
     match kind {
         IntegrationClientKind::Claude => parse_claude_config(content),
         IntegrationClientKind::Opencode => parse_opencode_config(content),
         IntegrationClientKind::Codex => parse_codex_config(content),
+    }
+}
+
+/// Parses configuration from JSON-like Map into AgentConfig.
+fn parse_agent_config_from_map(
+    kind: &IntegrationClientKind,
+    root: &Map<String, Value>,
+) -> AppResult<AgentConfig> {
+    match kind {
+        IntegrationClientKind::Claude => parse_claude_config_from_map(root),
+        IntegrationClientKind::Opencode => parse_opencode_config_from_map(root),
+        IntegrationClientKind::Codex => parse_codex_config_from_map(root),
     }
 }
 
@@ -757,17 +826,16 @@ fn parse_opencode_config(content: &str) -> AppResult<AgentConfig> {
         });
     };
 
-    // Extract provider config
+    // Extract provider.aor_shared config
     let provider = root.get("provider").and_then(|v| v.as_object());
-    let url = provider
-        .and_then(|p| p.values().next())
-        .and_then(|v| v.get("options"))
+    let aor_shared = provider.and_then(|p| p.get("aor_shared")).and_then(|v| v.as_object());
+    let url = aor_shared
+        .and_then(|a| a.get("options"))
         .and_then(|o| o.get("baseURL"))
         .and_then(|v| v.as_str())
         .map(String::from);
-    let timeout = provider
-        .and_then(|p| p.values().next())
-        .and_then(|v| v.get("options"))
+    let timeout = aor_shared
+        .and_then(|a| a.get("options"))
         .and_then(|o| o.get("timeout"))
         .and_then(|v| v.as_u64());
     let model = root.get("model").and_then(|v| v.as_str()).map(String::from);
@@ -815,6 +883,104 @@ fn parse_codex_config(content: &str) -> AppResult<AgentConfig> {
         .and_then(|v| v.as_str())
         .map(String::from);
     let model = doc["model"].as_str().map(String::from);
+
+    Ok(AgentConfig {
+        url,
+        api_token,
+        model,
+        timeout: None,
+        always_thinking_enabled: None,
+        include_coauthored_by: None,
+        skip_dangerous_mode_permission_prompt: None,
+    })
+}
+
+/// Parses Claude config from JSON-like Map.
+fn parse_claude_config_from_map(root: &Map<String, Value>) -> AppResult<AgentConfig> {
+    // Extract env field
+    let env = root.get("env").and_then(|v| v.as_object());
+    let url = env
+        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let api_token = env
+        .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let model = env
+        .and_then(|e| e.get("ANTHROPIC_MODEL"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let timeout = env
+        .and_then(|e| e.get("API_TIMEOUT_MS"))
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<u64>().ok());
+
+    // Extract behavior options
+    let always_thinking_enabled = root
+        .get("alwaysThinkingEnabled")
+        .and_then(|v| v.as_bool());
+    let include_coauthored_by = root.get("includeCoAuthoredBy").and_then(|v| v.as_bool());
+    let skip_dangerous_mode_permission_prompt = root
+        .get("skipDangerousModePermissionPrompt")
+        .and_then(|v| v.as_bool());
+
+    Ok(AgentConfig {
+        url,
+        api_token,
+        model,
+        timeout,
+        always_thinking_enabled,
+        include_coauthored_by,
+        skip_dangerous_mode_permission_prompt,
+    })
+}
+
+/// Parses OpenCode config from JSON-like Map.
+fn parse_opencode_config_from_map(root: &Map<String, Value>) -> AppResult<AgentConfig> {
+    // Extract provider.aor_shared config
+    let provider = root.get("provider").and_then(|v| v.as_object());
+    let aor_shared = provider
+        .and_then(|p| p.get("aor_shared"))
+        .and_then(|v| v.as_object());
+    let url = aor_shared
+        .and_then(|a| a.get("options"))
+        .and_then(|o| o.get("baseURL"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let timeout = aor_shared
+        .and_then(|a| a.get("options"))
+        .and_then(|o| o.get("timeout"))
+        .and_then(|v| v.as_u64());
+    let model = root.get("model").and_then(|v| v.as_str()).map(String::from);
+
+    Ok(AgentConfig {
+        url,
+        api_token: None,
+        model,
+        timeout,
+        always_thinking_enabled: None,
+        include_coauthored_by: None,
+        skip_dangerous_mode_permission_prompt: None,
+    })
+}
+
+/// Parses Codex config from JSON-like Map.
+fn parse_codex_config_from_map(root: &Map<String, Value>) -> AppResult<AgentConfig> {
+    let model_providers = root.get("model_providers").and_then(|v| v.as_object());
+    let aor_shared = model_providers
+        .and_then(|mp| mp.get("aor_shared"))
+        .and_then(|v| v.as_object());
+
+    let url = aor_shared
+        .and_then(|a| a.get("base_url"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let api_token = aor_shared
+        .and_then(|a| a.get("api_key"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let model = root.get("model").and_then(|v| v.as_str()).map(String::from);
 
     Ok(AgentConfig {
         url,
