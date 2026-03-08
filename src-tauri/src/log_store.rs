@@ -11,11 +11,9 @@ use std::sync::{Arc, Mutex};
 pub struct LogStore {
     inner: Arc<Mutex<VecDeque<LogEntry>>>,
     limit: usize,
-    #[cfg(debug_assertions)]
     dev_log_sink: Option<Arc<Mutex<DevLogSink>>>,
 }
 
-#[cfg(debug_assertions)]
 struct DevLogSink {
     path: PathBuf,
     file: std::fs::File,
@@ -28,19 +26,12 @@ impl LogStore {
         Self::with_dev_log_file(limit, None)
     }
 
-    /// Create an in-memory log store with optional dev-only JSONL persistence.
-    ///
-    /// When compiled in debug mode and `dev_log_path` is provided, every appended
-    /// log entry is also serialized as one JSON line into that file.
+    /// Create an in-memory log store with optional JSONL persistence.
     pub fn with_dev_log_file(limit: usize, dev_log_path: Option<PathBuf>) -> Self {
-        #[cfg(debug_assertions)]
         let dev_log_sink = init_dev_log_sink(dev_log_path);
-        #[cfg(not(debug_assertions))]
-        let _ = dev_log_path;
         Self {
             inner: Arc::new(Mutex::new(VecDeque::with_capacity(limit))),
             limit,
-            #[cfg(debug_assertions)]
             dev_log_sink,
         }
     }
@@ -53,17 +44,13 @@ impl LogStore {
 
     /// Append one log entry while allowing a separate dev-file payload.
     pub fn append_with_dev_entry(&self, entry: LogEntry, dev_entry: Option<LogEntry>) {
-        #[cfg(debug_assertions)]
         let entry_for_dev_file = dev_entry.unwrap_or_else(|| entry.clone());
-        #[cfg(not(debug_assertions))]
-        let _ = dev_entry;
         let mut guard = self.inner.lock().expect("log mutex poisoned");
         guard.push_back(entry);
         while guard.len() > self.limit {
             let _ = guard.pop_front();
         }
         drop(guard);
-        #[cfg(debug_assertions)]
         self.append_to_dev_file(&entry_for_dev_file);
     }
 
@@ -75,10 +62,7 @@ impl LogStore {
 
     /// Upsert one log entry while allowing a separate dev-file payload.
     pub fn upsert_by_trace_id_with_dev_entry(&self, entry: LogEntry, dev_entry: Option<LogEntry>) {
-        #[cfg(debug_assertions)]
         let entry_for_dev_file = dev_entry.unwrap_or_else(|| entry.clone());
-        #[cfg(not(debug_assertions))]
-        let _ = dev_entry;
 
         let mut guard = self.inner.lock().expect("log mutex poisoned");
         let mut replaced = false;
@@ -98,7 +82,6 @@ impl LogStore {
         }
         drop(guard);
 
-        #[cfg(debug_assertions)]
         self.append_to_dev_file(&entry_for_dev_file);
     }
 
@@ -121,11 +104,9 @@ impl LogStore {
         let mut guard = self.inner.lock().expect("log mutex poisoned");
         guard.clear();
         drop(guard);
-        #[cfg(debug_assertions)]
         self.clear_dev_file();
     }
 
-    #[cfg(debug_assertions)]
     /// Performs append to dev file.
     fn append_to_dev_file(&self, entry: &LogEntry) {
         let Some(sink) = &self.dev_log_sink else {
@@ -153,7 +134,6 @@ impl LogStore {
         let _ = std::io::Write::flush(&mut guard.file);
     }
 
-    #[cfg(debug_assertions)]
     /// Clears dev file for this module's workflow.
     fn clear_dev_file(&self) {
         let Some(sink) = &self.dev_log_sink else {
@@ -175,7 +155,6 @@ impl LogStore {
     }
 }
 
-#[cfg(debug_assertions)]
 /// Inits dev log sink for this module's workflow.
 fn init_dev_log_sink(dev_log_path: Option<PathBuf>) -> Option<Arc<Mutex<DevLogSink>>> {
     let path = dev_log_path?;

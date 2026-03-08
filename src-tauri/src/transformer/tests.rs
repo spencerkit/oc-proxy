@@ -302,6 +302,81 @@ mod tests {
     }
 
     #[test]
+    fn test_openai_responses_stream_to_claude_finalizes_on_eof_without_completed() {
+        let mut ctx = StreamContext::new();
+        ctx.model_name = "claude-sonnet-4-6".to_string();
+
+        let created = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n";
+        let added = b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\"}}\n\n";
+        let delta = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"hello\"}\n\n";
+        let done = b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\",\"status\":\"completed\"}}\n\n";
+
+        let mut out = Vec::new();
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(created, &mut ctx)
+                .expect("created"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(added, &mut ctx)
+                .expect("added"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(delta, &mut ctx)
+                .expect("delta"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(done, &mut ctx)
+                .expect("done"),
+        );
+        out.extend(
+            claude_openai_responses_stream::finalize_openai_responses_stream_to_claude(&mut ctx),
+        );
+
+        let s = String::from_utf8(out).expect("utf8");
+        assert!(s.contains("event: message_start"));
+        assert!(s.contains("\"type\":\"text_delta\""));
+        assert!(s.contains("\"text\":\"hello\""));
+        assert!(s.contains("event: message_delta"));
+        assert!(s.contains("\"stop_reason\":\"end_turn\""));
+        assert!(s.contains("event: message_stop"));
+    }
+
+    #[test]
+    fn test_openai_responses_stream_to_claude_handles_incomplete_terminal_event() {
+        let mut ctx = StreamContext::new();
+        ctx.model_name = "claude-sonnet-4-6".to_string();
+
+        let created = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n";
+        let added = b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\"}}\n\n";
+        let delta = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"hello\"}\n\n";
+        let incomplete = b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_1\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"output_tokens\":5}}}\n\n";
+
+        let mut out = Vec::new();
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(created, &mut ctx)
+                .expect("created"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(added, &mut ctx)
+                .expect("added"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(delta, &mut ctx)
+                .expect("delta"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(incomplete, &mut ctx)
+                .expect("incomplete"),
+        );
+
+        let s = String::from_utf8(out).expect("utf8");
+        assert!(s.contains("event: message_delta"));
+        assert!(s.contains("\"stop_reason\":\"max_tokens\""));
+        assert!(s.contains("\"output_tokens\":5"));
+        assert!(s.contains("event: message_stop"));
+    }
+
+    #[test]
     fn test_openai_responses_resp_to_claude_text_tool_call_fallback_enabled() {
         let openai_resp = json!({
             "id": "resp_1",

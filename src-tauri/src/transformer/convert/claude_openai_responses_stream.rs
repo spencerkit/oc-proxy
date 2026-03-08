@@ -374,81 +374,159 @@ pub fn claude_stream_to_openai_responses(
     Ok(result.into_bytes())
 }
 
+fn flush_buffered_text_output(ctx: &mut StreamContext, result: &mut Vec<u8>) {
+    let Some(output_index) = ctx.buffered_output_index.take() else {
+        return;
+    };
+    let buffered = std::mem::take(&mut ctx.buffered_output_text);
+    if buffered.is_empty() {
+        return;
+    }
+
+    if ctx.text_tool_call_fallback_enabled {
+        if let Some(parsed) = parse_text_tool_call_fallback(&buffered, &ctx.allowed_tool_names) {
+            let call_id = format!(
+                "fallback_call_{}_{}",
+                output_index, ctx.fallback_tool_call_counter
+            );
+            ctx.fallback_tool_call_counter += 1;
+            let args =
+                serde_json::to_string(&parsed.arguments).unwrap_or_else(|_| "{}".to_string());
+
+            ctx.current_tool_id = call_id.clone();
+            ctx.current_tool_name = parsed.name.clone();
+            ctx.tool_index = output_index;
+
+            result.extend(build_claude_event(
+                "content_block_start",
+                &json!({
+                    "index": output_index,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": call_id,
+                        "name": parsed.name,
+                        "input": {}
+                    }
+                }),
+            ));
+            result.extend(build_claude_event(
+                "content_block_delta",
+                &json!({
+                    "index": output_index,
+                    "delta": {"type": "input_json_delta", "partial_json": args}
+                }),
+            ));
+            result.extend(build_claude_event(
+                "content_block_stop",
+                &json!({"index": output_index}),
+            ));
+            return;
+        }
+    }
+
+    result.extend(build_claude_event(
+        "content_block_start",
+        &json!({
+            "index": output_index,
+            "content_block": {"type": "text", "text": ""}
+        }),
+    ));
+    result.extend(build_claude_event(
+        "content_block_delta",
+        &json!({
+            "index": output_index,
+            "delta": {"type": "text_delta", "text": buffered}
+        }),
+    ));
+    result.extend(build_claude_event(
+        "content_block_stop",
+        &json!({"index": output_index}),
+    ));
+}
+
+fn update_usage_from_response(ctx: &mut StreamContext, response: &Value) {
+    if let Some(usage) = response.get("usage") {
+        if let Some(input) = usage.get("input_tokens").and_then(|v| v.as_i64()) {
+            ctx.input_tokens = input as i32;
+        }
+        if let Some(output) = usage.get("output_tokens").and_then(|v| v.as_i64()) {
+            ctx.output_tokens = output as i32;
+        }
+    }
+}
+
+fn infer_stop_reason(ctx: &StreamContext, response: Option<&Value>) -> &'static str {
+    if let Some(response) = response {
+        if response.get("status").and_then(|v| v.as_str()) == Some("incomplete") {
+            if matches!(
+                response
+                    .get("incomplete_details")
+                    .and_then(|v| v.get("reason"))
+                    .and_then(|v| v.as_str()),
+                Some("max_output_tokens" | "max_tokens")
+            ) {
+                return "max_tokens";
+            }
+        }
+    }
+
+    if !ctx.current_tool_id.is_empty() {
+        "tool_use"
+    } else {
+        "end_turn"
+    }
+}
+
+fn finalize_openai_responses_stream_to_claude_with_stop_reason(
+    ctx: &mut StreamContext,
+    stop_reason: &str,
+) -> Vec<u8> {
+    if ctx.finish_reason_sent && !ctx.content_block_started && !ctx.tool_block_started {
+        return Vec::new();
+    }
+    if !ctx.message_start_sent {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+    flush_buffered_text_output(ctx, &mut result);
+
+    if ctx.content_block_started {
+        result.extend(build_claude_event(
+            "content_block_stop",
+            &json!({"index": ctx.content_index}),
+        ));
+        ctx.content_block_started = false;
+    }
+    if ctx.tool_block_started {
+        result.extend(build_claude_event(
+            "content_block_stop",
+            &json!({"index": ctx.tool_index}),
+        ));
+        ctx.tool_block_started = false;
+    }
+    if !ctx.finish_reason_sent {
+        result.extend(build_claude_event(
+            "message_delta",
+            &json!({
+                "delta": {"stop_reason": stop_reason, "stop_sequence": null},
+                "usage": {"output_tokens": ctx.output_tokens}
+            }),
+        ));
+    }
+    result.extend(build_claude_event("message_stop", &json!({})));
+    ctx.finish_reason_sent = true;
+    result
+}
+
+pub fn finalize_openai_responses_stream_to_claude(ctx: &mut StreamContext) -> Vec<u8> {
+    finalize_openai_responses_stream_to_claude_with_stop_reason(ctx, infer_stop_reason(ctx, None))
+}
+
 pub fn openai_responses_stream_to_claude(
     event: &[u8],
     ctx: &mut StreamContext,
 ) -> Result<Vec<u8>, String> {
-    fn flush_buffered_text_output(ctx: &mut StreamContext, result: &mut Vec<u8>) {
-        let Some(output_index) = ctx.buffered_output_index.take() else {
-            return;
-        };
-        let buffered = std::mem::take(&mut ctx.buffered_output_text);
-        if buffered.is_empty() {
-            return;
-        }
-
-        if ctx.text_tool_call_fallback_enabled {
-            if let Some(parsed) = parse_text_tool_call_fallback(&buffered, &ctx.allowed_tool_names)
-            {
-                let call_id = format!(
-                    "fallback_call_{}_{}",
-                    output_index, ctx.fallback_tool_call_counter
-                );
-                ctx.fallback_tool_call_counter += 1;
-                let args =
-                    serde_json::to_string(&parsed.arguments).unwrap_or_else(|_| "{}".to_string());
-
-                ctx.current_tool_id = call_id.clone();
-                ctx.current_tool_name = parsed.name.clone();
-                ctx.tool_index = output_index;
-
-                result.extend(build_claude_event(
-                    "content_block_start",
-                    &json!({
-                        "index": output_index,
-                        "content_block": {
-                            "type": "tool_use",
-                            "id": call_id,
-                            "name": parsed.name,
-                            "input": {}
-                        }
-                    }),
-                ));
-                result.extend(build_claude_event(
-                    "content_block_delta",
-                    &json!({
-                        "index": output_index,
-                        "delta": {"type": "input_json_delta", "partial_json": args}
-                    }),
-                ));
-                result.extend(build_claude_event(
-                    "content_block_stop",
-                    &json!({"index": output_index}),
-                ));
-                return;
-            }
-        }
-
-        result.extend(build_claude_event(
-            "content_block_start",
-            &json!({
-                "index": output_index,
-                "content_block": {"type": "text", "text": ""}
-            }),
-        ));
-        result.extend(build_claude_event(
-            "content_block_delta",
-            &json!({
-                "index": output_index,
-                "delta": {"type": "text_delta", "text": buffered}
-            }),
-        ));
-        result.extend(build_claude_event(
-            "content_block_stop",
-            &json!({"index": output_index}),
-        ));
-    }
-
     let (_, json_data) = parse_sse(event);
     if json_data.is_empty() {
         return Ok(Vec::new());
@@ -459,36 +537,7 @@ pub fn openai_responses_stream_to_claude(
         ctx.text_tool_call_fallback_enabled && !ctx.allowed_tool_names.is_empty();
 
     if json_data == "[DONE]" {
-        if ctx.finish_reason_sent && !ctx.content_block_started && !ctx.tool_block_started {
-            return Ok(Vec::new());
-        }
-        flush_buffered_text_output(ctx, &mut result);
-        if ctx.content_block_started {
-            result.extend(build_claude_event(
-                "content_block_stop",
-                &json!({"index": ctx.content_index}),
-            ));
-            ctx.content_block_started = false;
-        }
-        if ctx.tool_block_started {
-            result.extend(build_claude_event(
-                "content_block_stop",
-                &json!({"index": ctx.tool_index}),
-            ));
-            ctx.tool_block_started = false;
-        }
-        if !ctx.finish_reason_sent {
-            result.extend(build_claude_event(
-                "message_delta",
-                &json!({
-                    "delta": {"stop_reason": "end_turn", "stop_sequence": null},
-                    "usage": {"output_tokens": ctx.output_tokens}
-                }),
-            ));
-        }
-        result.extend(build_claude_event("message_stop", &json!({})));
-        ctx.finish_reason_sent = true;
-        return Ok(result);
+        return Ok(finalize_openai_responses_stream_to_claude(ctx));
     }
 
     let data: Value = serde_json::from_str(&json_data).map_err(|e| format!("parse: {}", e))?;
@@ -714,43 +763,27 @@ pub fn openai_responses_stream_to_claude(
             if ctx.finish_reason_sent {
                 return Ok(result);
             }
-            if let Some(usage) = data.get("response").and_then(|r| r.get("usage")) {
-                if let Some(input) = usage.get("input_tokens").and_then(|v| v.as_i64()) {
-                    ctx.input_tokens = input as i32;
-                }
-                if let Some(output) = usage.get("output_tokens").and_then(|v| v.as_i64()) {
-                    ctx.output_tokens = output as i32;
-                }
+            if let Some(response) = data.get("response") {
+                update_usage_from_response(ctx, response);
             }
-            flush_buffered_text_output(ctx, &mut result);
-            if ctx.content_block_started {
-                result.extend(build_claude_event(
-                    "content_block_stop",
-                    &json!({"index": ctx.content_index}),
-                ));
-                ctx.content_block_started = false;
-            }
-            if ctx.tool_block_started {
-                result.extend(build_claude_event(
-                    "content_block_stop",
-                    &json!({"index": ctx.tool_index}),
-                ));
-                ctx.tool_block_started = false;
-            }
-            let stop_reason = if !ctx.current_tool_id.is_empty() {
-                "tool_use"
-            } else {
-                "end_turn"
-            };
-            result.extend(build_claude_event(
-                "message_delta",
-                &json!({
-                    "delta": {"stop_reason": stop_reason, "stop_sequence": null},
-                    "usage": {"output_tokens": ctx.output_tokens}
-                }),
+            result.extend(finalize_openai_responses_stream_to_claude_with_stop_reason(
+                ctx,
+                infer_stop_reason(ctx, data.get("response")),
             ));
-            result.extend(build_claude_event("message_stop", &json!({})));
-            ctx.finish_reason_sent = true;
+        }
+        "response.incomplete" | "response.failed" => {
+            if ctx.finish_reason_sent {
+                return Ok(result);
+            }
+            if let Some(response) = data.get("response") {
+                update_usage_from_response(ctx, response);
+                result.extend(finalize_openai_responses_stream_to_claude_with_stop_reason(
+                    ctx,
+                    infer_stop_reason(ctx, Some(response)),
+                ));
+            } else {
+                result.extend(finalize_openai_responses_stream_to_claude(ctx));
+            }
         }
         _ => {}
     }

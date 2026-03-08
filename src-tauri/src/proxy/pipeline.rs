@@ -451,10 +451,9 @@ pub(super) async fn handle_proxy_request(
     );
     let request_timeout_ms = resolve_request_timeout_ms(stream, &entry, &target_protocol);
 
-    let upstream_resp = match state
+    let request_builder = state
         .client
         .post(upstream_url.clone())
-        .timeout(std::time::Duration::from_millis(request_timeout_ms))
         .headers(reqwest::header::HeaderMap::from_iter(
             upstream_headers.iter().filter_map(|(k, v)| {
                 let name = reqwest::header::HeaderName::from_bytes(k.as_bytes()).ok()?;
@@ -462,47 +461,158 @@ pub(super) async fn handle_proxy_request(
                 Some((name, value))
             }),
         ))
-        .json(&upstream_body)
-        .send()
+        .json(&upstream_body);
+
+    let upstream_resp = if stream {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(request_timeout_ms),
+            request_builder.send(),
+        )
         .await
-    {
-        Ok(r) => r,
-        Err(err) => {
-            let err_msg = format!("Upstream request failed: {err}");
-            state.metrics.increment_error();
-            finalize_log(
-                &state,
-                &request_timestamp,
-                &trace_id,
-                &method,
-                &parsed_path,
-                &active_route.group_name,
-                &active_route.rule,
-                &entry,
-                Some(&requested_model),
-                Some(&target_model),
-                Some(&upstream_url),
-                Some(request_headers_plain.clone()),
-                Some(upstream_headers.clone()),
-                Some(request_body.clone()),
-                Some(upstream_body.clone()),
-                Some(json!({
-                    "error": {
-                        "code": "upstream_error",
-                        "message": err_msg.clone(),
-                    }
-                })),
-                None,
-                Some(502),
-                None,
-                None,
-                Some(response_headers_json(&trace_id)),
-                None,
-                started.elapsed().as_millis() as u64,
-                "error",
-                capture_body,
-            );
-            return proxy_error_response(502, "upstream_error", &err_msg, None, "proxy", &trace_id);
+        {
+            Ok(Ok(r)) => r,
+            Ok(Err(err)) => {
+                let err_msg = format!("Upstream request failed: {err}");
+                state.metrics.increment_error();
+                finalize_log(
+                    &state,
+                    &request_timestamp,
+                    &trace_id,
+                    &method,
+                    &parsed_path,
+                    &active_route.group_name,
+                    &active_route.rule,
+                    &entry,
+                    Some(&requested_model),
+                    Some(&target_model),
+                    Some(&upstream_url),
+                    Some(request_headers_plain.clone()),
+                    Some(upstream_headers.clone()),
+                    Some(request_body.clone()),
+                    Some(upstream_body.clone()),
+                    Some(json!({
+                        "error": {
+                            "code": "upstream_error",
+                            "message": err_msg.clone(),
+                        }
+                    })),
+                    None,
+                    Some(502),
+                    None,
+                    None,
+                    Some(response_headers_json(&trace_id)),
+                    None,
+                    started.elapsed().as_millis() as u64,
+                    "error",
+                    capture_body,
+                );
+                return proxy_error_response(
+                    502,
+                    "upstream_error",
+                    &err_msg,
+                    None,
+                    "proxy",
+                    &trace_id,
+                );
+            }
+            Err(_) => {
+                let err_msg = format!(
+                    "Upstream response header timeout exceeded after {request_timeout_ms}ms"
+                );
+                state.metrics.increment_error();
+                finalize_log(
+                    &state,
+                    &request_timestamp,
+                    &trace_id,
+                    &method,
+                    &parsed_path,
+                    &active_route.group_name,
+                    &active_route.rule,
+                    &entry,
+                    Some(&requested_model),
+                    Some(&target_model),
+                    Some(&upstream_url),
+                    Some(request_headers_plain.clone()),
+                    Some(upstream_headers.clone()),
+                    Some(request_body.clone()),
+                    Some(upstream_body.clone()),
+                    Some(json!({
+                        "error": {
+                            "code": "upstream_error",
+                            "message": err_msg.clone(),
+                        }
+                    })),
+                    None,
+                    Some(504),
+                    None,
+                    None,
+                    Some(response_headers_json(&trace_id)),
+                    None,
+                    started.elapsed().as_millis() as u64,
+                    "error",
+                    capture_body,
+                );
+                return proxy_error_response(
+                    504,
+                    "upstream_error",
+                    &err_msg,
+                    None,
+                    "proxy",
+                    &trace_id,
+                );
+            }
+        }
+    } else {
+        match request_builder
+            .timeout(std::time::Duration::from_millis(request_timeout_ms))
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(err) => {
+                let err_msg = format!("Upstream request failed: {err}");
+                state.metrics.increment_error();
+                finalize_log(
+                    &state,
+                    &request_timestamp,
+                    &trace_id,
+                    &method,
+                    &parsed_path,
+                    &active_route.group_name,
+                    &active_route.rule,
+                    &entry,
+                    Some(&requested_model),
+                    Some(&target_model),
+                    Some(&upstream_url),
+                    Some(request_headers_plain.clone()),
+                    Some(upstream_headers.clone()),
+                    Some(request_body.clone()),
+                    Some(upstream_body.clone()),
+                    Some(json!({
+                        "error": {
+                            "code": "upstream_error",
+                            "message": err_msg.clone(),
+                        }
+                    })),
+                    None,
+                    Some(502),
+                    None,
+                    None,
+                    Some(response_headers_json(&trace_id)),
+                    None,
+                    started.elapsed().as_millis() as u64,
+                    "error",
+                    capture_body,
+                );
+                return proxy_error_response(
+                    502,
+                    "upstream_error",
+                    &err_msg,
+                    None,
+                    "proxy",
+                    &trace_id,
+                );
+            }
         }
     };
 
@@ -572,7 +682,15 @@ pub(super) async fn handle_proxy_request(
             let mut sse_pending = Vec::<u8>::new();
 
             loop {
-                match bytes_stream.try_next().await {
+                let next_chunk = tokio::select! {
+                    _ = tx.closed() => {
+                        downstream_closed = true;
+                        break;
+                    }
+                    result = bytes_stream.try_next() => result,
+                };
+
+                match next_chunk {
                     Ok(Some(bytes)) => {
                         if stream_probe_sse {
                             stream_probe_sse = false;
@@ -594,12 +712,30 @@ pub(super) async fn handle_proxy_request(
                                 sse_pending.extend_from_slice(bytes.as_ref());
                                 if sse_pending.len() > MAX_SSE_PENDING_BYTES {
                                     stream_failed = true;
-                                    let _ = tx
-                                        .send(Err(std::io::Error::new(
-                                            std::io::ErrorKind::Other,
-                                            "stream transform buffer overflow",
-                                        )))
-                                        .await;
+                                    let finalizer = finalize_stream_transform(
+                                        stream_transform,
+                                        &mut stream_ctx_moved,
+                                    );
+                                    if !finalizer.is_empty() {
+                                        capture_stream_chunk(
+                                            finalizer.as_slice(),
+                                            stream_capture_body,
+                                            &mut stream_body,
+                                            &mut stream_body_truncated,
+                                            stream_debug_capture_body,
+                                            &mut stream_debug_body,
+                                        );
+                                        if tx.send(Ok(Bytes::from(finalizer))).await.is_err() {
+                                            downstream_closed = true;
+                                        }
+                                    } else {
+                                        let _ = tx
+                                            .send(Err(std::io::Error::new(
+                                                std::io::ErrorKind::Other,
+                                                "stream transform buffer overflow",
+                                            )))
+                                            .await;
+                                    }
                                     break;
                                 }
 
@@ -617,12 +753,34 @@ pub(super) async fn handle_proxy_request(
                                         }
                                         Err(_) => {
                                             stream_failed = true;
-                                            let _ = tx
-                                                .send(Err(std::io::Error::new(
-                                                    std::io::ErrorKind::Other,
-                                                    "stream transform failed",
-                                                )))
-                                                .await;
+                                            let finalizer = finalize_stream_transform(
+                                                stream_transform,
+                                                &mut stream_ctx_moved,
+                                            );
+                                            if !finalizer.is_empty() {
+                                                capture_stream_chunk(
+                                                    finalizer.as_slice(),
+                                                    stream_capture_body,
+                                                    &mut stream_body,
+                                                    &mut stream_body_truncated,
+                                                    stream_debug_capture_body,
+                                                    &mut stream_debug_body,
+                                                );
+                                                if tx
+                                                    .send(Ok(Bytes::from(finalizer)))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    downstream_closed = true;
+                                                }
+                                            } else {
+                                                let _ = tx
+                                                    .send(Err(std::io::Error::new(
+                                                        std::io::ErrorKind::Other,
+                                                        "stream transform failed",
+                                                    )))
+                                                    .await;
+                                            }
                                             break;
                                         }
                                     }
@@ -636,21 +794,14 @@ pub(super) async fn handle_proxy_request(
                         };
 
                         for outgoing in outgoing_chunks {
-                            if stream_capture_body && !stream_body_truncated {
-                                let remaining =
-                                    MAX_STREAM_LOG_BODY_BYTES.saturating_sub(stream_body.len());
-                                if remaining == 0 {
-                                    stream_body_truncated = true;
-                                } else if outgoing.len() <= remaining {
-                                    stream_body.extend_from_slice(outgoing.as_ref());
-                                } else {
-                                    stream_body.extend_from_slice(&outgoing.as_ref()[..remaining]);
-                                    stream_body_truncated = true;
-                                }
-                            }
-                            if stream_debug_capture_body {
-                                stream_debug_body.extend_from_slice(outgoing.as_ref());
-                            }
+                            capture_stream_chunk(
+                                outgoing.as_ref(),
+                                stream_capture_body,
+                                &mut stream_body,
+                                &mut stream_body_truncated,
+                                stream_debug_capture_body,
+                                &mut stream_debug_body,
+                            );
                             if tx.send(Ok(outgoing)).await.is_err() {
                                 downstream_closed = true;
                                 break;
@@ -671,20 +822,63 @@ pub(super) async fn handle_proxy_request(
                                 &mut stream_ctx_moved,
                             ) {
                                 Ok(converted) => {
-                                    if !converted.is_empty()
-                                        && tx.send(Ok(Bytes::from(converted))).await.is_err()
-                                    {
-                                        downstream_closed = true;
+                                    if !converted.is_empty() {
+                                        capture_stream_chunk(
+                                            converted.as_slice(),
+                                            stream_capture_body,
+                                            &mut stream_body,
+                                            &mut stream_body_truncated,
+                                            stream_debug_capture_body,
+                                            &mut stream_debug_body,
+                                        );
+                                        if tx.send(Ok(Bytes::from(converted))).await.is_err() {
+                                            downstream_closed = true;
+                                        }
                                     }
                                 }
                                 Err(_) => {
                                     stream_failed = true;
-                                    let _ = tx
-                                        .send(Err(std::io::Error::new(
-                                            std::io::ErrorKind::Other,
-                                            "stream transform failed",
-                                        )))
-                                        .await;
+                                    let finalizer = finalize_stream_transform(
+                                        stream_transform,
+                                        &mut stream_ctx_moved,
+                                    );
+                                    if !finalizer.is_empty() {
+                                        capture_stream_chunk(
+                                            finalizer.as_slice(),
+                                            stream_capture_body,
+                                            &mut stream_body,
+                                            &mut stream_body_truncated,
+                                            stream_debug_capture_body,
+                                            &mut stream_debug_body,
+                                        );
+                                        if tx.send(Ok(Bytes::from(finalizer))).await.is_err() {
+                                            downstream_closed = true;
+                                        }
+                                    } else {
+                                        let _ = tx
+                                            .send(Err(std::io::Error::new(
+                                                std::io::ErrorKind::Other,
+                                                "stream transform failed",
+                                            )))
+                                            .await;
+                                    }
+                                }
+                            }
+                        }
+                        if !downstream_closed {
+                            let finalizer =
+                                finalize_stream_transform(stream_transform, &mut stream_ctx_moved);
+                            if !finalizer.is_empty() {
+                                capture_stream_chunk(
+                                    finalizer.as_slice(),
+                                    stream_capture_body,
+                                    &mut stream_body,
+                                    &mut stream_body_truncated,
+                                    stream_debug_capture_body,
+                                    &mut stream_debug_body,
+                                );
+                                if tx.send(Ok(Bytes::from(finalizer))).await.is_err() {
+                                    downstream_closed = true;
                                 }
                             }
                         }
@@ -692,12 +886,28 @@ pub(super) async fn handle_proxy_request(
                     }
                     Err(_) => {
                         stream_failed = true;
-                        let _ = tx
-                            .send(Err(std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                "stream read failed",
-                            )))
-                            .await;
+                        let finalizer =
+                            finalize_stream_transform(stream_transform, &mut stream_ctx_moved);
+                        if !finalizer.is_empty() {
+                            capture_stream_chunk(
+                                finalizer.as_slice(),
+                                stream_capture_body,
+                                &mut stream_body,
+                                &mut stream_body_truncated,
+                                stream_debug_capture_body,
+                                &mut stream_debug_body,
+                            );
+                            if tx.send(Ok(Bytes::from(finalizer))).await.is_err() {
+                                downstream_closed = true;
+                            }
+                        } else {
+                            let _ = tx
+                                .send(Err(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    "stream read failed",
+                                )))
+                                .await;
+                        }
                         break;
                     }
                 }
@@ -1004,8 +1214,7 @@ pub(super) async fn handle_proxy_request(
 /// - Same-surface forwarding is pass-through plus resolved target model override.
 /// - Cross-surface forwarding uses canonical mapper conversion.
 /// - Cross-surface streaming keeps mapper output (`stream`), while SSE bytes are
-///   forwarded directly from upstream.
-/// - For `messages -> responses`, stream is forced to false for compatibility.
+///   forwarded directly from upstream and normalized for the downstream surface.
 pub(super) fn build_upstream_body(
     entry: &PathEntry,
     target_protocol: &RuleProtocol,
@@ -1289,6 +1498,39 @@ fn transform_sse_event(
         StreamTransform::ResponsesToClaudeMessages => {
             claude_openai_responses_stream::openai_responses_stream_to_claude(event, ctx)
         }
+    }
+}
+
+fn finalize_stream_transform(transform: StreamTransform, ctx: &mut StreamContext) -> Vec<u8> {
+    match transform {
+        StreamTransform::ResponsesToClaudeMessages => {
+            claude_openai_responses_stream::finalize_openai_responses_stream_to_claude(ctx)
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn capture_stream_chunk(
+    outgoing: &[u8],
+    stream_capture_body: bool,
+    stream_body: &mut Vec<u8>,
+    stream_body_truncated: &mut bool,
+    stream_debug_capture_body: bool,
+    stream_debug_body: &mut Vec<u8>,
+) {
+    if stream_capture_body && !*stream_body_truncated {
+        let remaining = MAX_STREAM_LOG_BODY_BYTES.saturating_sub(stream_body.len());
+        if remaining == 0 {
+            *stream_body_truncated = true;
+        } else if outgoing.len() <= remaining {
+            stream_body.extend_from_slice(outgoing);
+        } else {
+            stream_body.extend_from_slice(&outgoing[..remaining]);
+            *stream_body_truncated = true;
+        }
+    }
+    if stream_debug_capture_body {
+        stream_debug_body.extend_from_slice(outgoing);
     }
 }
 

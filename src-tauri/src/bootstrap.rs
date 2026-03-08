@@ -346,14 +346,8 @@ pub fn setup_app(app: &mut App, app_name: &str, app_version: &str) -> Result<(),
     let integration_store = IntegrationStore::new(app_data_dir.join("client-integrations.json"));
     let _ = integration_store.initialize();
 
-    let log_store = LogStore::with_dev_log_file(
-        100,
-        if cfg!(debug_assertions) {
-            Some(app_data_dir.join("proxy-dev-logs.jsonl"))
-        } else {
-            None
-        },
-    );
+    let log_store =
+        LogStore::with_dev_log_file(100, Some(app_data_dir.join("proxy-dev-logs.jsonl")));
     let stats_path = app_data_dir.join("request-stats.sqlite");
     let stats_store = StatsStore::new(stats_path);
     let _ = stats_store.initialize();

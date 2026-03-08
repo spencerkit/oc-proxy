@@ -594,10 +594,7 @@ mod tests {
 }
 
 /// Reads Agent configuration file content.
-pub fn read_agent_config(
-    state: &SharedState,
-    target_id: &str,
-) -> AppResult<AgentConfigFile> {
+pub fn read_agent_config(state: &SharedState, target_id: &str) -> AppResult<AgentConfigFile> {
     let targets = state.integration_store.list();
     let target = targets
         .into_iter()
@@ -633,8 +630,8 @@ pub fn read_agent_config(
     };
 
     // Serialize root back to string for content field
-    let content = serde_json::to_string(&Value::Object(root.clone()))
-        .unwrap_or_else(|_| "{}".to_string());
+    let content =
+        serde_json::to_string(&Value::Object(root.clone())).unwrap_or_else(|_| "{}".to_string());
 
     let parsed_config = parse_agent_config(&target.kind, &root).ok();
 
@@ -668,15 +665,17 @@ fn toml_item_to_value(item: &toml_edit::Item) -> Value {
             }
             Value::Object(map)
         }
-        toml_edit::Item::ArrayOfTables(arr) => {
-            Value::Array(arr.iter().map(|t| {
-                let mut map = Map::new();
-                for (k, v) in t {
-                    map.insert(k.to_string(), toml_item_to_value(v));
-                }
-                Value::Object(map)
-            }).collect())
-        }
+        toml_edit::Item::ArrayOfTables(arr) => Value::Array(
+            arr.iter()
+                .map(|t| {
+                    let mut map = Map::new();
+                    for (k, v) in t {
+                        map.insert(k.to_string(), toml_item_to_value(v));
+                    }
+                    Value::Object(map)
+                })
+                .collect(),
+        ),
     }
 }
 
@@ -684,16 +683,12 @@ fn toml_value_to_value(v: &toml_edit::Value) -> Value {
     match v {
         toml_edit::Value::String(s) => Value::String(s.value().to_string()),
         toml_edit::Value::Integer(i) => Value::Number((*i.value()).into()),
-        toml_edit::Value::Float(f) => {
-            serde_json::Number::from_f64(*f.value())
-                .map(Value::Number)
-                .unwrap_or(Value::Null)
-        }
+        toml_edit::Value::Float(f) => serde_json::Number::from_f64(*f.value())
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
         toml_edit::Value::Boolean(b) => Value::Bool(*b.value()),
         toml_edit::Value::Datetime(dt) => Value::String(dt.value().to_string()),
-        toml_edit::Value::Array(arr) => {
-            Value::Array(arr.iter().map(toml_value_to_value).collect())
-        }
+        toml_edit::Value::Array(arr) => Value::Array(arr.iter().map(toml_value_to_value).collect()),
         toml_edit::Value::InlineTable(t) => {
             let mut map = Map::new();
             for (k, v) in t {
@@ -703,7 +698,6 @@ fn toml_value_to_value(v: &toml_edit::Value) -> Value {
         }
     }
 }
-
 
 /// Parses configuration into AgentConfig.
 fn parse_agent_config(
@@ -716,9 +710,6 @@ fn parse_agent_config(
         IntegrationClientKind::Codex => parse_codex_config(root),
     }
 }
-
-
-
 
 /// Parses Claude config from JSON-like Map.
 fn parse_claude_config(root: &Map<String, Value>) -> AppResult<AgentConfig> {
@@ -742,9 +733,7 @@ fn parse_claude_config(root: &Map<String, Value>) -> AppResult<AgentConfig> {
         .and_then(|s| s.parse::<u64>().ok());
 
     // Extract behavior options
-    let always_thinking_enabled = root
-        .get("alwaysThinkingEnabled")
-        .and_then(|v| v.as_bool());
+    let always_thinking_enabled = root.get("alwaysThinkingEnabled").and_then(|v| v.as_bool());
     let include_coauthored_by = root.get("includeCoAuthoredBy").and_then(|v| v.as_bool());
     let skip_dangerous_mode_permission_prompt = root
         .get("skipDangerousModePermissionPrompt")
@@ -818,7 +807,6 @@ fn parse_codex_config(root: &Map<String, Value>) -> AppResult<AgentConfig> {
     })
 }
 
-
 /// Writes Agent configuration to file.
 pub fn write_agent_config(
     state: &SharedState,
@@ -842,23 +830,16 @@ pub fn write_agent_config(
     };
 
     let file_path = match target.kind {
-        IntegrationClientKind::Claude => {
-            write_claude_full_config(&config_dir, &config)?
-        }
-        IntegrationClientKind::Opencode => {
-            write_opencode_full_config(&config_dir, &config)?
-        }
-        IntegrationClientKind::Codex => {
-            write_codex_full_config(&config_dir, &config)?
-        }
+        IntegrationClientKind::Claude => write_claude_full_config(&config_dir, &config)?,
+        IntegrationClientKind::Opencode => write_opencode_full_config(&config_dir, &config)?,
+        IntegrationClientKind::Codex => write_codex_full_config(&config_dir, &config)?,
     };
 
     // Update stored config
-    let _ = state.integration_store.update_target_config(
-        target_id,
-        target.config_dir,
-        Some(config),
-    );
+    let _ =
+        state
+            .integration_store
+            .update_target_config(target_id, target.config_dir, Some(config));
 
     Ok(WriteAgentConfigResult {
         ok: true,
@@ -878,13 +859,19 @@ fn write_claude_full_config(config_dir: &Path, config: &AgentConfig) -> AppResul
         env.insert("ANTHROPIC_BASE_URL".to_string(), Value::String(url.clone()));
     }
     if let Some(token) = &config.api_token {
-        env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), Value::String(token.clone()));
+        env.insert(
+            "ANTHROPIC_AUTH_TOKEN".to_string(),
+            Value::String(token.clone()),
+        );
     }
     if let Some(model) = &config.model {
         env.insert("ANTHROPIC_MODEL".to_string(), Value::String(model.clone()));
     }
     if let Some(timeout) = config.timeout {
-        env.insert("API_TIMEOUT_MS".to_string(), Value::String(timeout.to_string()));
+        env.insert(
+            "API_TIMEOUT_MS".to_string(),
+            Value::String(timeout.to_string()),
+        );
     }
 
     // Write behavior options
@@ -895,7 +882,10 @@ fn write_claude_full_config(config_dir: &Path, config: &AgentConfig) -> AppResul
         root.insert("includeCoAuthoredBy".to_string(), Value::Bool(enabled));
     }
     if let Some(enabled) = config.skip_dangerous_mode_permission_prompt {
-        root.insert("skipDangerousModePermissionPrompt".to_string(), Value::Bool(enabled));
+        root.insert(
+            "skipDangerousModePermissionPrompt".to_string(),
+            Value::Bool(enabled),
+        );
     }
 
     write_json_object(&file_path, &root)?;
@@ -951,7 +941,10 @@ fn write_codex_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult
     // Write to file
     if let Some(parent) = file_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::external(format!("create codex config dir failed ({}): {e}", parent.display()))
+            AppError::external(format!(
+                "create codex config dir failed ({}): {e}",
+                parent.display()
+            ))
         })?;
     }
     let mut output = doc.to_string();
@@ -959,7 +952,10 @@ fn write_codex_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult
         output.push('\n');
     }
     std::fs::write(&file_path, output).map_err(|e| {
-        AppError::external(format!("write codex config failed ({}): {e}", file_path.display()))
+        AppError::external(format!(
+            "write codex config failed ({}): {e}",
+            file_path.display()
+        ))
     })?;
     Ok(file_path)
 }
