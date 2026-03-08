@@ -1,0 +1,275 @@
+.panel {
+  padding: 20px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  margin-top: 16px;
+}
+
+.title {
+  margin: 0 0 16px 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.selectType {
+  text-align: center;
+}
+
+.agentCards {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.agentCard {
+  width: 150px;
+  padding: 20px;
+  background: var(--bg-primary);
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  color: inherit;
+}
+
+.agentCard:hover {
+  border-color: var(--primary-color);
+  transform: translateY(-2px);
+}
+
+.agentName {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.agentStatus {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.configured {
+  background: var(--success-bg);
+  color: var(--success-color);
+}
+
+.notConfigured {
+  background: var(--warning-bg);
+  color: var(--warning-color);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.backButton {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+}
+
+.backButton:hover {
+  text-decoration: underline;
+}
+
+.dirList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dirItem {
+  padding: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dirPath {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.dirActions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 32px;
+  color: var(--text-secondary);
+}
+
+.hint {
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+.addButton {
+  width: 100%;
+}
+
+.formGroup {
+  margin-bottom: 16px;
+}
+
+.formGroup label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.dirInput {
+  display: flex;
+  gap: 8px;
+}
+
+.dirInput input {
+  flex: 1;
+}
+
+.presetDirs {
+  margin-bottom: 16px;
+}
+
+.presetLabel {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.presetList {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.presetList button {
+  padding: 6px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.presetList button:hover {
+  background: var(--bg-hover);
+}
+
+.configDir {
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  margin-bottom: 16px;
+  word-break: break-all;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tab {
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-secondary);
+  border-bottom: 2px solid transparent;
+}
+
+.tab.active {
+  color: var(--primary-color);
+  border-bottom-color: var(--primary-color);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.behaviorOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  margin: 8px 0;
+}
+
+.behaviorLabel {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.sourceEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sourceTextarea {
+  width: 100%;
+  min-height: 300px;
+  padding: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.error {
+  padding: 8px 12px;
+  background: var(--error-bg);
+  color: var(--error-color);
+  border-radius: 4px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.success {
+  padding: 8px 12px;
+  background: var(--success-bg);
+  color: var(--success-color);
+  border-radius: 4px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
