@@ -1,0 +1,42 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="144" y1="128" x2="864" y2="896" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19202A" />
+      <stop offset="1" stop-color="#28303A" />
+    </linearGradient>
+    <linearGradient id="aFill" x1="240" y1="748" x2="610" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B87333" />
+      <stop offset="1" stop-color="#DEA879" />
+    </linearGradient>
+    <linearGradient id="oStroke" x1="544" y1="340" x2="864" y2="696" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7AC2A8" />
+      <stop offset="1" stop-color="#2D8B6F" />
+    </linearGradient>
+    <linearGradient id="routeFill" x1="258" y1="512" x2="844" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF8F0" />
+      <stop offset="1" stop-color="#F0E4D7" />
+    </linearGradient>
+    <filter id="shadow" x="148" y="204" width="748" height="648" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix" />
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha" />
+      <feOffset dy="16" />
+      <feGaussianBlur stdDeviation="24" />
+      <feComposite in2="hardAlpha" operator="out" />
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0431373 0 0 0 0 0.054902 0 0 0 0 0.0745098 0 0 0 0.4 0" />
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_0_1" />
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_0_1" result="shape" />
+    </filter>
+  </defs>
+
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#bg)" />
+  <rect x="88" y="88" width="848" height="848" rx="220" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="2" />
+  <rect x="88" y="88" width="848" height="848" rx="220" stroke="#46392E" stroke-opacity="0.42" stroke-width="2" />
+
+  <g filter="url(#shadow)">
+    <path d="M188 760L380 266C386 250 401 240 418 240H454C471 240 486 250 492 266L684 760H572L530 646H342L300 760H188ZM382 560H490L436 402L382 560Z" fill="url(#aFill)" />
+    <circle cx="706" cy="512" r="154" stroke="url(#oStroke)" stroke-width="82" />
+    <circle cx="232" cy="512" r="28" fill="url(#routeFill)" />
+    <rect x="258" y="468" width="454" height="88" rx="44" fill="url(#routeFill)" />
+    <path d="M688 410L842 512L688 614V410Z" fill="url(#routeFill)" />
+  </g>
+</svg>

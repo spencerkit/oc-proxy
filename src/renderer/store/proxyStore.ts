@@ -41,10 +41,18 @@ interface ProxyState {
   activeGroupId: string | null
   loading: boolean
   error: string | null
+  bootstrapping: boolean
+  bootstrapError: string | null
+  savingConfig: boolean
+  serverAction: "starting" | "stopping" | null
+  statusError: string | null
+  logsError: string | null
+  statsError: string | null
+  quotaError: string | null
+  lastOperationError: string | null
 
   // Polling interval IDs
   statusIntervalId: number | null
-  logsIntervalId: number | null
 
   // Actions
   init: () => Promise<void>
@@ -82,8 +90,9 @@ interface ProxyState {
  * Polling intervals (in milliseconds)
  */
 const STATUS_POLL_INTERVAL = 3000
-const LOGS_POLL_INTERVAL = 3000
 const MAX_LOGS = 100
+let statusRefreshInFlight = false
+
 /** Implements key behavior. */
 const quotaKey = (groupId: string, providerId: string) => `${groupId}:${providerId}`
 const ACTIVE_GROUP_STORAGE_KEY = "ai-open-router.activeGroupId"
@@ -129,6 +138,10 @@ function normalizeGroup(group: Partial<Group> & Pick<Group, "id" | "name">): Gro
 function normalizeConfig(config: ProxyConfig): ProxyConfig {
   return {
     ...config,
+    compat: {
+      ...config.compat,
+      textToolCallFallbackEnabled: config.compat.textToolCallFallbackEnabled ?? true,
+    },
     groups: (config.groups ?? []).map(group =>
       normalizeGroup(group as Partial<Group> & Pick<Group, "id" | "name">)
     ),
@@ -183,10 +196,18 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   providerCardStatsByProviderKey: {},
   quotaLoadingProviderKeys: {},
   activeGroupId: readPersistedActiveGroupId(),
-  loading: false,
+  loading: true,
   error: null,
+  bootstrapping: true,
+  bootstrapError: null,
+  savingConfig: false,
+  serverAction: null,
+  statusError: null,
+  logsError: null,
+  statsError: null,
+  quotaError: null,
+  lastOperationError: null,
   statusIntervalId: null,
-  logsIntervalId: null,
 
   /**
    * Initialize store with initial data from IPC
@@ -195,16 +216,27 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   init: async () => {
     try {
       console.log("[Store] Initializing...")
-      set({ loading: true, error: null })
+      set({
+        loading: true,
+        error: null,
+        bootstrapping: true,
+        bootstrapError: null,
+        lastOperationError: null,
+      })
 
       console.log("[Store] Fetching config and status...")
-      // Fetch initial config and status in parallel
-      const [rawConfig, status, logsStats] = await Promise.all([
-        ipc.getConfig(),
-        ipc.getStatus(),
-        ipc.getLogsStatsSummary(undefined, undefined, undefined, "rule", false),
-      ])
+      const [rawConfig, status] = await Promise.all([ipc.getConfig(), ipc.getStatus()])
       const config = normalizeConfig(rawConfig)
+      const logsStats = await ipc
+        .getLogsStatsSummary(undefined, undefined, undefined, "rule", false)
+        .catch(error => {
+          const errorMessage = getErrorMessage(error, "Failed to load logs stats")
+          set({
+            statsError: errorMessage,
+            lastOperationError: errorMessage,
+          })
+          return null
+        })
 
       console.log("[Store] Config received:", config)
       console.log("[Store] Status received:", status)
@@ -214,6 +246,8 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
         status,
         logsStats,
         loading: false,
+        bootstrapping: false,
+        bootstrapError: null,
       })
 
       console.log("[Store] Initialization complete")
@@ -221,11 +255,14 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
       // Start polling for status and logs
       get().startPolling()
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to initialize"
+      const errorMessage = getErrorMessage(error, "Failed to initialize")
       console.error("[Store] Initialization error:", errorMessage)
       set({
-        error: errorMessage,
         loading: false,
+        error: errorMessage,
+        bootstrapping: false,
+        bootstrapError: errorMessage,
+        lastOperationError: errorMessage,
       })
     }
   },
@@ -234,12 +271,25 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    * Refresh server status from IPC
    */
   refreshStatus: async () => {
+    if (statusRefreshInFlight) {
+      return
+    }
+
+    statusRefreshInFlight = true
     try {
       const status = await ipc.getStatus()
-      set({ status, error: null })
+      set({
+        status,
+        statusError: null,
+      })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to refresh status"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to refresh status")
+      set({
+        statusError: errorMessage,
+        lastOperationError: errorMessage,
+      })
+    } finally {
+      statusRefreshInFlight = false
     }
   },
 
@@ -249,10 +299,16 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   refreshLogs: async () => {
     try {
       const logs = await ipc.listLogs(MAX_LOGS)
-      set({ logs, error: null })
+      set({
+        logs,
+        logsError: null,
+      })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to refresh logs"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to refresh logs")
+      set({
+        logsError: errorMessage,
+        lastOperationError: errorMessage,
+      })
     }
   },
 
@@ -274,10 +330,16 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
         dimension,
         enableComparison
       )
-      set({ logsStats, error: null })
+      set({
+        logsStats,
+        statsError: null,
+      })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to refresh logs stats"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to refresh logs stats")
+      set({
+        statsError: errorMessage,
+        lastOperationError: errorMessage,
+      })
     }
   },
 
@@ -287,20 +349,24 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   saveConfig: async (config: ProxyConfig) => {
     try {
-      set({ loading: true, error: null })
+      set({
+        savingConfig: true,
+        lastOperationError: null,
+      })
 
       const result = await ipc.saveConfig(buildSaveConfigPayload(normalizeConfig(config)))
 
       set({
         config: normalizeConfig(result.config),
         status: result.status,
-        loading: false,
+        savingConfig: false,
+        lastOperationError: null,
       })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to save configuration"
+      const errorMessage = getErrorMessage(error, "Failed to save configuration")
       set({
-        error: errorMessage,
-        loading: false,
+        savingConfig: false,
+        lastOperationError: errorMessage,
       })
       throw new Error(errorMessage)
     }
@@ -311,11 +377,11 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   exportGroupsBackup: async () => {
     try {
-      set({ error: null })
+      set({ lastOperationError: null })
       return await ipc.exportGroupsBackup()
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to export group backup"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to export group backup")
+      set({ lastOperationError: errorMessage })
       throw error
     }
   },
@@ -325,11 +391,11 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   exportGroupsToFolder: async () => {
     try {
-      set({ error: null })
+      set({ lastOperationError: null })
       return await ipc.exportGroupsToFolder()
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to export group backup"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to export group backup")
+      set({ lastOperationError: errorMessage })
       throw error
     }
   },
@@ -339,11 +405,11 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   exportGroupsToClipboard: async () => {
     try {
-      set({ error: null })
+      set({ lastOperationError: null })
       return await ipc.exportGroupsToClipboard()
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to export group backup"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to export group backup")
+      set({ lastOperationError: errorMessage })
       throw error
     }
   },
@@ -353,25 +419,28 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   importGroupsBackup: async () => {
     try {
-      set({ loading: true, error: null })
+      set({
+        savingConfig: true,
+        lastOperationError: null,
+      })
       const result = await ipc.importGroupsBackup()
 
       if (!result.canceled && result.config && result.status) {
         set({
           config: normalizeConfig(result.config),
           status: result.status,
-          loading: false,
+          savingConfig: false,
         })
       } else {
-        set({ loading: false })
+        set({ savingConfig: false })
       }
 
       return result
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to import group backup"
+      const errorMessage = getErrorMessage(error, "Failed to import group backup")
       set({
-        error: errorMessage,
-        loading: false,
+        savingConfig: false,
+        lastOperationError: errorMessage,
       })
       throw error
     }
@@ -382,25 +451,28 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   importGroupsFromJson: async (jsonText: string) => {
     try {
-      set({ loading: true, error: null })
+      set({
+        savingConfig: true,
+        lastOperationError: null,
+      })
       const result = await ipc.importGroupsFromJson(jsonText)
 
       if (!result.canceled && result.config && result.status) {
         set({
           config: normalizeConfig(result.config),
           status: result.status,
-          loading: false,
+          savingConfig: false,
         })
       } else {
-        set({ loading: false })
+        set({ savingConfig: false })
       }
 
       return result
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to import group backup"
+      const errorMessage = getErrorMessage(error, "Failed to import group backup")
       set({
-        error: errorMessage,
-        loading: false,
+        savingConfig: false,
+        lastOperationError: errorMessage,
       })
       throw error
     }
@@ -411,11 +483,11 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   remoteRulesUpload: async (force?: boolean) => {
     try {
-      set({ error: null })
+      set({ lastOperationError: null })
       return await ipc.remoteRulesUpload(force)
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to upload remote rules"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to upload remote rules")
+      set({ lastOperationError: errorMessage })
       throw error
     }
   },
@@ -425,7 +497,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   remoteRulesPull: async (force?: boolean) => {
     try {
-      set({ error: null })
+      set({ lastOperationError: null })
       const result = await ipc.remoteRulesPull(force)
       if (result.config && result.status) {
         set({
@@ -435,8 +507,8 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
       }
       return result
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to pull remote rules"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to pull remote rules")
+      set({ lastOperationError: errorMessage })
       throw error
     }
   },
@@ -446,11 +518,11 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   readClipboardText: async () => {
     try {
-      set({ error: null })
+      set({ lastOperationError: null })
       return await ipc.readClipboardText()
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to read clipboard"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to read clipboard")
+      set({ lastOperationError: errorMessage })
       throw error
     }
   },
@@ -469,20 +541,32 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   clearLogs: async () => {
     try {
       await ipc.clearLogs()
-      set({ logs: [], error: null })
+      set({
+        logs: [],
+        logsError: null,
+      })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to clear logs"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to clear logs")
+      set({
+        logsError: errorMessage,
+        lastOperationError: errorMessage,
+      })
     }
   },
 
   clearLogsStats: async (beforeEpochMs?: number) => {
     try {
       await ipc.clearLogsStats(beforeEpochMs)
-      set({ logsStats: null, error: null })
+      set({
+        logsStats: null,
+        statsError: null,
+      })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to clear logs stats"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to clear logs stats")
+      set({
+        statsError: errorMessage,
+        lastOperationError: errorMessage,
+      })
       throw error
     }
   },
@@ -490,7 +574,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   fetchGroupQuotas: async (groupId: string) => {
     try {
       if (!groupId.trim()) return
-      set({ error: null })
+      set({ quotaError: null })
       const snapshots = await ipc.getGroupQuotas(groupId)
       set(state => {
         const next = { ...state.providerQuotas }
@@ -500,8 +584,11 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
         return { providerQuotas: next }
       })
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to fetch group quotas"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to fetch group quotas")
+      set({
+        quotaError: errorMessage,
+        lastOperationError: errorMessage,
+      })
       throw error
     }
   },
@@ -509,7 +596,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
   fetchGroupProviderCardStats: async (groupId: string, hours?: number) => {
     try {
       if (!groupId.trim()) return
-      set({ error: null })
+      set({ statsError: null })
       const items = await ipc.getRuleCardStats(groupId, hours)
       set(state => {
         const next = { ...state.providerCardStatsByProviderKey }
@@ -525,9 +612,11 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
         return { providerCardStatsByProviderKey: next }
       })
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to fetch group provider card stats"
-      set({ error: errorMessage })
+      const errorMessage = getErrorMessage(error, "Failed to fetch group provider card stats")
+      set({
+        statsError: errorMessage,
+        lastOperationError: errorMessage,
+      })
       throw error
     }
   },
@@ -536,7 +625,7 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
     const key = quotaKey(groupId, providerId)
     try {
       set(state => ({
-        error: null,
+        quotaError: null,
         quotaLoadingProviderKeys: {
           ...state.quotaLoadingProviderKeys,
           [key]: true,
@@ -554,9 +643,10 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
         },
       }))
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to fetch provider quota"
+      const errorMessage = getErrorMessage(error, "Failed to fetch provider quota")
       set(state => ({
-        error: errorMessage,
+        quotaError: errorMessage,
+        lastOperationError: errorMessage,
         quotaLoadingProviderKeys: {
           ...state.quotaLoadingProviderKeys,
           [key]: false,
@@ -577,21 +667,16 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
     if (state.statusIntervalId !== null) {
       window.clearInterval(state.statusIntervalId)
     }
-    if (state.logsIntervalId !== null) {
-      window.clearInterval(state.logsIntervalId)
-    }
 
     // Set up status polling
     const statusIntervalId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return
+      }
       get().refreshStatus()
     }, STATUS_POLL_INTERVAL)
 
-    // Set up logs polling
-    const logsIntervalId = window.setInterval(() => {
-      get().refreshLogs()
-    }, LOGS_POLL_INTERVAL)
-
-    set({ statusIntervalId, logsIntervalId })
+    set({ statusIntervalId })
   },
 
   /**
@@ -605,11 +690,6 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
       window.clearInterval(state.statusIntervalId)
       set({ statusIntervalId: null })
     }
-
-    if (state.logsIntervalId !== null) {
-      window.clearInterval(state.logsIntervalId)
-      set({ logsIntervalId: null })
-    }
   },
 
   /**
@@ -617,12 +697,23 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   startServer: async () => {
     try {
-      set({ loading: true, error: null })
+      set({
+        serverAction: "starting",
+        lastOperationError: null,
+      })
       const status = await ipc.startServer()
-      set({ status, loading: false })
+      set({
+        status,
+        serverAction: null,
+        statusError: null,
+      })
     } catch (error) {
       const errorMessage = getErrorMessage(error, "Failed to start server")
-      set({ loading: false })
+      set({
+        serverAction: null,
+        statusError: errorMessage,
+        lastOperationError: errorMessage,
+      })
       throw new Error(errorMessage)
     }
   },
@@ -632,12 +723,23 @@ export const useProxyStore = create<ProxyState>((set, get) => ({
    */
   stopServer: async () => {
     try {
-      set({ loading: true, error: null })
+      set({
+        serverAction: "stopping",
+        lastOperationError: null,
+      })
       const status = await ipc.stopServer()
-      set({ status, loading: false })
+      set({
+        status,
+        serverAction: null,
+        statusError: null,
+      })
     } catch (error) {
       const errorMessage = getErrorMessage(error, "Failed to stop server")
-      set({ loading: false })
+      set({
+        serverAction: null,
+        statusError: errorMessage,
+        lastOperationError: errorMessage,
+      })
       throw new Error(errorMessage)
     }
   },

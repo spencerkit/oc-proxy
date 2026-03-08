@@ -64,6 +64,13 @@ export interface RuleQuotaTestResult {
   message?: string | null
 }
 
+export interface ProviderModelTestResult {
+  ok: boolean
+  resolvedModel?: string | null
+  rawText?: string | null
+  message?: string | null
+}
+
 export interface RuleCostConfig {
   enabled: boolean
   inputPricePerM: number

@@ -3,7 +3,7 @@
 //! Separates response payload shape from internal service implementation details.
 
 use crate::domain::entities::{ProxyConfig, ProxyStatus};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,4 +77,44 @@ pub struct ClipboardTextResult {
 pub struct AppInfo {
     pub name: String,
     pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum IntegrationClientKind {
+    Claude,
+    Codex,
+    Opencode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationTarget {
+    pub id: String,
+    pub kind: IntegrationClientKind,
+    pub config_dir: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationWriteItem {
+    pub target_id: String,
+    pub kind: Option<IntegrationClientKind>,
+    pub config_dir: String,
+    pub file_path: Option<String>,
+    pub ok: bool,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrationWriteResult {
+    pub ok: bool,
+    pub group_id: String,
+    pub entry_url: String,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub items: Vec<IntegrationWriteItem>,
 }

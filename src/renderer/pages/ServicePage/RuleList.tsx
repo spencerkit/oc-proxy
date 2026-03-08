@@ -1,14 +1,4 @@
-import {
-  Check,
-  ChevronRight,
-  Folder,
-  Loader2,
-  Pencil,
-  Play,
-  Plus,
-  RefreshCw,
-  Trash2,
-} from "lucide-react"
+import { FlaskConical, Loader2, Pencil, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
 import type React from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components"
@@ -28,65 +18,6 @@ function resolveCurrencyPrefix(currency?: string): string {
   return `${normalized} `
 }
 
-export interface ServicePageProps {
-  groups: Group[]
-  activeGroupId: string | null
-  onSelectGroup: (groupId: string) => void
-  onAddGroup: () => void
-  onDeleteGroup: (groupId: string) => void
-}
-
-/**
- * GroupList Component
- * Displays a list of groups in the sidebar
- */
-export const GroupList: React.FC<{
-  groups: Group[]
-  activeGroupId: string | null
-  onSelect: (groupId: string) => void
-  onAdd: () => void
-}> = ({ groups, activeGroupId, onSelect, onAdd }) => {
-  const { t } = useTranslation()
-
-  return (
-    <div className={styles.groupList}>
-      <div className={styles.groupListHeader}>
-        <h3>{t("servicePage.groupInfo")}</h3>
-        <Button
-          variant="ghost"
-          size="small"
-          icon={Plus}
-          onClick={onAdd}
-          title={t("header.addGroup")}
-        />
-      </div>
-      <div className={styles.groupListContent}>
-        {groups.length === 0 ? (
-          <p className={styles.emptyHint}>{t("servicePage.noGroupsHint")}</p>
-        ) : (
-          <ul className={styles.groupItems}>
-            {groups.map(group => (
-              <li key={group.id}>
-                <button
-                  type="button"
-                  className={`${styles.groupItem} ${group.id === activeGroupId ? styles.active : ""}`}
-                  onClick={() => onSelect(group.id)}
-                >
-                  <Folder size={16} className={styles.groupIcon} />
-                  <span className={styles.groupName}>{group.name}</span>
-                  <span className={styles.groupPath}>/{group.id}</span>
-                  {group.id === activeGroupId && <Check size={14} className={styles.activeIcon} />}
-                  <ChevronRight size={14} className={styles.chevron} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  )
-}
-
 /**
  * RuleList Component
  * Displays rules within a group
@@ -94,34 +25,38 @@ export const GroupList: React.FC<{
 export const RuleList: React.FC<{
   providers: Group["providers"]
   activeProviderId: string | null
-  onSelect: (providerId: string) => void
   onActivate: (providerId: string) => void | Promise<void>
   activatingProviderId?: string | null
   quotaByRuleId?: Record<string, RuleQuotaSnapshot | undefined>
   quotaLoadingByRuleId?: Record<string, boolean | undefined>
   cardStatsByRuleId?: Record<string, RuleCardStatsItem | undefined>
   onRefreshQuota?: (providerId: string) => void | Promise<void>
+  onTestModel?: (providerId: string) => void | Promise<void>
+  testingProviderIds?: Record<string, boolean | undefined>
   onDelete: (providerId: string) => void
   groupName: string
   groupId: string
+  emptyMessage?: string
 }> = ({
   providers,
   activeProviderId,
-  onSelect,
   onActivate,
   activatingProviderId,
   quotaByRuleId,
   quotaLoadingByRuleId,
   cardStatsByRuleId,
   onRefreshQuota,
+  onTestModel,
+  testingProviderIds,
   onDelete,
   groupName,
   groupId,
+  emptyMessage,
 }) => {
   const { t } = useTranslation()
   const navigate = useNavigate()
 
-  const handleProviderClick = (providerId: string) => {
+  const handleProviderEdit = (providerId: string) => {
     navigate(`/groups/${groupId}/providers/${providerId}/edit`)
   }
 
@@ -351,7 +286,6 @@ export const RuleList: React.FC<{
 
     const resolveTokenBarColor = (ratioRaw: number) => {
       const ratio = Math.min(1, Math.max(0, ratioRaw))
-      // Low usage: green-ish, high usage: orange/red.
       const hue = 160 - ratio * 145
       const saturation = 72 + ratio * 8
       const lightness = 58 - ratio * 14
@@ -460,9 +394,6 @@ export const RuleList: React.FC<{
         <div className={styles.ruleHeaderTitle}>
           <h3>{t("servicePage.ruleName")}</h3>
           <span className={styles.countBadge}>{providers.length}</span>
-          <span className={styles.ruleGroupName} title={groupName}>
-            {groupName}
-          </span>
         </div>
         <Button
           variant="ghost"
@@ -474,7 +405,7 @@ export const RuleList: React.FC<{
       </div>
       <div className={styles.ruleListContent}>
         {providers.length === 0 ? (
-          <p className={styles.emptyHint}>{t("servicePage.noRulesHint")}</p>
+          <p className={styles.emptyHint}>{emptyMessage || t("servicePage.noRulesHint")}</p>
         ) : (
           <ul className={styles.ruleItems}>
             {providers.map(provider => (
@@ -486,18 +417,14 @@ export const RuleList: React.FC<{
                   <span className={styles.enabledCornerBadge}>{t("servicePage.current")}</span>
                 )}
                 <div className={styles.ruleCardTop}>
-                  <button
-                    type="button"
-                    className={`${styles.ruleItem} ${provider.id === activeProviderId ? styles.active : ""}`}
-                    onClick={() => {
-                      onSelect(provider.id)
-                      handleProviderClick(provider.id)
-                    }}
-                  >
-                    <div className={styles.ruleMainLine}>
+                  <div className={styles.ruleItem}>
+                    <div className={styles.ruleTitleLine}>
                       <span className={styles.ruleModel}>{provider.name}</span>
+                      <span className={styles.ruleDirection}>
+                        {t(`ruleProtocol.${provider.protocol}`)}
+                      </span>
                     </div>
-                  </button>
+                  </div>
                   <div className={styles.ruleHeaderRight}>
                     <div className={styles.ruleActionButtons}>
                       {provider.id !== activeProviderId && (
@@ -515,8 +442,8 @@ export const RuleList: React.FC<{
                       <button
                         type="button"
                         className={styles.editButton}
-                        onClick={() => handleProviderClick(provider.id)}
-                        title={t("servicePage.editRule")}
+                        onClick={() => handleProviderEdit(provider.id)}
+                        data-tooltip={t("servicePage.editRule")}
                         aria-label={`${t("servicePage.editRule")}: ${provider.name}`}
                       >
                         <Pencil size={14} />
@@ -525,15 +452,30 @@ export const RuleList: React.FC<{
                         type="button"
                         className={styles.deleteButton}
                         onClick={() => onDelete(provider.id)}
-                        title={t("servicePage.deleteRule")}
+                        data-tooltip={t("servicePage.deleteRule")}
                         aria-label={`${t("servicePage.deleteRule")}: ${provider.name}`}
                       >
                         <Trash2 size={14} />
                       </button>
+                      <button
+                        type="button"
+                        className={styles.testIconButton}
+                        onClick={() => onTestModel?.(provider.id)}
+                        data-tooltip={
+                          testingProviderIds?.[provider.id]
+                            ? t("servicePage.testingModel")
+                            : t("servicePage.testModel")
+                        }
+                        aria-label={`${t("servicePage.testModel")}: ${provider.name}`}
+                        disabled={Boolean(testingProviderIds?.[provider.id])}
+                      >
+                        {testingProviderIds?.[provider.id] ? (
+                          <Loader2 size={14} className={styles.spinner} />
+                        ) : (
+                          <FlaskConical size={14} />
+                        )}
+                      </button>
                     </div>
-                    <span className={styles.ruleDirection}>
-                      {t(`ruleProtocol.${provider.protocol}`)}
-                    </span>
                   </div>
                 </div>
                 {(() => {
@@ -591,6 +533,10 @@ export const RuleList: React.FC<{
                           <span>
                             {t("servicePage.miniTokens")}:{" "}
                             {formatTokenMillions(cardStats?.tokens ?? 0)}
+                          </span>
+                          <span>
+                            {t("servicePage.miniCacheTokens")}:{" "}
+                            {formatTokenMillions(cardStats?.cacheTokens ?? 0)}
                           </span>
                         </div>
                         {renderRuleMiniChart(cardStats)}

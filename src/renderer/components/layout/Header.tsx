@@ -3,6 +3,7 @@ import type React from "react"
 import { useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { useLocation, useNavigate } from "react-router-dom"
+import { shallow } from "zustand/shallow"
 import { useProxyStore } from "@/store"
 import type { LocaleCode, ThemeMode } from "@/types"
 import { resolveEffectiveLocale } from "@/utils/locale"
@@ -48,6 +49,11 @@ export interface HeaderProps {
   onStopServer?: () => void
 
   /**
+   * Current server transition state
+   */
+  serverAction?: "starting" | "stopping" | null
+
+  /**
    * Error count badge value
    */
   errorCount?: number
@@ -74,6 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
   serverAddress,
   onStartServer,
   onStopServer,
+  serverAction,
   errorCount,
   actions,
   testId,
@@ -81,7 +88,14 @@ export const Header: React.FC<HeaderProps> = ({
   const navigate = useNavigate()
   const location = useLocation()
   const { t, i18n } = useTranslation()
-  const { config, saveConfig, loading } = useProxyStore()
+  const { config, saveConfig, savingConfig } = useProxyStore(
+    state => ({
+      config: state.config,
+      saveConfig: state.saveConfig,
+      savingConfig: state.savingConfig,
+    }),
+    shallow
+  )
 
   const supportedLocales: LocaleCode[] = ["en-US", "zh-CN"]
   const documentTheme = document.documentElement.getAttribute("data-theme")
@@ -194,6 +208,11 @@ export const Header: React.FC<HeaderProps> = ({
               variant={isRunning ? "danger" : "primary"}
               size="small"
               onClick={isRunning ? onStopServer : onStartServer}
+              loading={
+                (isRunning && serverAction === "stopping") ||
+                (!isRunning && serverAction === "starting")
+              }
+              disabled={serverAction !== null}
             >
               {isRunning ? t("header.stop") : t("header.start")}
             </Button>
@@ -243,7 +262,7 @@ export const Header: React.FC<HeaderProps> = ({
           type="button"
           className={styles.themeToggle}
           onClick={handleThemeToggle}
-          disabled={!config || loading}
+          disabled={!config || savingConfig}
           aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
           title={theme === "light" ? "Dark mode" : "Light mode"}
         >
@@ -263,7 +282,7 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               className={`${styles.languageSegmentButton} ${currentLocale === locale ? styles.languageSegmentButtonActive : ""}`}
               onClick={() => handleLanguageChange(locale)}
-              disabled={!config || loading}
+              disabled={!config || savingConfig}
               aria-pressed={currentLocale === locale}
             >
               {locale === "en-US" ? "EN" : "中文"}

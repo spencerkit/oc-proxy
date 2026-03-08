@@ -1,6 +1,7 @@
 import type React from "react"
-import { useCallback, useEffect } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import { Navigate, Route, Routes } from "react-router-dom"
+import { shallow } from "zustand/shallow"
 import { Layout } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import {
@@ -25,9 +26,31 @@ import {
 const App: React.FC = () => {
   console.log("[App] Rendering...")
 
-  const store = useProxyStore()
+  const {
+    init,
+    bootstrapping,
+    bootstrapError,
+    status,
+    startServer,
+    stopServer,
+    config,
+    serverAction,
+  } = useProxyStore(
+    state => ({
+      init: state.init,
+      bootstrapping: state.bootstrapping,
+      bootstrapError: state.bootstrapError,
+      status: state.status,
+      startServer: state.startServer,
+      stopServer: state.stopServer,
+      config: state.config,
+      serverAction: state.serverAction,
+    }),
+    shallow
+  )
   const { t } = useTranslation()
   const { showToast } = useLogs()
+  const initStartedRef = useRef(false)
 
   // Fallback translation function
   const translate = useCallback(
@@ -48,16 +71,6 @@ const App: React.FC = () => {
     const normalized = String(message || "").toLowerCase()
     return normalized.includes("eaddrinuse") || normalized.includes("address already in use")
   }, [])
-
-  const { init, loading, error, status, startServer, stopServer, config } = store || {
-    init: () => {},
-    loading: false,
-    error: null,
-    status: null,
-    config: null,
-    startServer: () => {},
-    stopServer: () => {},
-  }
 
   const isRunning = status?.running ?? false
   const serverAddresses = status
@@ -97,18 +110,27 @@ const App: React.FC = () => {
     }
   }, [showToast, stopServer, translate])
 
-  console.log("[App] loading:", loading, "error:", error, "status:", status)
+  console.log(
+    "[App] bootstrapping:",
+    bootstrapping,
+    "bootstrapError:",
+    bootstrapError,
+    "status:",
+    status
+  )
 
   useEffect(() => {
+    if (initStartedRef.current) {
+      return
+    }
+    initStartedRef.current = true
     console.log("[App] useEffect running, calling init()...")
-    init()
+    void init()
   }, [init])
 
   console.log("[App] About to render layout")
 
-  const isInitialLoading = loading && !error && !config && !status
-
-  if (isInitialLoading) {
+  if (bootstrapping && !bootstrapError && !config && !status) {
     console.log("[App] Showing loading screen")
     return (
       <div className="loading-screen">
@@ -117,11 +139,11 @@ const App: React.FC = () => {
     )
   }
 
-  if (error) {
-    console.log("[App] Showing error screen:", error)
+  if (bootstrapError) {
+    console.log("[App] Showing error screen:", bootstrapError)
     return (
       <div className="error-screen">
-        <p>{error}</p>
+        <p>{bootstrapError}</p>
       </div>
     )
   }
@@ -131,6 +153,7 @@ const App: React.FC = () => {
     <Layout
       isRunning={isRunning}
       serverAddress={serverAddress}
+      serverAction={serverAction}
       onStartServer={handleStartServer}
       onStopServer={handleStopServer}
     >

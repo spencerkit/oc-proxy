@@ -29,7 +29,7 @@ export function useProxyStatus() {
   const status = useProxyStore(state => state.status)
   const running = useProxyStore(proxySelectors.isRunning)
   const refreshStatus = useProxyStore(state => state.refreshStatus)
-  const error = useProxyStore(state => state.error)
+  const error = useProxyStore(state => state.statusError)
 
   return {
     status,
@@ -62,6 +62,7 @@ export function useProxyStatusAutoRefresh() {
 
     // Set up interval for auto-refresh
     const intervalId = setInterval(() => {
+      if (document.visibilityState !== "visible") return
       refreshStatus()
     }, STATUS_REFRESH_INTERVAL)
 

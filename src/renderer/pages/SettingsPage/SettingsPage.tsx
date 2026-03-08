@@ -1,5 +1,6 @@
 import type React from "react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { shallow } from "zustand/shallow"
 import { Button, Input, Modal, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { useProxyStore } from "@/store"
@@ -11,22 +12,17 @@ import styles from "./SettingsPage.module.css"
 type ImportSource = "file" | "clipboard"
 type ExportTarget = "folder" | "clipboard"
 type RemoteSyncAction = "upload" | "pull" | null
+
+type PendingRemoteConflict = {
+  action: Exclude<RemoteSyncAction, null>
+  localUpdatedAt?: string
+  remoteUpdatedAt?: string
+  warning?: string
+} | null
+
 const QUOTA_REFRESH_MINUTES_MIN = 1
 const QUOTA_REFRESH_MINUTES_MAX = 1440
 const QUOTA_REFRESH_MINUTES_DEFAULT = 5
-
-/** Builds immediate config. */
-function buildImmediateConfig(config: ProxyConfig, next: Partial<ProxyConfig>): ProxyConfig {
-  return {
-    ...config,
-    ...next,
-    server: {
-      ...config.server,
-      ...(next.server || {}),
-      port: config.server.port,
-    },
-  }
-}
 
 /**
  * SettingsPage Component
@@ -37,6 +33,7 @@ export const SettingsPage: React.FC = () => {
   const {
     config,
     saveConfig,
+    savingConfig,
     exportGroupsToFolder,
     exportGroupsToClipboard,
     importGroupsBackup,
@@ -44,14 +41,29 @@ export const SettingsPage: React.FC = () => {
     remoteRulesPull,
     remoteRulesUpload,
     readClipboardText,
-    loading,
-  } = useProxyStore()
+  } = useProxyStore(
+    state => ({
+      config: state.config,
+      saveConfig: state.saveConfig,
+      savingConfig: state.savingConfig,
+      exportGroupsToFolder: state.exportGroupsToFolder,
+      exportGroupsToClipboard: state.exportGroupsToClipboard,
+      importGroupsBackup: state.importGroupsBackup,
+      importGroupsFromJson: state.importGroupsFromJson,
+      remoteRulesPull: state.remoteRulesPull,
+      remoteRulesUpload: state.remoteRulesUpload,
+      readClipboardText: state.readClipboardText,
+    }),
+    shallow
+  )
   const { showToast } = useLogs()
 
   const [portText, setPortText] = useState("8080")
   const [strictMode, setStrictMode] = useState(false)
+  const [textToolCallFallbackEnabled, setTextToolCallFallbackEnabled] = useState(true)
   const [detailedLogs, setDetailedLogs] = useState(false)
   const [launchOnStartup, setLaunchOnStartup] = useState(false)
+  const [autoStartServer, setAutoStartServer] = useState(true)
   const [closeToTray, setCloseToTray] = useState(true)
   const [quotaAutoRefreshMinutesText, setQuotaAutoRefreshMinutesText] = useState(
     String(QUOTA_REFRESH_MINUTES_DEFAULT)
@@ -73,40 +85,54 @@ export const SettingsPage: React.FC = () => {
   const [readingClipboard, setReadingClipboard] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [remoteSyncAction, setRemoteSyncAction] = useState<RemoteSyncAction>(null)
+  const [pendingRemoteConflict, setPendingRemoteConflict] = useState<PendingRemoteConflict>(null)
   const [aboutLoading, setAboutLoading] = useState(false)
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
-  const lastConfigPortRef = useRef("")
+  const serverSnapshotRef = useRef("")
+  const remoteSnapshotRef = useRef("")
+  const quotaRefreshSnapshotRef = useRef("")
   const remoteSyncing = remoteSyncAction !== null
 
-  // Load initial values from config
   useEffect(() => {
     if (!config) return
-    const currentPort = String(config.server.port)
-    setPortText(prevPort => {
-      if (!lastConfigPortRef.current) {
-        return currentPort
-      }
 
-      // Keep in-progress user input unless the config port actually changed.
-      if (currentPort !== lastConfigPortRef.current) {
-        return currentPort
-      }
-
-      if (prevPort === lastConfigPortRef.current) {
-        return currentPort
-      }
-
-      return prevPort
+    const nextServerSnapshot = JSON.stringify({
+      port: config.server.port,
     })
-    lastConfigPortRef.current = currentPort
+    if (nextServerSnapshot !== serverSnapshotRef.current) {
+      serverSnapshotRef.current = nextServerSnapshot
+      setPortText(String(config.server.port))
+      setPortError("")
+    }
+
+    const nextRemoteSnapshot = JSON.stringify({
+      enabled: config.remoteGit.enabled,
+      repoUrl: config.remoteGit.repoUrl ?? "",
+      token: config.remoteGit.token ?? "",
+      branch: config.remoteGit.branch ?? "main",
+    })
+    if (nextRemoteSnapshot !== remoteSnapshotRef.current) {
+      remoteSnapshotRef.current = nextRemoteSnapshot
+      setRemoteSyncEnabled(!!config.remoteGit.enabled)
+      setRemoteRepoUrl(config.remoteGit.repoUrl ?? "")
+      setRemoteToken(config.remoteGit.token ?? "")
+      setRemoteBranch(config.remoteGit.branch || "main")
+    }
+
     setStrictMode(config.compat.strictMode)
+    setTextToolCallFallbackEnabled(config.compat.textToolCallFallbackEnabled ?? true)
     setDetailedLogs(!!config.logging.captureBody)
     setLaunchOnStartup(config.ui.launchOnStartup)
+    setAutoStartServer(config.ui.autoStartServer ?? true)
     setCloseToTray(config.ui.closeToTray ?? true)
-    setQuotaAutoRefreshMinutesText(
-      String(config.ui.quotaAutoRefreshMinutes ?? QUOTA_REFRESH_MINUTES_DEFAULT)
+    const nextQuotaRefreshText = String(
+      config.ui.quotaAutoRefreshMinutes ?? QUOTA_REFRESH_MINUTES_DEFAULT
     )
-    setQuotaAutoRefreshMinutesError("")
+    if (nextQuotaRefreshText !== quotaRefreshSnapshotRef.current) {
+      quotaRefreshSnapshotRef.current = nextQuotaRefreshText
+      setQuotaAutoRefreshMinutesText(nextQuotaRefreshText)
+      setQuotaAutoRefreshMinutesError("")
+    }
     setTheme(config.ui.theme)
     setLocale(
       resolveEffectiveLocale({
@@ -115,47 +141,173 @@ export const SettingsPage: React.FC = () => {
         systemLanguage: navigator.language,
       })
     )
-    setRemoteRepoUrl(config.remoteGit.repoUrl ?? "")
-    setRemoteToken(config.remoteGit.token ?? "")
-    setRemoteBranch(config.remoteGit.branch || "main")
-    setRemoteSyncEnabled(!!config.remoteGit.enabled)
   }, [config])
 
-  const validatePort = (value: string): boolean => {
-    if (!/^\d+$/.test(value)) {
-      setPortError(t("settings.portError"))
-      return false
-    }
+  const validatePort = useCallback(
+    (value: string) => {
+      if (!/^\d+$/.test(value)) {
+        setPortError(t("settings.portError"))
+        return false
+      }
 
-    const parsed = Number(value)
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
-      setPortError(t("settings.portError"))
-      return false
-    }
+      const parsed = Number(value)
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+        setPortError(t("settings.portError"))
+        return false
+      }
 
-    setPortError("")
-    return true
-  }
+      setPortError("")
+      return true
+    },
+    [t]
+  )
 
-  const validateQuotaAutoRefreshMinutes = (value: string): boolean => {
-    if (!/^\d+$/.test(value)) {
-      setQuotaAutoRefreshMinutesError(t("settings.quotaAutoRefreshMinutesError"))
-      return false
-    }
+  const validateQuotaAutoRefreshMinutes = useCallback(
+    (value: string) => {
+      if (!/^\d+$/.test(value)) {
+        setQuotaAutoRefreshMinutesError(t("settings.quotaAutoRefreshMinutesError"))
+        return false
+      }
 
-    const parsed = Number(value)
-    if (
-      !Number.isInteger(parsed) ||
-      parsed < QUOTA_REFRESH_MINUTES_MIN ||
-      parsed > QUOTA_REFRESH_MINUTES_MAX
-    ) {
-      setQuotaAutoRefreshMinutesError(t("settings.quotaAutoRefreshMinutesError"))
-      return false
-    }
+      const parsed = Number(value)
+      if (
+        !Number.isInteger(parsed) ||
+        parsed < QUOTA_REFRESH_MINUTES_MIN ||
+        parsed > QUOTA_REFRESH_MINUTES_MAX
+      ) {
+        setQuotaAutoRefreshMinutesError(t("settings.quotaAutoRefreshMinutesError"))
+        return false
+      }
 
-    setQuotaAutoRefreshMinutesError("")
-    return true
-  }
+      setQuotaAutoRefreshMinutesError("")
+      return true
+    },
+    [t]
+  )
+
+  const applyImmediateConfig = useCallback(
+    async (builder: (base: ProxyConfig) => ProxyConfig) => {
+      if (!config) return
+      try {
+        await saveConfig(builder(config))
+      } catch (error) {
+        showToast(t("errors.saveFailed", { message: String(error) }), "error")
+      }
+    },
+    [config, saveConfig, showToast, t]
+  )
+
+  const parsedPort = /^\d+$/.test(portText) ? Number(portText) : NaN
+  const isServerDirty = Boolean(config && portText !== String(config.server.port))
+  const canSaveServer = Boolean(
+    config && isServerDirty && !savingConfig && !portError && Number.isInteger(parsedPort)
+  )
+
+  const remoteIsConfigured = useMemo(
+    () => remoteRepoUrl.trim().length > 0 && remoteToken.trim().length > 0,
+    [remoteRepoUrl, remoteToken]
+  )
+
+  const persistRemoteConfig = useCallback(
+    async (
+      overrides?: Partial<{
+        enabled: boolean
+        repoUrl: string
+        token: string
+        branch: string
+      }>
+    ) => {
+      if (!config) return false
+
+      const nextEnabled = overrides?.enabled ?? remoteSyncEnabled
+      const nextRepoUrl = (overrides?.repoUrl ?? remoteRepoUrl).trim()
+      const nextToken = (overrides?.token ?? remoteToken).trim()
+      const nextBranch = (overrides?.branch ?? remoteBranch).trim() || "main"
+      const changed =
+        nextEnabled !== !!config.remoteGit.enabled ||
+        nextRepoUrl !== (config.remoteGit.repoUrl ?? "") ||
+        nextToken !== (config.remoteGit.token ?? "") ||
+        nextBranch !== (config.remoteGit.branch ?? "main")
+
+      if (!changed) return true
+
+      try {
+        await saveConfig({
+          ...config,
+          remoteGit: {
+            enabled: nextEnabled,
+            repoUrl: nextRepoUrl,
+            token: nextToken,
+            branch: nextBranch,
+          },
+        })
+        return true
+      } catch (error) {
+        showToast(t("errors.saveFailed", { message: String(error) }), "error")
+        return false
+      }
+    },
+    [config, remoteBranch, remoteRepoUrl, remoteSyncEnabled, remoteToken, saveConfig, showToast, t]
+  )
+
+  const formatSyncTime = useCallback((value?: string) => {
+    if (!value) return "-"
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  }, [])
+
+  const executeRemoteAction = useCallback(
+    async (action: Exclude<RemoteSyncAction, null>, force = false) => {
+      if (!remoteIsConfigured) {
+        showToast(t("settings.remoteNotConfigured"), "error")
+        return
+      }
+      if (!(await persistRemoteConfig())) return
+
+      try {
+        setRemoteSyncAction(action)
+        if (action === "upload") {
+          const result = await remoteRulesUpload(force)
+          if (result.needsConfirmation && !force) {
+            setPendingRemoteConflict({
+              action,
+              localUpdatedAt: result.localUpdatedAt,
+              remoteUpdatedAt: result.remoteUpdatedAt,
+              warning: result.warning,
+            })
+            return
+          }
+          showToast(
+            result.changed ? t("settings.remoteUploadSuccess") : t("settings.remoteUploadNoChange"),
+            "success"
+          )
+          setPendingRemoteConflict(null)
+          return
+        }
+
+        const result = await remoteRulesPull(force)
+        if (result.needsConfirmation && !force) {
+          setPendingRemoteConflict({
+            action,
+            localUpdatedAt: result.localUpdatedAt,
+            remoteUpdatedAt: result.remoteUpdatedAt,
+            warning: result.warning,
+          })
+          return
+        }
+        showToast(
+          t("settings.remotePullSuccess", { count: result.importedGroupCount || 0 }),
+          "success"
+        )
+        setPendingRemoteConflict(null)
+      } catch (error) {
+        showToast(t("errors.operationFailed", { message: String(error) }), "error")
+      } finally {
+        setRemoteSyncAction(null)
+      }
+    },
+    [persistRemoteConfig, remoteIsConfigured, remoteRulesPull, remoteRulesUpload, showToast, t]
+  )
 
   const handlePortChange = (value: string) => {
     setPortText(value)
@@ -167,79 +319,11 @@ export const SettingsPage: React.FC = () => {
     validateQuotaAutoRefreshMinutes(value)
   }
 
-  const focusInput = (id: string) => {
-    const input = document.getElementById(id) as HTMLInputElement | null
-    input?.focus()
-  }
-
-  const handleQuotaAutoRefreshMinutesBlur = async () => {
+  const handleSaveServer = async () => {
     if (!config) return
-    if (!validateQuotaAutoRefreshMinutes(quotaAutoRefreshMinutesText)) return
-    const nextMinutes = Number(quotaAutoRefreshMinutesText)
-    if (nextMinutes === config.ui.quotaAutoRefreshMinutes) return
 
-    await applyImmediateConfig(current =>
-      buildImmediateConfig(current, {
-        ui: {
-          ...current.ui,
-          quotaAutoRefreshMinutes: nextMinutes,
-        },
-      })
-    )
-  }
-
-  const parsedPort = /^\d+$/.test(portText) ? Number(portText) : NaN
-  const isPortDirty = Boolean(config && String(config.server.port) !== portText)
-  const canSavePort = !loading && isPortDirty && !portError && Number.isInteger(parsedPort)
-
-  const remoteIsConfigured = useMemo(
-    () => remoteRepoUrl.trim().length > 0 && remoteToken.trim().length > 0,
-    [remoteRepoUrl, remoteToken]
-  )
-
-  const applyImmediateConfig = async (builder: (base: ProxyConfig) => ProxyConfig) => {
-    if (!config) return
-    try {
-      await saveConfig(builder(config))
-    } catch (error) {
-      showToast(t("errors.saveFailed", { message: String(error) }), "error")
-    }
-  }
-
-  const persistRemoteConfig = async () => {
-    if (!config) return false
-    const nextEnabled = remoteSyncEnabled
-    const nextRepoUrl = remoteRepoUrl.trim()
-    const nextToken = remoteToken.trim()
-    const nextBranch = remoteBranch.trim() || "main"
-    const changed =
-      nextEnabled !== !!config.remoteGit.enabled ||
-      nextRepoUrl !== (config.remoteGit.repoUrl ?? "") ||
-      nextToken !== (config.remoteGit.token ?? "") ||
-      nextBranch !== (config.remoteGit.branch ?? "main")
-    if (!changed) return true
-
-    try {
-      await saveConfig({
-        ...config,
-        remoteGit: {
-          enabled: nextEnabled,
-          repoUrl: nextRepoUrl,
-          token: nextToken,
-          branch: nextBranch,
-        },
-      })
-      return true
-    } catch (error) {
-      showToast(t("errors.saveFailed", { message: String(error) }), "error")
-      return false
-    }
-  }
-
-  const handleSavePort = async () => {
-    if (!config) return
-    if (!validatePort(portText)) {
-      focusInput("port")
+    const portValid = validatePort(portText)
+    if (!portValid) {
       return
     }
 
@@ -248,14 +332,28 @@ export const SettingsPage: React.FC = () => {
         ...config,
         server: {
           ...config.server,
-          host: "0.0.0.0",
           port: Number(portText),
         },
       })
-      showToast(t("settings.portSaveSuccess"), "success")
+      showToast(t("settings.networkSaveSuccess"), "success")
     } catch (error) {
       showToast(t("errors.saveFailed", { message: String(error) }), "error")
     }
+  }
+
+  const handleQuotaAutoRefreshMinutesBlur = async () => {
+    if (!config) return
+    if (!validateQuotaAutoRefreshMinutes(quotaAutoRefreshMinutesText)) return
+    const nextMinutes = Number(quotaAutoRefreshMinutesText)
+    if (nextMinutes === config.ui.quotaAutoRefreshMinutes) return
+
+    await applyImmediateConfig(current => ({
+      ...current,
+      ui: {
+        ...current.ui,
+        quotaAutoRefreshMinutes: nextMinutes,
+      },
+    }))
   }
 
   const handleExportGroups = async () => {
@@ -337,76 +435,6 @@ export const SettingsPage: React.FC = () => {
     }
   }
 
-  const formatSyncTime = (value?: string) => {
-    if (!value) return "-"
-    const date = new Date(value)
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
-  }
-
-  const handleRemoteUpload = async () => {
-    if (!remoteIsConfigured) {
-      showToast(t("settings.remoteNotConfigured"), "error")
-      return
-    }
-    if (!(await persistRemoteConfig())) return
-
-    try {
-      setRemoteSyncAction("upload")
-      let result = await remoteRulesUpload()
-      if (result.needsConfirmation) {
-        const confirmed = window.confirm(
-          t("settings.remoteUploadConflict", {
-            local: formatSyncTime(result.localUpdatedAt),
-            remote: formatSyncTime(result.remoteUpdatedAt),
-          })
-        )
-        if (!confirmed) return
-        result = await remoteRulesUpload(true)
-      }
-      showToast(
-        result.changed ? t("settings.remoteUploadSuccess") : t("settings.remoteUploadNoChange"),
-        "success"
-      )
-    } catch (error) {
-      showToast(t("errors.operationFailed", { message: String(error) }), "error")
-    } finally {
-      setRemoteSyncAction(null)
-    }
-  }
-
-  const handleRemotePull = async () => {
-    if (!remoteIsConfigured) {
-      showToast(t("settings.remoteNotConfigured"), "error")
-      return
-    }
-    if (!(await persistRemoteConfig())) return
-
-    try {
-      setRemoteSyncAction("pull")
-      let result = await remoteRulesPull()
-      if (result.needsConfirmation) {
-        const confirmed = window.confirm(
-          t("settings.remotePullConflict", {
-            local: formatSyncTime(result.localUpdatedAt),
-            remote: formatSyncTime(result.remoteUpdatedAt),
-          })
-        )
-        if (!confirmed) return
-        result = await remoteRulesPull(true)
-      }
-      showToast(
-        t("settings.remotePullSuccess", { count: result.importedGroupCount || 0 }),
-        "success"
-      )
-    } catch (error) {
-      showToast(t("errors.operationFailed", { message: String(error) }), "error")
-    } finally {
-      setRemoteSyncAction(null)
-    }
-  }
-
-  const canConfirmImport = importSource === "file" || importJsonText.trim().length > 0
-
   const handleOpenAbout = async () => {
     setShowAboutModal(true)
     if (appInfo) return
@@ -421,6 +449,8 @@ export const SettingsPage: React.FC = () => {
       setAboutLoading(false)
     }
   }
+
+  const canConfirmImport = importSource === "file" || importJsonText.trim().length > 0
 
   return (
     <div className={styles.settingsPage}>
@@ -446,20 +476,20 @@ export const SettingsPage: React.FC = () => {
                 placeholder="8080"
                 hint={!portError ? t("settings.portHint") : undefined}
                 error={portError || undefined}
-                endAdornment={
-                  <Button
-                    variant="primary"
-                    size="small"
-                    onClick={handleSavePort}
-                    disabled={!canSavePort}
-                    loading={loading}
-                    type="button"
-                  >
-                    {t("settings.savePort")}
-                  </Button>
-                }
+                disabled={savingConfig}
               />
-              <p className={styles.fieldHint}>{t("settings.nonPortAutoApplyHint")}</p>
+            </div>
+
+            <div className={styles.actions}>
+              <Button
+                variant="primary"
+                onClick={handleSaveServer}
+                disabled={!canSaveServer}
+                loading={savingConfig && isServerDirty}
+                type="button"
+              >
+                {t("settings.savePort")}
+              </Button>
             </div>
           </div>
 
@@ -474,16 +504,40 @@ export const SettingsPage: React.FC = () => {
               <Switch
                 id="strictMode"
                 checked={strictMode}
+                disabled={savingConfig}
                 onChange={next => {
                   setStrictMode(next)
-                  void applyImmediateConfig(current =>
-                    buildImmediateConfig(current, {
-                      compat: {
-                        ...current.compat,
-                        strictMode: next,
-                      },
-                    })
-                  )
+                  void applyImmediateConfig(current => ({
+                    ...current,
+                    compat: {
+                      ...current.compat,
+                      strictMode: next,
+                    },
+                  }))
+                }}
+              />
+            </div>
+
+            <div className={styles.formGroupSwitch}>
+              <div className={styles.switchLabel}>
+                <label htmlFor="textToolCallFallbackEnabled">
+                  {t("settings.textToolCallFallbackEnabled")}
+                </label>
+                <p>{t("settings.textToolCallFallbackEnabledHint")}</p>
+              </div>
+              <Switch
+                id="textToolCallFallbackEnabled"
+                checked={textToolCallFallbackEnabled}
+                disabled={savingConfig}
+                onChange={next => {
+                  setTextToolCallFallbackEnabled(next)
+                  void applyImmediateConfig(current => ({
+                    ...current,
+                    compat: {
+                      ...current.compat,
+                      textToolCallFallbackEnabled: next,
+                    },
+                  }))
                 }}
               />
             </div>
@@ -496,16 +550,16 @@ export const SettingsPage: React.FC = () => {
               <Switch
                 id="detailedLogs"
                 checked={detailedLogs}
+                disabled={savingConfig}
                 onChange={next => {
                   setDetailedLogs(next)
-                  void applyImmediateConfig(current =>
-                    buildImmediateConfig(current, {
-                      logging: {
-                        ...current.logging,
-                        captureBody: next,
-                      },
-                    })
-                  )
+                  void applyImmediateConfig(current => ({
+                    ...current,
+                    logging: {
+                      ...current.logging,
+                      captureBody: next,
+                    },
+                  }))
                 }}
               />
             </div>
@@ -518,16 +572,38 @@ export const SettingsPage: React.FC = () => {
               <Switch
                 id="launchOnStartup"
                 checked={launchOnStartup}
+                disabled={savingConfig}
                 onChange={next => {
                   setLaunchOnStartup(next)
-                  void applyImmediateConfig(current =>
-                    buildImmediateConfig(current, {
-                      ui: {
-                        ...current.ui,
-                        launchOnStartup: next,
-                      },
-                    })
-                  )
+                  void applyImmediateConfig(current => ({
+                    ...current,
+                    ui: {
+                      ...current.ui,
+                      launchOnStartup: next,
+                    },
+                  }))
+                }}
+              />
+            </div>
+
+            <div className={styles.formGroupSwitch}>
+              <div className={styles.switchLabel}>
+                <label htmlFor="autoStartServer">{t("settings.autoStartServer")}</label>
+                <p>{t("settings.autoStartServerHint")}</p>
+              </div>
+              <Switch
+                id="autoStartServer"
+                checked={autoStartServer}
+                disabled={savingConfig}
+                onChange={next => {
+                  setAutoStartServer(next)
+                  void applyImmediateConfig(current => ({
+                    ...current,
+                    ui: {
+                      ...current.ui,
+                      autoStartServer: next,
+                    },
+                  }))
                 }}
               />
             </div>
@@ -540,16 +616,16 @@ export const SettingsPage: React.FC = () => {
               <Switch
                 id="closeToTray"
                 checked={closeToTray}
+                disabled={savingConfig}
                 onChange={next => {
                   setCloseToTray(next)
-                  void applyImmediateConfig(current =>
-                    buildImmediateConfig(current, {
-                      ui: {
-                        ...current.ui,
-                        closeToTray: next,
-                      },
-                    })
-                  )
+                  void applyImmediateConfig(current => ({
+                    ...current,
+                    ui: {
+                      ...current.ui,
+                      closeToTray: next,
+                    },
+                  }))
                 }}
               />
             </div>
@@ -574,6 +650,7 @@ export const SettingsPage: React.FC = () => {
                     : undefined
                 }
                 error={quotaAutoRefreshMinutesError || undefined}
+                disabled={savingConfig}
               />
             </div>
           </div>
@@ -591,15 +668,15 @@ export const SettingsPage: React.FC = () => {
                   className={`${styles.choiceButton} ${theme === "light" ? styles.choiceButtonActive : ""}`}
                   onClick={() => {
                     setTheme("light")
-                    void applyImmediateConfig(current =>
-                      buildImmediateConfig(current, {
-                        ui: {
-                          ...current.ui,
-                          theme: "light",
-                        },
-                      })
-                    )
+                    void applyImmediateConfig(current => ({
+                      ...current,
+                      ui: {
+                        ...current.ui,
+                        theme: "light",
+                      },
+                    }))
                   }}
+                  disabled={savingConfig}
                 >
                   <span className={styles.choiceTitle}>{t("settings.themeLight")}</span>
                   <span className={styles.choiceValue}>LIGHT</span>
@@ -610,15 +687,15 @@ export const SettingsPage: React.FC = () => {
                   className={`${styles.choiceButton} ${theme === "dark" ? styles.choiceButtonActive : ""}`}
                   onClick={() => {
                     setTheme("dark")
-                    void applyImmediateConfig(current =>
-                      buildImmediateConfig(current, {
-                        ui: {
-                          ...current.ui,
-                          theme: "dark",
-                        },
-                      })
-                    )
+                    void applyImmediateConfig(current => ({
+                      ...current,
+                      ui: {
+                        ...current.ui,
+                        theme: "dark",
+                      },
+                    }))
                   }}
+                  disabled={savingConfig}
                 >
                   <span className={styles.choiceTitle}>{t("settings.themeDark")}</span>
                   <span className={styles.choiceValue}>DARK</span>
@@ -637,16 +714,16 @@ export const SettingsPage: React.FC = () => {
                   className={`${styles.choiceButton} ${locale === "en-US" ? styles.choiceButtonActive : ""}`}
                   onClick={() => {
                     setLocale("en-US")
-                    void applyImmediateConfig(current =>
-                      buildImmediateConfig(current, {
-                        ui: {
-                          ...current.ui,
-                          locale: "en-US",
-                          localeMode: "manual",
-                        },
-                      })
-                    )
+                    void applyImmediateConfig(current => ({
+                      ...current,
+                      ui: {
+                        ...current.ui,
+                        locale: "en-US",
+                        localeMode: "manual",
+                      },
+                    }))
                   }}
+                  disabled={savingConfig}
                 >
                   <span className={styles.choiceTitle}>{t("settings.languageEnglish")}</span>
                   <span className={styles.choiceValue}>EN-US</span>
@@ -657,16 +734,16 @@ export const SettingsPage: React.FC = () => {
                   className={`${styles.choiceButton} ${locale === "zh-CN" ? styles.choiceButtonActive : ""}`}
                   onClick={() => {
                     setLocale("zh-CN")
-                    void applyImmediateConfig(current =>
-                      buildImmediateConfig(current, {
-                        ui: {
-                          ...current.ui,
-                          locale: "zh-CN",
-                          localeMode: "manual",
-                        },
-                      })
-                    )
+                    void applyImmediateConfig(current => ({
+                      ...current,
+                      ui: {
+                        ...current.ui,
+                        locale: "zh-CN",
+                        localeMode: "manual",
+                      },
+                    }))
                   }}
+                  disabled={savingConfig}
                 >
                   <span className={styles.choiceTitle}>{t("settings.languageChinese")}</span>
                   <span className={styles.choiceValue}>ZH-CN</span>
@@ -686,14 +763,14 @@ export const SettingsPage: React.FC = () => {
                   id="settings-backup-export"
                   variant="default"
                   onClick={handleExportGroups}
-                  disabled={loading || exporting}
+                  disabled={savingConfig || exporting}
                 >
                   {t("settings.backupExport")}
                 </Button>
                 <Button
                   variant="default"
                   onClick={handleImportGroups}
-                  disabled={loading || exporting}
+                  disabled={savingConfig || exporting}
                 >
                   {t("settings.backupImport")}
                 </Button>
@@ -713,16 +790,10 @@ export const SettingsPage: React.FC = () => {
               <Switch
                 id="remoteSyncEnabled"
                 checked={remoteSyncEnabled}
+                disabled={savingConfig}
                 onChange={next => {
                   setRemoteSyncEnabled(next)
-                  void applyImmediateConfig(current =>
-                    buildImmediateConfig(current, {
-                      remoteGit: {
-                        ...current.remoteGit,
-                        enabled: next,
-                      },
-                    })
-                  )
+                  void persistRemoteConfig({ enabled: next })
                 }}
               />
             </div>
@@ -739,6 +810,7 @@ export const SettingsPage: React.FC = () => {
                       void persistRemoteConfig()
                     }}
                     placeholder={t("settings.remoteRepoUrlPlaceholder")}
+                    disabled={savingConfig}
                   />
                 </div>
 
@@ -753,6 +825,7 @@ export const SettingsPage: React.FC = () => {
                       void persistRemoteConfig()
                     }}
                     placeholder={t("settings.remoteTokenPlaceholder")}
+                    disabled={savingConfig}
                   />
                 </div>
 
@@ -767,22 +840,27 @@ export const SettingsPage: React.FC = () => {
                     }}
                     placeholder="main"
                     hint={t("settings.remoteBranchHint")}
+                    disabled={savingConfig}
                   />
                 </div>
 
                 <div className={styles.backupActions}>
                   <Button
                     variant="default"
-                    onClick={handleRemoteUpload}
-                    disabled={loading || remoteSyncing}
+                    onClick={() => {
+                      void executeRemoteAction("upload")
+                    }}
+                    disabled={savingConfig || remoteSyncing}
                     loading={remoteSyncAction === "upload"}
                   >
                     {t("settings.remoteRulesUpload")}
                   </Button>
                   <Button
                     variant="default"
-                    onClick={handleRemotePull}
-                    disabled={loading || remoteSyncing}
+                    onClick={() => {
+                      void executeRemoteAction("pull")
+                    }}
+                    disabled={savingConfig || remoteSyncing}
                     loading={remoteSyncAction === "pull"}
                   >
                     {t("settings.remoteRulesUpdate")}
@@ -853,7 +931,7 @@ export const SettingsPage: React.FC = () => {
               variant="primary"
               onClick={handleConfirmExport}
               loading={exporting}
-              disabled={loading}
+              disabled={savingConfig}
             >
               {t("settings.exportConfirm")}
             </Button>
@@ -907,7 +985,7 @@ export const SettingsPage: React.FC = () => {
                   variant="default"
                   onClick={handleReadClipboard}
                   loading={readingClipboard}
-                  disabled={loading}
+                  disabled={savingConfig}
                 >
                   {t("settings.readClipboard")}
                 </Button>
@@ -923,9 +1001,61 @@ export const SettingsPage: React.FC = () => {
               variant="danger"
               onClick={handleConfirmImport}
               disabled={!canConfirmImport}
-              loading={loading}
+              loading={savingConfig}
             >
               {t("settings.importConfirm")}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={pendingRemoteConflict !== null}
+        onClose={() => {
+          if (remoteSyncing) return
+          setPendingRemoteConflict(null)
+        }}
+        title={t("settings.remoteConflictTitle")}
+      >
+        <div className={styles.importModalContent}>
+          {pendingRemoteConflict && (
+            <>
+              <p className={styles.importWarning}>
+                {pendingRemoteConflict.action === "upload"
+                  ? t("settings.remoteUploadConflict", {
+                      local: formatSyncTime(pendingRemoteConflict.localUpdatedAt),
+                      remote: formatSyncTime(pendingRemoteConflict.remoteUpdatedAt),
+                    })
+                  : t("settings.remotePullConflict", {
+                      local: formatSyncTime(pendingRemoteConflict.localUpdatedAt),
+                      remote: formatSyncTime(pendingRemoteConflict.remoteUpdatedAt),
+                    })}
+              </p>
+              {pendingRemoteConflict.warning && (
+                <p className={styles.importWarning}>{pendingRemoteConflict.warning}</p>
+              )}
+            </>
+          )}
+
+          <div className={styles.importModalActions}>
+            <Button
+              variant="default"
+              onClick={() => setPendingRemoteConflict(null)}
+              disabled={remoteSyncing}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (!pendingRemoteConflict) return
+                void executeRemoteAction(pendingRemoteConflict.action, true)
+              }}
+              loading={remoteSyncing}
+            >
+              {pendingRemoteConflict?.action === "upload"
+                ? t("settings.remoteConflictConfirmUpload")
+                : t("settings.remoteConflictConfirmPull")}
             </Button>
           </div>
         </div>

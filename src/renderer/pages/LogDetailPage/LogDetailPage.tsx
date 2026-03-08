@@ -1,9 +1,10 @@
-import { ArrowLeft, RefreshCw } from "lucide-react"
+import { ArrowLeft, Copy, RefreshCw } from "lucide-react"
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { shallow } from "zustand/shallow"
 import { Button } from "@/components"
-import { useTranslation } from "@/hooks"
+import { useLogs, useTranslation } from "@/hooks"
 import { useProxyStore } from "@/store"
 import type { LogEntry } from "@/types"
 import { formatTokenMillions } from "@/utils/tokenFormat"
@@ -38,6 +39,27 @@ function toText(value: unknown, emptyText: string): string {
 
   if (typeof value === "string") {
     return value || emptyText
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value)
+  }
+
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+/** Converts any value into clipboard-safe text. */
+function toCopyText(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value === "string") {
+    return value ? value : null
   }
 
   if (typeof value === "number" || typeof value === "boolean") {
@@ -201,12 +223,21 @@ export const LogDetailPage: React.FC = () => {
   const navigate = useNavigate()
   const { traceId } = useParams<{ traceId: string }>()
   const { t } = useTranslation()
-  const { logs, refreshLogs, loading } = useProxyStore()
+  const { showToast } = useLogs()
+  const { logs, refreshLogs } = useProxyStore(
+    state => ({
+      logs: state.logs,
+      refreshLogs: state.refreshLogs,
+    }),
+    shallow
+  )
+  const [refreshingLogs, setRefreshingLogs] = useState(false)
 
   const decodedTraceId = useMemo(() => (traceId ? decodeURIComponent(traceId) : ""), [traceId])
 
   useEffect(() => {
-    refreshLogs()
+    setRefreshingLogs(true)
+    Promise.resolve(refreshLogs()).finally(() => setRefreshingLogs(false))
   }, [refreshLogs])
 
   const log = useMemo(() => {
@@ -215,6 +246,38 @@ export const LogDetailPage: React.FC = () => {
   }, [decodedTraceId, logs])
 
   const getStatusText = (status: LogEntry["status"]) => t(`logs.state.${status}`)
+
+  const handleCopy = async (label: string, value: unknown) => {
+    const text = toCopyText(value)
+    if (!text) return
+
+    try {
+      await navigator.clipboard.writeText(text)
+      showToast(t("logs.copySuccess", { label }), "success")
+    } catch {
+      showToast(t("toast.copyFailed"), "error")
+    }
+  }
+
+  const renderCopyButton = (label: string, value: unknown) => {
+    const text = toCopyText(value)
+    return (
+      <Button
+        variant="ghost"
+        size="small"
+        icon={Copy}
+        type="button"
+        disabled={!text}
+        onClick={() => {
+          void handleCopy(label, value)
+        }}
+        title={`${t("common.copy")} ${label}`}
+        aria-label={`${t("common.copy")} ${label}`}
+      >
+        {t("common.copy")}
+      </Button>
+    )
+  }
 
   if (!decodedTraceId) {
     return (
@@ -243,8 +306,11 @@ export const LogDetailPage: React.FC = () => {
             variant="default"
             size="small"
             icon={RefreshCw}
-            onClick={() => refreshLogs()}
-            loading={loading}
+            onClick={() => {
+              setRefreshingLogs(true)
+              Promise.resolve(refreshLogs()).finally(() => setRefreshingLogs(false))
+            }}
+            loading={refreshingLogs}
           >
             {t("logs.refresh")}
           </Button>
@@ -285,32 +351,61 @@ export const LogDetailPage: React.FC = () => {
               <span>{t("logs.duration")}</span>
               <strong>{log.durationMs}ms</strong>
             </div>
+            <div className={styles.metaItem}>
+              <span>{t("logs.entryProtocol")}</span>
+              <strong>
+                {log.entryProtocol ? t(`ruleProtocol.${log.entryProtocol}`) : t("logs.emptyValue")}
+              </strong>
+            </div>
+            <div className={styles.metaItem}>
+              <span>{t("logs.downstreamProtocol")}</span>
+              <strong>
+                {log.downstreamProtocol
+                  ? t(`ruleProtocol.${log.downstreamProtocol}`)
+                  : t("logs.emptyValue")}
+              </strong>
+            </div>
           </div>
 
           <div className={styles.dataArea}>
             <h3 className={styles.areaTitle}>{t("logs.requestDataSection")}</h3>
             <div className={styles.section}>
-              <h3>{t("logs.requestHeaders")}</h3>
+              <div className={styles.sectionHeader}>
+                <h3>{t("logs.requestHeaders")}</h3>
+                {renderCopyButton(t("logs.requestHeaders"), log.requestHeaders)}
+              </div>
               <pre>{toText(log.requestHeaders, t("logs.emptyValue"))}</pre>
             </div>
 
             <div className={styles.section}>
-              <h3>{t("logs.forwardRequestHeaders")}</h3>
+              <div className={styles.sectionHeader}>
+                <h3>{t("logs.forwardRequestHeaders")}</h3>
+                {renderCopyButton(t("logs.forwardRequestHeaders"), log.forwardRequestHeaders)}
+              </div>
               <pre>{toText(log.forwardRequestHeaders, t("logs.emptyValue"))}</pre>
             </div>
 
             <div className={styles.section}>
-              <h3>{t("logs.responseHeaders")}</h3>
+              <div className={styles.sectionHeader}>
+                <h3>{t("logs.responseHeaders")}</h3>
+                {renderCopyButton(t("logs.responseHeaders"), log.responseHeaders)}
+              </div>
               <pre>{toText(log.responseHeaders, t("logs.emptyValue"))}</pre>
             </div>
 
             <div className={styles.section}>
-              <h3>{t("logs.upstreamResponseHeaders")}</h3>
+              <div className={styles.sectionHeader}>
+                <h3>{t("logs.upstreamResponseHeaders")}</h3>
+                {renderCopyButton(t("logs.upstreamResponseHeaders"), log.upstreamResponseHeaders)}
+              </div>
               <pre>{toText(log.upstreamResponseHeaders, t("logs.emptyValue"))}</pre>
             </div>
 
             <div className={styles.section}>
-              <h3>{t("logs.requestBody")}</h3>
+              <div className={styles.sectionHeader}>
+                <h3>{t("logs.requestBody")}</h3>
+                {renderCopyButton(t("logs.requestBody"), log.requestBody)}
+              </div>
               <StructuredValue
                 value={log.requestBody}
                 emptyText={t("logs.emptyValue")}
@@ -319,7 +414,10 @@ export const LogDetailPage: React.FC = () => {
             </div>
 
             <div className={styles.section}>
-              <h3>{t("logs.responseBody")}</h3>
+              <div className={styles.sectionHeader}>
+                <h3>{t("logs.responseBody")}</h3>
+                {renderCopyButton(t("logs.responseBody"), log.responseBody)}
+              </div>
               <StructuredValue
                 value={log.responseBody}
                 emptyText={t("logs.emptyValue")}
@@ -329,7 +427,10 @@ export const LogDetailPage: React.FC = () => {
 
             {log.error && (
               <div className={styles.section}>
-                <h3>{t("logs.errorDetail")}</h3>
+                <div className={styles.sectionHeader}>
+                  <h3>{t("logs.errorDetail")}</h3>
+                  {renderCopyButton(t("logs.errorDetail"), log.error)}
+                </div>
                 <pre>{toText(log.error, t("logs.emptyValue"))}</pre>
               </div>
             )}

@@ -95,7 +95,7 @@ pub(super) fn detect_entry_protocol(suffix: &str) -> Option<PathEntry> {
 ///
 /// Note that OpenAI paths intentionally omit `/v1` so callers can control versioning
 /// via `rule.apiAddress` (for example `https://host` vs `https://host/v1`).
-pub(super) fn resolve_upstream_path(target_protocol: &RuleProtocol) -> &'static str {
+pub(crate) fn resolve_upstream_path(target_protocol: &RuleProtocol) -> &'static str {
     match target_protocol {
         RuleProtocol::Anthropic => "/v1/messages",
         RuleProtocol::Openai => "/responses",
@@ -110,7 +110,7 @@ pub(super) fn resolve_upstream_path(target_protocol: &RuleProtocol) -> &'static 
 /// - If `apiAddress` already includes a prefix path (for example `/v1`),
 ///   append default path under that prefix (`/v1` + `/responses` => `/v1/responses`).
 /// - If `default_path` already starts with the prefix path, do not duplicate it.
-pub(super) fn resolve_upstream_url(
+pub(crate) fn resolve_upstream_url(
     api_address: &str,
     default_path: &str,
 ) -> Result<String, String> {
@@ -141,7 +141,7 @@ pub(super) fn resolve_upstream_url(
 ///
 /// - Anthropic uses `x-api-key` + `Anthropic-version`.
 /// - OpenAI surfaces use standard `Authorization: Bearer ...`.
-pub(super) fn build_rule_headers(protocol: &RuleProtocol, rule: &Rule) -> HashMap<String, String> {
+pub(crate) fn build_rule_headers(protocol: &RuleProtocol, rule: &Rule) -> HashMap<String, String> {
     let mut headers = HashMap::new();
     headers.insert("content-type".to_string(), "application/json".to_string());
     match protocol {
@@ -293,15 +293,20 @@ fn find_group_model_match<'a>(group_models: &'a [String], requested: &str) -> Op
     best
 }
 
-/// Returns whether model match is true.
+/// Returns true when `candidate` fuzzily matches `requested` (case-insensitive).
 fn is_model_match(candidate: &str, requested: &str) -> bool {
+    let candidate = candidate.trim();
+    let requested = requested.trim();
+    if candidate.is_empty() || requested.is_empty() {
+        return false;
+    }
+
     if candidate == requested {
         return true;
     }
 
-    if let Some(prefix) = candidate.strip_suffix('*') {
-        return !prefix.is_empty() && requested.starts_with(prefix);
-    }
+    let candidate_lower = candidate.to_ascii_lowercase();
+    let requested_lower = requested.to_ascii_lowercase();
 
-    requested.starts_with(candidate) && requested.as_bytes().get(candidate.len()) == Some(&b'-')
+    requested_lower.contains(&candidate_lower)
 }

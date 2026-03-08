@@ -18,6 +18,11 @@ pub fn default_quota_auto_refresh_minutes() -> u32 {
     5
 }
 
+/// Performs default auto start server flag.
+pub fn default_auto_start_server() -> bool {
+    true
+}
+
 /// Performs default remote git config.
 pub fn default_remote_git_config() -> RemoteGitConfig {
     RemoteGitConfig {
@@ -38,24 +43,19 @@ pub fn default_config() -> ProxyConfig {
             auth_enabled: false,
             local_bearer_token: String::new(),
         },
-        compat: CompatConfig { strict_mode: false },
+        compat: CompatConfig {
+            strict_mode: false,
+            text_tool_call_fallback_enabled: true,
+        },
         logging: LoggingConfig {
-            level: "info".to_string(),
             capture_body: false,
-            redact_rules: vec![
-                "authorization".to_string(),
-                "x-api-key".to_string(),
-                "api-key".to_string(),
-                "api_key".to_string(),
-                "token".to_string(),
-                "password".to_string(),
-            ],
         },
         ui: UiConfig {
             theme: "light".to_string(),
             locale: "en-US".to_string(),
             locale_mode: "auto".to_string(),
             launch_on_startup: false,
+            auto_start_server: default_auto_start_server(),
             close_to_tray: true,
             quota_auto_refresh_minutes: default_quota_auto_refresh_minutes(),
         },
@@ -92,14 +92,13 @@ struct PartialServerConfig {
 #[serde(rename_all = "camelCase")]
 struct PartialCompatConfig {
     strict_mode: Option<bool>,
+    text_tool_call_fallback_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PartialLoggingConfig {
-    level: Option<String>,
     capture_body: Option<bool>,
-    redact_rules: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -109,6 +108,7 @@ struct PartialUiConfig {
     locale: Option<String>,
     locale_mode: Option<String>,
     launch_on_startup: Option<bool>,
+    auto_start_server: Option<bool>,
     close_to_tray: Option<bool>,
     quota_auto_refresh_minutes: Option<u32>,
 }
@@ -196,7 +196,12 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
     Ok(ProxyConfig {
         config_version: partial.config_version.unwrap_or(default_config_version()),
         server: ServerConfig {
-            host: defaults.server.host,
+            host: partial
+                .server
+                .as_ref()
+                .and_then(|s| s.host.clone())
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or(defaults.server.host),
             port: partial
                 .server
                 .as_ref()
@@ -219,24 +224,18 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
                 .as_ref()
                 .and_then(|c| c.strict_mode)
                 .unwrap_or(defaults.compat.strict_mode),
+            text_tool_call_fallback_enabled: partial
+                .compat
+                .as_ref()
+                .and_then(|c| c.text_tool_call_fallback_enabled)
+                .unwrap_or(defaults.compat.text_tool_call_fallback_enabled),
         },
         logging: LoggingConfig {
-            level: partial
-                .logging
-                .as_ref()
-                .and_then(|l| l.level.clone())
-                .unwrap_or(defaults.logging.level),
             capture_body: partial
                 .logging
                 .as_ref()
                 .and_then(|l| l.capture_body)
                 .unwrap_or(defaults.logging.capture_body),
-            redact_rules: partial
-                .logging
-                .as_ref()
-                .and_then(|l| l.redact_rules.clone())
-                .filter(|arr| arr.iter().all(|v| !v.trim().is_empty()))
-                .unwrap_or(defaults.logging.redact_rules),
         },
         ui: UiConfig {
             theme: partial
@@ -252,6 +251,11 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
                 .as_ref()
                 .and_then(|u| u.launch_on_startup)
                 .unwrap_or(defaults.ui.launch_on_startup),
+            auto_start_server: partial
+                .ui
+                .as_ref()
+                .and_then(|u| u.auto_start_server)
+                .unwrap_or(defaults.ui.auto_start_server),
             close_to_tray: partial
                 .ui
                 .as_ref()

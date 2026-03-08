@@ -3,6 +3,7 @@
 //! Applies config updates and synchronizes proxy runtime lifecycle when settings change.
 
 use crate::config_store::ConfigStore;
+use crate::integration_store::IntegrationStore;
 use crate::models::{AppInfo, ProxyConfig, ProxyStatus};
 use crate::proxy::ProxyRuntime;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,6 +14,7 @@ use tauri_plugin_autostart::ManagerExt as _;
 pub struct AppState {
     pub app_info: AppInfo,
     pub config_store: ConfigStore,
+    pub integration_store: IntegrationStore,
     pub runtime: ProxyRuntime,
     pub renderer_ready: AtomicBool,
 }

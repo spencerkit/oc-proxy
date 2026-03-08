@@ -46,9 +46,17 @@ impl LogStore {
     }
 
     /// Append one log entry and evict oldest entries when capacity is exceeded.
+    #[allow(dead_code)]
     pub fn append(&self, entry: LogEntry) {
+        self.append_with_dev_entry(entry, None);
+    }
+
+    /// Append one log entry while allowing a separate dev-file payload.
+    pub fn append_with_dev_entry(&self, entry: LogEntry, dev_entry: Option<LogEntry>) {
         #[cfg(debug_assertions)]
-        let entry_for_dev_file = entry.clone();
+        let entry_for_dev_file = dev_entry.unwrap_or_else(|| entry.clone());
+        #[cfg(not(debug_assertions))]
+        let _ = dev_entry;
         let mut guard = self.inner.lock().expect("log mutex poisoned");
         guard.push_back(entry);
         while guard.len() > self.limit {
@@ -60,9 +68,17 @@ impl LogStore {
     }
 
     /// Upsert one log entry keyed by trace id and keep queue order stable.
+    #[allow(dead_code)]
     pub fn upsert_by_trace_id(&self, entry: LogEntry) {
+        self.upsert_by_trace_id_with_dev_entry(entry, None);
+    }
+
+    /// Upsert one log entry while allowing a separate dev-file payload.
+    pub fn upsert_by_trace_id_with_dev_entry(&self, entry: LogEntry, dev_entry: Option<LogEntry>) {
         #[cfg(debug_assertions)]
-        let entry_for_dev_file = entry.clone();
+        let entry_for_dev_file = dev_entry.unwrap_or_else(|| entry.clone());
+        #[cfg(not(debug_assertions))]
+        let _ = dev_entry;
 
         let mut guard = self.inner.lock().expect("log mutex poisoned");
         let mut replaced = false;

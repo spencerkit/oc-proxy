@@ -4,6 +4,7 @@ import { Check, ChevronLeft, ChevronRight, RotateCcw, Trash2, X } from "lucide-r
 import type React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { shallow } from "zustand/shallow"
 import { Button, Modal } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { useProxyStore } from "@/store"
@@ -134,8 +135,19 @@ function formatDelta(delta: number): string {
 export const LogsPage: React.FC = () => {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { logs, logsStats, refreshLogsStats, clearLogs, clearLogsStats, loading, config } =
-    useProxyStore()
+  const { logs, logsStats, refreshLogs, refreshLogsStats, clearLogs, clearLogsStats, config } =
+    useProxyStore(
+      state => ({
+        logs: state.logs,
+        logsStats: state.logsStats,
+        refreshLogs: state.refreshLogs,
+        refreshLogsStats: state.refreshLogsStats,
+        clearLogs: state.clearLogs,
+        clearLogsStats: state.clearLogsStats,
+        config: state.config,
+      }),
+      shallow
+    )
   const { showToast } = useLogs()
   const [activeTab, setActiveTab] = useState<LogsTab>("stats")
   const [statusFilter, setStatusFilter] = useState<"all" | LogEntry["status"]>("all")
@@ -146,6 +158,7 @@ export const LogsPage: React.FC = () => {
   const [enableComparison, setEnableComparison] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [showResetStatsConfirm, setShowResetStatsConfirm] = useState(false)
+  const [resettingStats, setResettingStats] = useState(false)
   const [resetBeforeDate, setResetBeforeDate] = useState(() => toDateInputValue(new Date()))
   const [resetCalendarMonth, setResetCalendarMonth] = useState(() => getMonthStart(new Date()))
   const hasInitializedProviderSelectionRef = useRef(false)
@@ -241,8 +254,35 @@ export const LogsPage: React.FC = () => {
   }, [hoursFilter, refreshLogsStats, selectedProviderKeys, enableComparison])
 
   useEffect(() => {
+    void refreshLogs()
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return
+      void refreshLogs()
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
+  }, [refreshLogs])
+
+  useEffect(() => {
+    if (activeTab !== "logs") return
+    void refreshLogs()
+  }, [activeTab, refreshLogs])
+
+  useEffect(() => {
+    if (activeTab !== "logs") return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return
+      void refreshLogs()
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [activeTab, refreshLogs])
+
+  useEffect(() => {
     if (!hasInitializedProviderSelectionRef.current) return
     const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return
       void refreshLogsStats(hoursFilter, selectedProviderKeys, undefined, "rule", enableComparison)
     }, 3000)
     return () => window.clearInterval(timer)
@@ -326,6 +366,7 @@ export const LogsPage: React.FC = () => {
       return
     }
     try {
+      setResettingStats(true)
       await clearLogsStats(beforeEpochMs)
       await refreshLogsStats(hoursFilter, selectedProviderKeys, undefined, "rule", enableComparison)
       showToast(t("logs.resetStatsSuccess"), "success")
@@ -333,6 +374,8 @@ export const LogsPage: React.FC = () => {
     } catch (error) {
       showToast(t("logs.resetStatsError"), "error")
       console.error(error)
+    } finally {
+      setResettingStats(false)
     }
   }
 
@@ -1120,7 +1163,7 @@ export const LogsPage: React.FC = () => {
                 variant="default"
                 icon={RotateCcw}
                 onClick={handleResetStats}
-                loading={loading}
+                loading={resettingStats}
               >
                 {t("logs.resetStats")}
               </Button>

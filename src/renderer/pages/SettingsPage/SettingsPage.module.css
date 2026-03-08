@@ -150,6 +150,11 @@
   background: var(--surface-hover);
 }
 
+.choiceButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .choiceButton:focus-visible {
   outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
   outline-offset: 1px;
@@ -170,6 +175,22 @@
   font-size: 11px;
   letter-spacing: 0.08em;
   color: var(--text-tertiary);
+}
+
+.nativeSelect {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0 var(--sp-3);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.nativeSelect:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  outline-offset: 1px;
 }
 
 .formGroupSwitch {
@@ -201,14 +222,9 @@
 .actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--sp-3);
   padding-top: var(--sp-1);
-}
-
-.changeHint {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
 }
 
 @media (max-width: 640px) {
