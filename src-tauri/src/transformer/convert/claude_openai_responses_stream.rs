@@ -775,10 +775,7 @@ pub fn openai_responses_stream_to_claude(
                     "usage": {"output_tokens": 0}
                 }),
             ));
-            result.extend(build_claude_event(
-                "message_stop",
-                &json!({}),
-            ));
+            result.extend(build_claude_event("message_stop", &json!({})));
             ctx.finish_reason_sent = true;
         }
         _ => {}
