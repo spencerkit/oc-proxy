@@ -59,7 +59,6 @@ struct ServiceState {
     stats_store: StatsStore,
     metrics: Arc<observability::MetricsState>,
     client: Client,
-    transformer_registry: Arc<crate::transformer::registry::TransformerRegistry>,
 }
 
 impl ProxyRuntime {
@@ -114,10 +113,6 @@ impl ProxyRuntime {
         let (listener, bound_host) =
             net::bind_proxy_listener(&config.server.host, config.server.port).await?;
 
-        // Initialize transformer registry (simplified for ccNexus architecture)
-        let transformer_registry =
-            Arc::new(crate::transformer::registry::TransformerRegistry::new());
-
         let (tx, rx) = oneshot::channel();
         let service_state = ServiceState {
             config: self.inner.config.clone(),
@@ -128,7 +123,6 @@ impl ProxyRuntime {
             stats_store: self.inner.stats_store.clone(),
             metrics: self.inner.metrics.clone(),
             client: self.inner.client.clone(),
-            transformer_registry,
         };
 
         let app = Router::new()
@@ -278,11 +272,8 @@ impl ProxyRuntime {
 #[cfg(test)]
 mod tests {
     use super::observability::{extract_token_usage, StreamTokenAccumulator};
-    use super::pipeline::{build_upstream_body, resolve_request_timeout_ms};
-    use super::routing::{
-        detect_entry_protocol, resolve_target_model, resolve_upstream_path, EntryEndpoint,
-        EntryProtocol, PathEntry,
-    };
+    use super::pipeline::resolve_request_timeout_ms;
+    use super::routing::{detect_entry_protocol, resolve_target_model, resolve_upstream_path};
     use super::{
         MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS, NON_STREAM_REQUEST_TIMEOUT_MS,
     };
@@ -528,24 +519,14 @@ mod tests {
     #[test]
     /// Resolves request timeout ms extends messages to responses non stream requests for this module's workflow.
     fn resolve_request_timeout_ms_extends_messages_to_responses_non_stream_requests() {
-        let entry = PathEntry {
-            protocol: EntryProtocol::Anthropic,
-            endpoint: EntryEndpoint::Messages,
-        };
-
-        let timeout = resolve_request_timeout_ms(false, &entry, &RuleProtocol::Openai);
+        let timeout = resolve_request_timeout_ms(false, "cc_openai2");
         assert_eq!(timeout, MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS);
     }
 
     #[test]
     /// Resolves request timeout ms keeps default for other non stream requests for this module's workflow.
     fn resolve_request_timeout_ms_keeps_default_for_other_non_stream_requests() {
-        let entry = PathEntry {
-            protocol: EntryProtocol::Anthropic,
-            endpoint: EntryEndpoint::Messages,
-        };
-
-        let timeout = resolve_request_timeout_ms(false, &entry, &RuleProtocol::OpenaiCompletion);
+        let timeout = resolve_request_timeout_ms(false, "cc_openai");
         assert_eq!(timeout, NON_STREAM_REQUEST_TIMEOUT_MS);
     }
 

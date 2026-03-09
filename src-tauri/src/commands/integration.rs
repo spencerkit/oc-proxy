@@ -1,9 +1,11 @@
 //! Module Overview
 //! Tauri command handlers for external client integration workflows.
 
+use crate::api::dto::{AgentConfig, AgentConfigFile, WriteAgentConfigResult};
 use crate::app_state::SharedState;
 use crate::models::{IntegrationClientKind, IntegrationTarget, IntegrationWriteResult};
 use crate::services::integration_service;
+use crate::wsl;
 use serde_json::json;
 use std::path::PathBuf;
 use tauri::{AppHandle, State};
@@ -52,7 +54,11 @@ fn resolve_starting_directory(
 ) -> Option<PathBuf> {
     if let Some(dir) = initial_dir {
         let path = PathBuf::from(dir.trim());
-        if path.exists() {
+        if wsl::is_wsl_path(&path) {
+            if wsl::is_dir(&path).ok()? {
+                return wsl::normalize_windows_path(&path);
+            }
+        } else if path.exists() {
             return Some(path);
         }
     }
@@ -131,4 +137,40 @@ pub async fn integration_write_group_entry(
     target_ids: Vec<String>,
 ) -> Result<IntegrationWriteResult, String> {
     integration_service::write_group_entry(&state, &group_id, target_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+/// Reads agent configuration file content.
+pub async fn integration_read_agent_config(
+    state: State<'_, SharedState>,
+    target_id: String,
+) -> Result<AgentConfigFile, String> {
+    integration_service::read_agent_config(&state, &target_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+/// Writes agent configuration to file.
+pub async fn integration_write_agent_config(
+    state: State<'_, SharedState>,
+    target_id: String,
+    config: AgentConfig,
+) -> Result<WriteAgentConfigResult, String> {
+    integration_service::write_agent_config(&state, &target_id, config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+/// Writes raw agent configuration source to file.
+pub async fn integration_write_agent_config_source(
+    state: State<'_, SharedState>,
+    target_id: String,
+    content: String,
+    source_id: Option<String>,
+) -> Result<WriteAgentConfigResult, String> {
+    integration_service::write_agent_config_source(
+        &state,
+        &target_id,
+        &content,
+        source_id.as_deref(),
+    )
+    .map_err(|e| e.to_string())
 }

@@ -22,6 +22,7 @@ mod remote_sync;
 mod services;
 mod stats_store;
 mod transformer;
+mod wsl;
 
 use commands::{
     app_get_info, app_get_status, app_read_clipboard_text, app_renderer_ready,
@@ -29,9 +30,10 @@ use commands::{
     config_export_groups_clipboard, config_export_groups_folder, config_get, config_import_groups,
     config_import_groups_json, config_remote_rules_pull, config_remote_rules_upload, config_save,
     integration_add_target, integration_list_targets, integration_pick_directory,
-    integration_remove_target, integration_update_target, integration_write_group_entry,
-    logs_clear, logs_list, logs_stats_clear, logs_stats_rule_cards, logs_stats_summary,
-    provider_test_model, quota_get_group, quota_get_rule, quota_test_draft,
+    integration_read_agent_config, integration_remove_target, integration_update_target,
+    integration_write_agent_config, integration_write_agent_config_source,
+    integration_write_group_entry, logs_clear, logs_list, logs_stats_clear, logs_stats_rule_cards,
+    logs_stats_summary, provider_test_model, quota_get_group, quota_get_rule, quota_test_draft,
 };
 use tauri::Manager;
 
@@ -78,6 +80,9 @@ async fn main() {
             integration_update_target,
             integration_remove_target,
             integration_write_group_entry,
+            integration_read_agent_config,
+            integration_write_agent_config,
+            integration_write_agent_config_source,
             app_read_clipboard_text,
             logs_list,
             logs_clear,

@@ -321,6 +321,8 @@ pub struct LogEntry {
     pub request_body: Option<serde_json::Value>,
     pub forward_request_body: Option<serde_json::Value>,
     pub response_body: Option<serde_json::Value>,
+    pub transformed_response_body: Option<serde_json::Value>,
+    pub transform_debug: Option<serde_json::Value>,
     pub token_usage: Option<TokenUsage>,
     pub cost_snapshot: Option<CostSnapshot>,
     pub http_status: Option<u16>,

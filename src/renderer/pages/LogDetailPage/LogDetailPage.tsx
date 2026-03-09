@@ -172,15 +172,7 @@ function JsonNode({ value, label, path, depth, inArray, expandedPaths, onToggle 
 }
 
 /** Implements value behavior. */
-function StructuredValue({
-  value,
-  emptyText,
-  resetKey,
-}: {
-  value: unknown
-  emptyText: string
-  resetKey: string
-}) {
+function StructuredValue({ value, emptyText }: { value: unknown; emptyText: string }) {
   const parsed = useMemo(() => parseStructuredValue(value), [value])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set(["$"]))
 
@@ -407,9 +399,21 @@ export const LogDetailPage: React.FC = () => {
                 {renderCopyButton(t("logs.requestBody"), log.requestBody)}
               </div>
               <StructuredValue
+                key={`${decodedTraceId}:request`}
                 value={log.requestBody}
                 emptyText={t("logs.emptyValue")}
-                resetKey={`${decodedTraceId}:request`}
+              />
+            </div>
+
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <h3>{t("logs.forwardRequestBody")}</h3>
+                {renderCopyButton(t("logs.forwardRequestBody"), log.forwardRequestBody)}
+              </div>
+              <StructuredValue
+                key={`${decodedTraceId}:forward-request`}
+                value={log.forwardRequestBody}
+                emptyText={t("logs.emptyValue")}
               />
             </div>
 
@@ -419,9 +423,21 @@ export const LogDetailPage: React.FC = () => {
                 {renderCopyButton(t("logs.responseBody"), log.responseBody)}
               </div>
               <StructuredValue
+                key={`${decodedTraceId}:response`}
                 value={log.responseBody}
                 emptyText={t("logs.emptyValue")}
-                resetKey={`${decodedTraceId}:response`}
+              />
+            </div>
+
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <h3>{t("logs.transformedResponseBody")}</h3>
+                {renderCopyButton(t("logs.transformedResponseBody"), log.transformedResponseBody)}
+              </div>
+              <StructuredValue
+                key={`${decodedTraceId}:transformed-response`}
+                value={log.transformedResponseBody}
+                emptyText={t("logs.emptyValue")}
               />
             </div>
 

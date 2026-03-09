@@ -5,14 +5,11 @@
 pub mod cc;
 pub mod convert;
 pub mod cx;
-pub mod messages_to_responses;
-pub mod registry;
 pub mod types;
 
 #[cfg(test)]
 mod tests;
 
-pub use messages_to_responses::MessagesToResponsesTransformer;
 pub use types::StreamContext;
 
 /// Transformer defines the interface for API format transformation

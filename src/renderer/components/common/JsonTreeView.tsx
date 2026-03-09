@@ -144,8 +144,9 @@ export const JsonTreeView: React.FC<JsonTreeViewProps> = ({
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set(["$"]))
 
   useEffect(() => {
+    void resetKey
     setExpandedPaths(new Set(["$"]))
-  }, [])
+  }, [resetKey])
 
   if (!parsed) {
     return <pre className={className}>{toText(value, emptyText)}</pre>

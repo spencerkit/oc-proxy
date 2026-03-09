@@ -2,7 +2,9 @@
 //! Persistent store for external client integration targets.
 //! Keeps selected config directories for Claude/Codex/OpenCode in local app data.
 
+use crate::api::dto::AgentConfig;
 use crate::models::{IntegrationClientKind, IntegrationTarget};
+use crate::wsl;
 use chrono::Utc;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -91,6 +93,7 @@ impl IntegrationStore {
             id: Uuid::new_v4().to_string(),
             kind,
             config_dir: normalized_dir,
+            config: None,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -134,6 +137,44 @@ impl IntegrationStore {
         Ok(updated)
     }
 
+    /// Updates target config for this module's workflow.
+    pub fn update_target_config(
+        &self,
+        target_id: &str,
+        config_dir: String,
+        config: Option<AgentConfig>,
+    ) -> Result<IntegrationTarget, String> {
+        let normalized_id = target_id.trim();
+        if normalized_id.is_empty() {
+            return Err("target id is required".to_string());
+        }
+        let mut guard = self
+            .targets
+            .lock()
+            .map_err(|_| "integration store lock poisoned".to_string())?;
+
+        let index = guard
+            .iter()
+            .position(|item| item.id == normalized_id)
+            .ok_or_else(|| "integration target not found".to_string())?;
+
+        // Update config_dir if provided
+        if !config_dir.is_empty() {
+            let normalized_dir = normalize_config_dir(&config_dir)?;
+            guard[index].config_dir = normalized_dir;
+        }
+
+        // Update config if provided
+        if config.is_some() {
+            guard[index].config = config;
+        }
+
+        guard[index].updated_at = Utc::now().to_rfc3339();
+        let updated = guard[index].clone();
+        self.persist(&guard)?;
+        Ok(updated)
+    }
+
     /// Removes target for this module's workflow.
     pub fn remove_target(&self, target_id: &str) -> Result<bool, String> {
         let normalized_id = target_id.trim();
@@ -169,12 +210,29 @@ fn normalize_config_dir(raw: &str) -> Result<String, String> {
         return Err("config directory is required".to_string());
     }
     let path = PathBuf::from(trimmed);
+
+    if let Some(normalized) = wsl::normalize_windows_path(&path) {
+        if !wsl::exists(&normalized)
+            .map_err(|e| format!("check WSL config directory failed: {e}"))?
+        {
+            return Err(format!("config directory does not exist: {trimmed}"));
+        }
+        if !wsl::is_dir(&normalized)
+            .map_err(|e| format!("check WSL config directory failed: {e}"))?
+        {
+            return Err(format!("config directory is not a folder: {trimmed}"));
+        }
+        return Ok(normalized.to_string_lossy().to_string());
+    }
+
     if !path.exists() {
         return Err(format!("config directory does not exist: {trimmed}"));
     }
     if !path.is_dir() {
         return Err(format!("config directory is not a folder: {trimmed}"));
     }
+
     let normalized = std::fs::canonicalize(&path).unwrap_or(path);
+
     Ok(normalized.to_string_lossy().to_string())
 }

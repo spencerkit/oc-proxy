@@ -20,7 +20,9 @@ pub use config::{
 };
 pub use integration::{
     integration_add_target, integration_list_targets, integration_pick_directory,
-    integration_remove_target, integration_update_target, integration_write_group_entry,
+    integration_read_agent_config, integration_remove_target, integration_update_target,
+    integration_write_agent_config, integration_write_agent_config_source,
+    integration_write_group_entry,
 };
 pub use logs::{
     logs_clear, logs_list, logs_stats_clear, logs_stats_rule_cards, logs_stats_summary,

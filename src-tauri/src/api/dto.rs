@@ -89,10 +89,55 @@ pub enum IntegrationClientKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentConfig {
+    pub url: Option<String>,
+    pub api_token: Option<String>,
+    pub model: Option<String>,
+    pub timeout: Option<u64>,
+    // Claude行为选项
+    pub always_thinking_enabled: Option<bool>,
+    pub include_coauthored_by: Option<bool>,
+    pub skip_dangerous_mode_permission_prompt: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSourceFile {
+    pub source_id: String,
+    pub label: String,
+    pub file_path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentConfigFile {
+    pub target_id: String,
+    pub kind: IntegrationClientKind,
+    pub config_dir: String,
+    pub file_path: String,
+    pub content: String,
+    pub source_files: Vec<AgentSourceFile>,
+    pub updated_at: Option<String>,
+    pub parsed_config: Option<AgentConfig>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteAgentConfigResult {
+    pub ok: bool,
+    pub target_id: String,
+    pub file_path: String,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IntegrationTarget {
     pub id: String,
     pub kind: IntegrationClientKind,
     pub config_dir: String,
+    pub config: Option<AgentConfig>,
     pub created_at: String,
     pub updated_at: String,
 }

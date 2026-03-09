@@ -34,7 +34,6 @@ export const RuleList: React.FC<{
   onTestModel?: (providerId: string) => void | Promise<void>
   testingProviderIds?: Record<string, boolean | undefined>
   onDelete: (providerId: string) => void
-  groupName: string
   groupId: string
   emptyMessage?: string
 }> = ({
@@ -49,7 +48,6 @@ export const RuleList: React.FC<{
   onTestModel,
   testingProviderIds,
   onDelete,
-  groupName,
   groupId,
   emptyMessage,
 }) => {
@@ -422,6 +420,12 @@ export const RuleList: React.FC<{
                       <span className={styles.ruleModel}>{provider.name}</span>
                       <span className={styles.ruleDirection}>
                         {t(`ruleProtocol.${provider.protocol}`)}
+                      </span>
+                      <span
+                        className={styles.ruleApiAddress}
+                        title={provider.apiAddress?.trim() || "-"}
+                      >
+                        {provider.apiAddress?.trim() || "-"}
                       </span>
                     </div>
                   </div>

@@ -5,6 +5,9 @@ use crate::transformer::types::*;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
+const THINK_TAG_OPEN: &str = "<think>";
+const THINK_TAG_CLOSE: &str = "</think>";
+
 #[derive(Debug, Clone, Default)]
 pub struct ResponsesToClaudeOptions {
     pub text_tool_call_fallback_enabled: bool,
@@ -26,59 +29,29 @@ pub fn claude_req_to_openai_responses(claude_req: &[u8], model: &str) -> Result<
 
     let mut input = Vec::new();
     for msg in &req.messages {
-        let mut item = json!({"type": "message", "role": msg.role});
-        let message_text_type = if msg.role == "assistant" {
-            "output_text"
-        } else {
-            "input_text"
-        };
-
-        let mut content_parts = Vec::new();
         match &msg.content {
             Value::String(s) => {
-                content_parts.push(json!({"type": message_text_type, "text": s}));
+                let text_type = if msg.role == "assistant" {
+                    "output_text"
+                } else {
+                    "input_text"
+                };
+                input.push(json!({
+                    "type": "message",
+                    "role": msg.role,
+                    "content": [{
+                        "type": text_type,
+                        "text": s
+                    }]
+                }));
             }
             Value::Array(blocks) => {
-                for block in blocks {
-                    if let Some(block_type) = block.get("type").and_then(|t| t.as_str()) {
-                        match block_type {
-                            "text" => {
-                                if let Some(text) = block.get("text") {
-                                    content_parts
-                                        .push(json!({"type": message_text_type, "text": text}));
-                                }
-                            }
-                            "tool_use" => {
-                                let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                                let input = block.get("input").cloned().unwrap_or(json!({}));
-                                let args = serde_json::to_string(&input)
-                                    .unwrap_or_else(|_| "{}".to_string());
-                                content_parts.push(json!({
-                                    "type": "output_text",
-                                    "text": format!("[Tool Call: {}({})]", name, args)
-                                }));
-                            }
-                            "tool_result" => {
-                                // Some responses-compatible upstreams reject
-                                // `function_call_output` in `message.content`.
-                                // Keep tool-result signal as text for broad compatibility.
-                                let content = extract_tool_result_content(
-                                    block.get("content").unwrap_or(&Value::Null),
-                                );
-                                content_parts.push(json!({
-                                    "type": "input_text",
-                                    "text": format!("[Tool Result: {}]", content)
-                                }));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
+                input.extend(convert_claude_message_to_openai_responses_items(
+                    blocks, &msg.role,
+                ));
             }
             _ => {}
         }
-        item["content"] = json!(content_parts);
-        input.push(item);
     }
     openai_req["input"] = json!(input);
 
@@ -94,7 +67,19 @@ pub fn claude_req_to_openai_responses(claude_req: &[u8], model: &str) -> Result<
                 })
             })
             .collect();
-        openai_req["tools"] = json!(openai_tools);
+        if !openai_tools.is_empty() {
+            openai_req["tools"] = json!(openai_tools);
+
+            if let Some(mapped) =
+                map_claude_tool_choice_to_openai_responses(req.tool_choice.as_ref())
+            {
+                openai_req["tool_choice"] = mapped;
+            } else if has_claude_tool_result(&req.messages) {
+                openai_req["tool_choice"] = json!("auto");
+            } else {
+                openai_req["tool_choice"] = json!("required");
+            }
+        }
     }
 
     serde_json::to_vec(&openai_req).map_err(|e| format!("serialize: {}", e))
@@ -112,89 +97,83 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
     if let Some(instructions) = req.get("instructions").and_then(|i| i.as_str()) {
         claude_req["system"] = json!(instructions);
     }
+    if let Some(max_output_tokens) = req.get("max_output_tokens").and_then(|v| v.as_i64()) {
+        if max_output_tokens > 0 {
+            claude_req["max_tokens"] = json!(max_output_tokens);
+        }
+    }
+    if let Some(temperature) = req.get("temperature") {
+        claude_req["temperature"] = temperature.clone();
+    }
 
     let mut messages = Vec::new();
     let mut pending_tool_uses = Vec::new();
     let mut pending_tool_results = Vec::new();
 
-    if let Some(input) = req.get("input").and_then(|i| i.as_array()) {
-        for item in input {
-            match item.get("type").and_then(|t| t.as_str()) {
-                Some("message") => {
-                    if !pending_tool_uses.is_empty() {
-                        messages.push(json!({"role": "assistant", "content": pending_tool_uses}));
-                        pending_tool_uses = Vec::new();
-                    }
-                    if !pending_tool_results.is_empty() {
-                        messages.push(json!({"role": "user", "content": pending_tool_results}));
-                        pending_tool_results = Vec::new();
-                    }
-
-                    let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
-                    // Claude only supports "user" and "assistant" roles
-                    let claude_role = match role {
-                        "assistant" => "assistant",
-                        _ => "user", // Map developer, system, user all to user
-                    };
-                    let mut content = Vec::new();
-
-                    if let Some(parts) = item.get("content").and_then(|c| c.as_array()) {
-                        for part in parts {
-                            if matches!(
-                                part.get("type").and_then(|t| t.as_str()),
-                                Some("input_text" | "output_text")
-                            ) {
-                                if let Some(text) = part.get("text") {
-                                    content.push(json!({"type": "text", "text": text}));
-                                }
-                            }
+    match req.get("input") {
+        Some(Value::String(text)) => {
+            messages.push(json!({"role": "user", "content": text}));
+        }
+        Some(Value::Array(input)) => {
+            for item in input {
+                match item.get("type").and_then(|t| t.as_str()) {
+                    Some("message") => {
+                        if !pending_tool_uses.is_empty() {
+                            messages
+                                .push(json!({"role": "assistant", "content": pending_tool_uses}));
+                            pending_tool_uses = Vec::new();
                         }
+                        if !pending_tool_results.is_empty() {
+                            messages.push(json!({"role": "user", "content": pending_tool_results}));
+                            pending_tool_results = Vec::new();
+                        }
+
+                        let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+                        let content =
+                            convert_openai_responses_content_to_claude(item.get("content"));
+                        messages.push(json!({"role": role, "content": content}));
                     }
+                    Some("function_call") => {
+                        let call_id = item
+                            .get("call_id")
+                            .or_else(|| item.get("id"))
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("");
+                        let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                        let args_str = item
+                            .get("arguments")
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("{}");
+                        let input: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
 
-                    // Only add message if content is not empty
-                    if !content.is_empty() {
-                        messages.push(json!({"role": claude_role, "content": content}));
+                        pending_tool_uses.push(json!({
+                            "type": "tool_use",
+                            "id": call_id,
+                            "name": name,
+                            "input": input
+                        }));
                     }
-                }
-                Some("function_call") => {
-                    let call_id = item.get("call_id").and_then(|c| c.as_str()).unwrap_or("");
-                    let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    let args_str = item
-                        .get("arguments")
-                        .and_then(|a| a.as_str())
-                        .unwrap_or("{}");
-                    let input: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
+                    Some("function_call_output") => {
+                        if !pending_tool_uses.is_empty() {
+                            messages
+                                .push(json!({"role": "assistant", "content": pending_tool_uses}));
+                            pending_tool_uses = Vec::new();
+                        }
 
-                    pending_tool_uses.push(json!({
-                        "type": "tool_use",
-                        "id": call_id,
-                        "name": name,
-                        "input": input
-                    }));
-                }
-                Some("function_call_output") => {
-                    // Flush pending tool uses first
-                    if !pending_tool_uses.is_empty() {
-                        messages.push(json!({"role": "assistant", "content": pending_tool_uses}));
-                        pending_tool_uses = Vec::new();
+                        let call_id = item.get("call_id").and_then(|c| c.as_str()).unwrap_or("");
+                        let output = item.get("output").and_then(|o| o.as_str()).unwrap_or("");
+
+                        pending_tool_results.push(json!({
+                            "type": "tool_result",
+                            "tool_use_id": call_id,
+                            "content": output
+                        }));
                     }
-
-                    let call_id = item.get("call_id").and_then(|c| c.as_str()).unwrap_or("");
-                    let output = item.get("output").and_then(|o| o.as_str()).unwrap_or("");
-
-                    pending_tool_results.push(json!({
-                        "type": "tool_result",
-                        "tool_use_id": call_id,
-                        "content": output
-                    }));
-
-                    // Immediately flush tool results after adding
-                    messages.push(json!({"role": "user", "content": pending_tool_results}));
-                    pending_tool_results = Vec::new();
+                    _ => {}
                 }
-                _ => {}
             }
         }
+        _ => {}
     }
 
     if !pending_tool_uses.is_empty() {
@@ -210,14 +189,32 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
         let claude_tools: Vec<Value> = tools
             .iter()
             .filter_map(|t| {
-                if t.get("type").and_then(|ty| ty.as_str()) == Some("function") {
-                    Some(json!({
-                        "name": t.get("name")?,
-                        "description": t.get("description")?,
-                        "input_schema": t.get("parameters")?
-                    }))
-                } else {
-                    None
+                let name = t.get("name")?.clone();
+                let description = t.get("description").cloned().unwrap_or_else(|| json!(""));
+                match t.get("type").and_then(|ty| ty.as_str()) {
+                    Some("function") => Some(json!({
+                        "name": name,
+                        "description": description,
+                        "input_schema": t
+                            .get("parameters")
+                            .cloned()
+                            .unwrap_or_else(|| json!({"type": "object", "properties": {}}))
+                    })),
+                    Some("custom") => Some(json!({
+                        "name": name,
+                        "description": description,
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "input": {
+                                    "type": "string",
+                                    "description": "The input for this tool"
+                                }
+                            },
+                            "required": ["input"]
+                        }
+                    })),
+                    _ => None,
                 }
             })
             .collect();
@@ -322,28 +319,27 @@ pub fn openai_responses_resp_to_claude_with_options(
                                         }
                                     }
 
-                                    content.push(json!({"type": "text", "text": text}));
+                                    content.extend(split_think_tagged_text(text));
                                 }
                             }
                         }
                     }
                 }
                 Some("function_call") => {
-                    if let Some(call_id) = item.get("call_id") {
-                        if let Some(name) = item.get("name") {
-                            let args_str = item
-                                .get("arguments")
-                                .and_then(|a| a.as_str())
-                                .unwrap_or("{}");
-                            let input: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
-                            content.push(json!({
-                                "type": "tool_use",
-                                "id": call_id,
-                                "name": name,
-                                "input": input
-                            }));
-                            stop_reason = "tool_use";
-                        }
+                    if let Some(name) = item.get("name") {
+                        let args_str = item
+                            .get("arguments")
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("{}");
+                        let input: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
+                        let call_id = item.get("call_id").or_else(|| item.get("id"));
+                        content.push(json!({
+                            "type": "tool_use",
+                            "id": call_id.cloned().unwrap_or(json!("")),
+                            "name": name,
+                            "input": input
+                        }));
+                        stop_reason = "tool_use";
                     }
                 }
                 _ => {}
@@ -368,4 +364,183 @@ pub fn openai_responses_resp_to_claude_with_options(
 
 pub fn openai_responses_resp_to_claude(openai_resp: &[u8]) -> Result<Vec<u8>, String> {
     openai_responses_resp_to_claude_with_options(openai_resp, &ResponsesToClaudeOptions::default())
+}
+
+fn map_claude_tool_choice_to_openai_responses(tool_choice: Option<&Value>) -> Option<Value> {
+    let tool_choice = tool_choice?;
+
+    match tool_choice {
+        Value::Object(tc) => match tc.get("type").and_then(|v| v.as_str()) {
+            Some("tool") => tc
+                .get("name")
+                .and_then(|v| v.as_str())
+                .filter(|name| !name.is_empty())
+                .map(|name| json!({"type": "function", "name": name})),
+            Some("any") => Some(json!("required")),
+            Some("auto") => Some(json!("auto")),
+            Some("none") => Some(json!("none")),
+            _ => None,
+        },
+        Value::String(tc) => match tc.as_str() {
+            "any" => Some(json!("required")),
+            "auto" => Some(json!("auto")),
+            "none" => Some(json!("none")),
+            other if !other.is_empty() => Some(json!(other)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn has_claude_tool_result(messages: &[ClaudeMessage]) -> bool {
+    messages.iter().any(|msg| match &msg.content {
+        Value::Array(blocks) => blocks
+            .iter()
+            .any(|block| block.get("type").and_then(|v| v.as_str()) == Some("tool_result")),
+        _ => false,
+    })
+}
+
+fn convert_claude_message_to_openai_responses_items(blocks: &[Value], role: &str) -> Vec<Value> {
+    let mut items = Vec::new();
+    let mut message_parts = Vec::new();
+    let text_type = if role == "assistant" {
+        "output_text"
+    } else {
+        "input_text"
+    };
+
+    let flush_message = |items: &mut Vec<Value>, message_parts: &mut Vec<Value>| {
+        if message_parts.is_empty() {
+            return;
+        }
+        items.push(json!({
+            "type": "message",
+            "role": role,
+            "content": message_parts.clone()
+        }));
+        message_parts.clear();
+    };
+
+    for block in blocks {
+        match block.get("type").and_then(|v| v.as_str()) {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                    message_parts.push(json!({
+                        "type": text_type,
+                        "text": text
+                    }));
+                }
+            }
+            Some("thinking") => {}
+            Some("tool_use") => {
+                flush_message(&mut items, &mut message_parts);
+                let call_id = block.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let name = block.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let args = serde_json::to_string(block.get("input").unwrap_or(&json!({})))
+                    .unwrap_or_else(|_| "{}".to_string());
+                items.push(json!({
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": args
+                }));
+            }
+            Some("tool_result") => {
+                flush_message(&mut items, &mut message_parts);
+                let call_id = block
+                    .get("tool_use_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                items.push(json!({
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": tool_result_to_string(block.get("content"))
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    flush_message(&mut items, &mut message_parts);
+    items
+}
+
+fn tool_result_to_string(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(text)) => text.clone(),
+        Some(other) => serde_json::to_string(other).unwrap_or_else(|_| format!("{other}")),
+        None => String::new(),
+    }
+}
+
+fn convert_openai_responses_content_to_claude(content: Option<&Value>) -> Value {
+    let Some(items) = content.and_then(|v| v.as_array()) else {
+        return content.cloned().unwrap_or_else(|| json!(""));
+    };
+
+    let mut result = Vec::new();
+    for part in items {
+        match part.get("type").and_then(|v| v.as_str()) {
+            Some("input_text" | "output_text") => {
+                result.push(json!({
+                    "type": "text",
+                    "text": part.get("text").cloned().unwrap_or(json!(""))
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    if result.len() == 1 {
+        if let Some(text) = result[0].get("text").and_then(|v| v.as_str()) {
+            return json!(text);
+        }
+    }
+
+    Value::Array(result)
+}
+
+fn split_think_tagged_text(text: &str) -> Vec<Value> {
+    let mut remaining = text;
+    let mut blocks = Vec::new();
+
+    loop {
+        let Some(open_idx) = remaining.find(THINK_TAG_OPEN) else {
+            if !remaining.is_empty() {
+                blocks.push(json!({
+                    "type": "text",
+                    "text": remaining
+                }));
+            }
+            return blocks;
+        };
+
+        if open_idx > 0 {
+            blocks.push(json!({
+                "type": "text",
+                "text": &remaining[..open_idx]
+            }));
+        }
+
+        remaining = &remaining[open_idx + THINK_TAG_OPEN.len()..];
+        let Some(close_idx) = remaining.find(THINK_TAG_CLOSE) else {
+            if !remaining.is_empty() {
+                blocks.push(json!({
+                    "type": "text",
+                    "text": remaining
+                }));
+            }
+            return blocks;
+        };
+
+        if close_idx > 0 {
+            blocks.push(json!({
+                "type": "thinking",
+                "thinking": &remaining[..close_idx]
+            }));
+        }
+
+        remaining = &remaining[close_idx + THINK_TAG_CLOSE.len()..];
+    }
 }

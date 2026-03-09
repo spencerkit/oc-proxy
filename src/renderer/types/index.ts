@@ -230,12 +230,48 @@ export interface AppInfo {
 
 export type IntegrationClientKind = "claude" | "codex" | "opencode"
 
+export interface AgentConfig {
+  url?: string
+  apiToken?: string
+  model?: string
+  timeout?: number
+  alwaysThinkingEnabled?: boolean
+  includeCoAuthoredBy?: boolean
+  skipDangerousModePermissionPrompt?: boolean
+}
+
 export interface IntegrationTarget {
   id: string
   kind: IntegrationClientKind
   configDir: string
+  config?: AgentConfig
   createdAt: string
   updatedAt: string
+}
+
+export interface AgentConfigFile {
+  targetId: string
+  kind: IntegrationClientKind
+  configDir: string
+  filePath: string
+  content: string
+  sourceFiles: AgentSourceFile[]
+  updatedAt?: string
+  parsedConfig?: AgentConfig
+}
+
+export interface AgentSourceFile {
+  sourceId: string
+  label: string
+  filePath: string
+  content: string
+}
+
+export interface WriteAgentConfigResult {
+  ok: boolean
+  targetId: string
+  filePath: string
+  message?: string
 }
 
 export interface IntegrationWriteItem {

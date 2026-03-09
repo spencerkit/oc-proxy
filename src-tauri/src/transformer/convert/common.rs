@@ -80,34 +80,16 @@ pub fn build_claude_event(event_type: &str, data: &Value) -> Vec<u8> {
     format!("event: {}\ndata: {}\n\n", event_type, json_str).into_bytes()
 }
 
-/// Build OpenAI streaming chunk
-pub fn build_openai_chunk(
-    id: &str,
-    model: &str,
-    content: Option<&str>,
-    finish_reason: Option<&str>,
-) -> Vec<u8> {
-    let mut delta = serde_json::Map::new();
-    if let Some(c) = content {
-        delta.insert("content".to_string(), Value::String(c.to_string()));
+/// Override the `model` field while preserving the original request shape.
+pub fn override_request_model(request: &[u8], model: &str) -> Result<Vec<u8>, String> {
+    let mut value: Value =
+        serde_json::from_slice(request).map_err(|e| format!("parse request: {}", e))?;
+
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("model".to_string(), Value::String(model.to_string()));
     }
 
-    let chunk = serde_json::json!({
-        "id": id,
-        "object": "chat.completion.chunk",
-        "model": model,
-        "choices": [{
-            "index": 0,
-            "delta": delta,
-            "finish_reason": finish_reason
-        }]
-    });
-
-    format!(
-        "data: {}\n\n",
-        serde_json::to_string(&chunk).unwrap_or_default()
-    )
-    .into_bytes()
+    serde_json::to_vec(&value).map_err(|e| format!("serialize request: {}", e))
 }
 
 /// Parsed textual tool call payload extracted from placeholder format.
@@ -141,7 +123,7 @@ pub fn parse_strict_text_tool_call(
     text: &str,
     allowed_tool_names: &HashSet<String>,
 ) -> Option<ParsedTextToolCall> {
-    const MARKER: &str = "[Tool Call: ";
+    const MARKER: &str = "[Tool Call:";
 
     let mut tool_names: Vec<&str> = allowed_tool_names.iter().map(String::as_str).collect();
     // Prefer longest names first to avoid prefix collisions.
@@ -152,6 +134,12 @@ pub fn parse_strict_text_tool_call(
         let marker_start = search_from + rel_start;
         let inner_start = marker_start + MARKER.len();
         let inner = &text[inner_start..];
+        let skipped_ws = inner
+            .char_indices()
+            .find(|(_, ch)| !ch.is_whitespace())
+            .map(|(idx, _)| idx)
+            .unwrap_or(inner.len());
+        let inner = &inner[skipped_ws..];
 
         let mut matched_tool = None;
         let mut args_start = 0usize;
@@ -159,7 +147,7 @@ pub fn parse_strict_text_tool_call(
             let prefix = format!("{tool_name}(");
             if inner.starts_with(&prefix) {
                 matched_tool = Some((*tool_name).to_string());
-                args_start = inner_start + prefix.len();
+                args_start = inner_start + skipped_ws + prefix.len();
                 break;
             }
         }

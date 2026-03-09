@@ -3,7 +3,8 @@
 //! Handles auth, routing, request/response mapping, upstream I/O, streaming, metrics, and final logging.
 
 use super::observability::{
-    append_processing_log, apply_headers, extract_token_usage, finalize_log, log_simple,
+    append_processing_log, append_processing_log_with_stream_debug, apply_headers,
+    extract_token_usage, finalize_log, finalize_log_with_stream_debug, log_simple,
     plain_downstream_headers, plain_headers, proxy_error_response, response_headers_json,
     response_headers_sse, StreamTokenAccumulator,
 };
@@ -18,10 +19,8 @@ use super::{
     STREAM_REQUEST_TIMEOUT_MS,
 };
 use crate::models::{RuleProtocol, TokenUsage};
-use crate::transformer::convert::{
-    claude_openai_responses_stream, claude_openai_stream, openai_chat_responses_stream,
-};
-use crate::transformer::StreamContext;
+use crate::transformer::convert::claude_openai_responses::ResponsesToClaudeOptions;
+use crate::transformer::{StreamContext, Transformer};
 use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, Method, StatusCode};
@@ -31,19 +30,37 @@ use chrono::Utc;
 use futures_util::TryStreamExt;
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 const MAX_SSE_PENDING_BYTES: usize = 2 * 1024 * 1024;
 
-#[derive(Clone, Copy)]
-enum StreamTransform {
-    None,
-    ClaudeToOpenAIChat,
-    ClaudeToOpenAIResponses,
-    ChatCompletionsToResponses,
-    ResponsesToChatCompletions,
-    ResponsesToClaudeMessages,
+#[derive(Debug, Clone, Default)]
+struct StreamDebugState {
+    entered_stream_mode: bool,
+    transformer_name: String,
+    requires_buffer: bool,
+    probe_sse_enabled: bool,
+    upstream_content_type: String,
+    upstream_chunk_count: usize,
+    upstream_chunk_bytes: usize,
+    upstream_event_count: usize,
+    first_upstream_event: Option<String>,
+    first_upstream_data_type: Option<String>,
+    upstream_done_seen: bool,
+    transformed_chunk_count: usize,
+    transformed_chunk_bytes: usize,
+    transformed_event_count: usize,
+    first_transformed_event: Option<String>,
+    first_transformed_data_type: Option<String>,
+    transformed_done_seen: bool,
+    transformed_message_start_seen: bool,
+    transformed_message_delta_seen: bool,
+    transformed_message_stop_seen: bool,
+    downstream_send_count: usize,
+    finalizer_count: usize,
+    finalizer_bytes: usize,
 }
 
 /// Performs healthz.
@@ -167,7 +184,7 @@ pub(super) async fn handle_proxy_request(
         return proxy_error_response(500, "proxy_error", &msg, None, "proxy", &trace_id);
     }
 
-    let (auth_enabled, expected_auth, capture_body, strict_mode, text_tool_call_fallback_enabled) =
+    let (auth_enabled, expected_auth, capture_body, _strict_mode, text_tool_call_fallback_enabled) =
         match state.config.read() {
             Ok(cfg) => {
                 let expected = format!("Bearer {}", cfg.server.local_bearer_token);
@@ -336,6 +353,53 @@ pub(super) async fn handle_proxy_request(
         && matches!(entry.endpoint, EntryEndpoint::Messages)
         && matches!(target_protocol, RuleProtocol::Openai)
         && !declared_tool_names.is_empty();
+    let transformer = match prepare_transformer_for_route(
+        &entry,
+        &target_protocol,
+        &target_model,
+        enable_text_tool_call_fallback,
+        &declared_tool_names,
+    ) {
+        Ok(transformer) => transformer,
+        Err(msg) => {
+            state.metrics.increment_error();
+            finalize_log(
+                &state,
+                &request_timestamp,
+                &trace_id,
+                &method,
+                &parsed_path,
+                &active_route.group_name,
+                &active_route.rule,
+                &entry,
+                Some(&requested_model),
+                Some(&target_model),
+                None,
+                Some(request_headers_plain.clone()),
+                None,
+                Some(request_body.clone()),
+                None,
+                Some(json!({
+                    "error": {
+                        "code": "proxy_error",
+                        "message": msg.clone(),
+                    }
+                })),
+                None,
+                None,
+                Some(422),
+                None,
+                None,
+                Some(response_headers_json(&trace_id)),
+                None,
+                started.elapsed().as_millis() as u64,
+                "error",
+                capture_body,
+            );
+            return proxy_error_response(422, "proxy_error", &msg, None, "proxy", &trace_id);
+        }
+    };
+    let transformer_name = transformer.name().to_string();
     let upstream_path = resolve_upstream_path(&target_protocol);
     let upstream_url = match resolve_upstream_url(&active_route.rule.api_address, upstream_path) {
         Ok(v) => v,
@@ -364,6 +428,7 @@ pub(super) async fn handle_proxy_request(
                     }
                 })),
                 None,
+                None,
                 Some(400),
                 None,
                 None,
@@ -377,14 +442,7 @@ pub(super) async fn handle_proxy_request(
         }
     };
 
-    let upstream_body = match build_upstream_body(
-        &entry,
-        &target_protocol,
-        &request_body,
-        strict_mode,
-        &target_model,
-        &state,
-    ) {
+    let upstream_body = match build_upstream_body(transformer.as_ref(), &request_body) {
         Ok(v) => v,
         Err(msg) => {
             state.metrics.increment_error();
@@ -410,6 +468,7 @@ pub(super) async fn handle_proxy_request(
                         "message": msg.clone(),
                     }
                 })),
+                None,
                 None,
                 Some(422),
                 None,
@@ -449,12 +508,11 @@ pub(super) async fn handle_proxy_request(
         Some(upstream_body.clone()),
         capture_body,
     );
-    let request_timeout_ms = resolve_request_timeout_ms(stream, &entry, &target_protocol);
+    let request_timeout_ms = resolve_request_timeout_ms(stream, &transformer_name);
 
-    let upstream_resp = match state
+    let request_builder = state
         .client
         .post(upstream_url.clone())
-        .timeout(std::time::Duration::from_millis(request_timeout_ms))
         .headers(reqwest::header::HeaderMap::from_iter(
             upstream_headers.iter().filter_map(|(k, v)| {
                 let name = reqwest::header::HeaderName::from_bytes(k.as_bytes()).ok()?;
@@ -462,47 +520,161 @@ pub(super) async fn handle_proxy_request(
                 Some((name, value))
             }),
         ))
-        .json(&upstream_body)
-        .send()
+        .json(&upstream_body);
+
+    let upstream_resp = if stream {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(request_timeout_ms),
+            request_builder.send(),
+        )
         .await
-    {
-        Ok(r) => r,
-        Err(err) => {
-            let err_msg = format!("Upstream request failed: {err}");
-            state.metrics.increment_error();
-            finalize_log(
-                &state,
-                &request_timestamp,
-                &trace_id,
-                &method,
-                &parsed_path,
-                &active_route.group_name,
-                &active_route.rule,
-                &entry,
-                Some(&requested_model),
-                Some(&target_model),
-                Some(&upstream_url),
-                Some(request_headers_plain.clone()),
-                Some(upstream_headers.clone()),
-                Some(request_body.clone()),
-                Some(upstream_body.clone()),
-                Some(json!({
-                    "error": {
-                        "code": "upstream_error",
-                        "message": err_msg.clone(),
-                    }
-                })),
-                None,
-                Some(502),
-                None,
-                None,
-                Some(response_headers_json(&trace_id)),
-                None,
-                started.elapsed().as_millis() as u64,
-                "error",
-                capture_body,
-            );
-            return proxy_error_response(502, "upstream_error", &err_msg, None, "proxy", &trace_id);
+        {
+            Ok(Ok(r)) => r,
+            Ok(Err(err)) => {
+                let err_msg = format!("Upstream request failed: {err}");
+                state.metrics.increment_error();
+                finalize_log(
+                    &state,
+                    &request_timestamp,
+                    &trace_id,
+                    &method,
+                    &parsed_path,
+                    &active_route.group_name,
+                    &active_route.rule,
+                    &entry,
+                    Some(&requested_model),
+                    Some(&target_model),
+                    Some(&upstream_url),
+                    Some(request_headers_plain.clone()),
+                    Some(upstream_headers.clone()),
+                    Some(request_body.clone()),
+                    Some(upstream_body.clone()),
+                    Some(json!({
+                        "error": {
+                            "code": "upstream_error",
+                            "message": err_msg.clone(),
+                        }
+                    })),
+                    None,
+                    None,
+                    Some(502),
+                    None,
+                    None,
+                    Some(response_headers_json(&trace_id)),
+                    None,
+                    started.elapsed().as_millis() as u64,
+                    "error",
+                    capture_body,
+                );
+                return proxy_error_response(
+                    502,
+                    "upstream_error",
+                    &err_msg,
+                    None,
+                    "proxy",
+                    &trace_id,
+                );
+            }
+            Err(_) => {
+                let err_msg = format!(
+                    "Upstream response header timeout exceeded after {request_timeout_ms}ms"
+                );
+                state.metrics.increment_error();
+                finalize_log(
+                    &state,
+                    &request_timestamp,
+                    &trace_id,
+                    &method,
+                    &parsed_path,
+                    &active_route.group_name,
+                    &active_route.rule,
+                    &entry,
+                    Some(&requested_model),
+                    Some(&target_model),
+                    Some(&upstream_url),
+                    Some(request_headers_plain.clone()),
+                    Some(upstream_headers.clone()),
+                    Some(request_body.clone()),
+                    Some(upstream_body.clone()),
+                    Some(json!({
+                        "error": {
+                            "code": "upstream_error",
+                            "message": err_msg.clone(),
+                        }
+                    })),
+                    None,
+                    None,
+                    Some(504),
+                    None,
+                    None,
+                    Some(response_headers_json(&trace_id)),
+                    None,
+                    started.elapsed().as_millis() as u64,
+                    "error",
+                    capture_body,
+                );
+                return proxy_error_response(
+                    504,
+                    "upstream_error",
+                    &err_msg,
+                    None,
+                    "proxy",
+                    &trace_id,
+                );
+            }
+        }
+    } else {
+        match request_builder
+            .timeout(std::time::Duration::from_millis(request_timeout_ms))
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(err) => {
+                let err_msg = format!("Upstream request failed: {err}");
+                state.metrics.increment_error();
+                finalize_log(
+                    &state,
+                    &request_timestamp,
+                    &trace_id,
+                    &method,
+                    &parsed_path,
+                    &active_route.group_name,
+                    &active_route.rule,
+                    &entry,
+                    Some(&requested_model),
+                    Some(&target_model),
+                    Some(&upstream_url),
+                    Some(request_headers_plain.clone()),
+                    Some(upstream_headers.clone()),
+                    Some(request_body.clone()),
+                    Some(upstream_body.clone()),
+                    Some(json!({
+                        "error": {
+                            "code": "upstream_error",
+                            "message": err_msg.clone(),
+                        }
+                    })),
+                    None,
+                    None,
+                    Some(502),
+                    None,
+                    None,
+                    Some(response_headers_json(&trace_id)),
+                    None,
+                    started.elapsed().as_millis() as u64,
+                    "error",
+                    capture_body,
+                );
+                return proxy_error_response(
+                    502,
+                    "upstream_error",
+                    &err_msg,
+                    None,
+                    "proxy",
+                    &trace_id,
+                );
+            }
         }
     };
 
@@ -541,7 +713,6 @@ pub(super) async fn handle_proxy_request(
             protocol: entry.protocol,
             endpoint: entry.endpoint,
         };
-        let stream_target_protocol = target_protocol.clone();
         let stream_requested_model = requested_model.clone();
         let stream_target_model = target_model.clone();
         let stream_upstream_url = upstream_url.clone();
@@ -555,9 +726,11 @@ pub(super) async fn handle_proxy_request(
         let stream_debug_capture_body = cfg!(debug_assertions);
         let stream_upstream_status = upstream_status;
         let stream_upstream_is_error = upstream_is_error;
+        let stream_upstream_ct = upstream_ct.clone();
         let stream_started = started;
-        let stream_transform =
-            select_stream_transform(stream_entry.endpoint, &stream_target_protocol);
+        let stream_transformer = transformer.clone();
+        let stream_transformer_name = transformer_name.clone();
+        let stream_requires_buffer = stream_requires_sse_event_buffer(&stream_transformer_name);
         let mut stream_ctx_moved = stream_ctx;
         let mut stream_probe_sse = sse_fallback_probe_enabled;
 
@@ -566,14 +739,88 @@ pub(super) async fn handle_proxy_request(
             let mut usage_acc = StreamTokenAccumulator::default();
             let mut stream_failed = false;
             let mut downstream_closed = false;
-            let mut stream_body = Vec::<u8>::new();
-            let mut stream_body_truncated = false;
-            let mut stream_debug_body = Vec::<u8>::new();
+            let mut stream_upstream_response_bytes = Vec::<u8>::new();
+            let mut stream_upstream_response_truncated = false;
+            let mut stream_upstream_response_debug_bytes = Vec::<u8>::new();
+            let mut stream_transformed_response_bytes = Vec::<u8>::new();
+            let mut stream_transformed_response_truncated = false;
+            let mut stream_transformed_response_debug_bytes = Vec::<u8>::new();
             let mut sse_pending = Vec::<u8>::new();
+            let mut stream_debug = StreamDebugState {
+                entered_stream_mode: true,
+                transformer_name: stream_transformer_name.clone(),
+                requires_buffer: stream_requires_buffer,
+                probe_sse_enabled: stream_probe_sse,
+                upstream_content_type: stream_upstream_ct.clone(),
+                ..Default::default()
+            };
+
+            stream_debug_terminal(
+                &stream_trace_id,
+                "enter",
+                json!({
+                    "transformer": stream_transformer_name.clone(),
+                    "requiresBuffer": stream_requires_buffer,
+                    "probeSseEnabled": stream_probe_sse,
+                    "upstreamStatus": stream_upstream_status,
+                    "upstreamContentType": stream_upstream_ct.clone(),
+                    "requestPath": format!("/oc/{}{}", stream_parsed_path.group_id, stream_parsed_path.suffix),
+                }),
+            );
+            append_processing_log_with_stream_debug(
+                &stream_state,
+                &stream_request_timestamp,
+                &stream_trace_id,
+                &stream_method,
+                &stream_parsed_path,
+                &stream_group_name,
+                &stream_rule,
+                &stream_entry,
+                Some(&stream_requested_model),
+                Some(&stream_target_model),
+                Some(&stream_upstream_url),
+                Some(stream_request_headers.clone()),
+                Some(stream_forward_request_headers.clone()),
+                Some(stream_request_body.clone()),
+                Some(stream_upstream_body.clone()),
+                stream_capture_body,
+                Some(stream_debug_summary_json(&stream_debug)),
+            );
 
             loop {
                 match bytes_stream.try_next().await {
                     Ok(Some(bytes)) => {
+                        stream_debug_update_upstream_chunk(&mut stream_debug, bytes.as_ref());
+                        stream_debug_terminal(
+                            &stream_trace_id,
+                            "upstream_chunk",
+                            json!({
+                                "index": stream_debug.upstream_chunk_count,
+                                "bytes": bytes.len(),
+                                "pendingBytesBeforeSplit": sse_pending.len(),
+                            }),
+                        );
+                        if stream_debug.upstream_chunk_count == 1 {
+                            append_processing_log_with_stream_debug(
+                                &stream_state,
+                                &stream_request_timestamp,
+                                &stream_trace_id,
+                                &stream_method,
+                                &stream_parsed_path,
+                                &stream_group_name,
+                                &stream_rule,
+                                &stream_entry,
+                                Some(&stream_requested_model),
+                                Some(&stream_target_model),
+                                Some(&stream_upstream_url),
+                                Some(stream_request_headers.clone()),
+                                Some(stream_forward_request_headers.clone()),
+                                Some(stream_request_body.clone()),
+                                Some(stream_upstream_body.clone()),
+                                stream_capture_body,
+                                Some(stream_debug_summary_json(&stream_debug)),
+                            );
+                        }
                         if stream_probe_sse {
                             stream_probe_sse = false;
                             if !looks_like_sse_prelude(bytes.as_ref()) {
@@ -588,69 +835,217 @@ pub(super) async fn handle_proxy_request(
                             }
                         }
                         usage_acc.consume_chunk(bytes.as_ref());
-                        let outgoing_chunks = match stream_transform {
-                            StreamTransform::None => vec![bytes],
-                            _ => {
-                                sse_pending.extend_from_slice(bytes.as_ref());
-                                if sse_pending.len() > MAX_SSE_PENDING_BYTES {
-                                    stream_failed = true;
+                        capture_stream_chunk(
+                            bytes.as_ref(),
+                            stream_capture_body,
+                            &mut stream_upstream_response_bytes,
+                            &mut stream_upstream_response_truncated,
+                            stream_debug_capture_body,
+                            &mut stream_upstream_response_debug_bytes,
+                        );
+                        let outgoing_chunks = if !stream_requires_buffer {
+                            vec![bytes]
+                        } else {
+                            sse_pending.extend_from_slice(bytes.as_ref());
+                            if sse_pending.len() > MAX_SSE_PENDING_BYTES {
+                                stream_failed = true;
+                                let finalizer = finalize_stream_transform(
+                                    &stream_transformer_name,
+                                    &mut stream_ctx_moved,
+                                );
+                                if !finalizer.is_empty() {
+                                    capture_stream_chunk(
+                                        finalizer.as_slice(),
+                                        stream_capture_body,
+                                        &mut stream_transformed_response_bytes,
+                                        &mut stream_transformed_response_truncated,
+                                        stream_debug_capture_body,
+                                        &mut stream_transformed_response_debug_bytes,
+                                    );
+                                    if tx.send(Ok(Bytes::from(finalizer))).await.is_err() {
+                                        downstream_closed = true;
+                                    }
+                                } else {
                                     let _ = tx
                                         .send(Err(std::io::Error::new(
                                             std::io::ErrorKind::Other,
                                             "stream transform buffer overflow",
                                         )))
                                         .await;
-                                    break;
                                 }
+                                break;
+                            }
 
-                                let mut transformed_chunks = Vec::new();
-                                while let Some(event) = pop_sse_event(&mut sse_pending) {
-                                    match transform_sse_event(
-                                        stream_transform,
-                                        event.as_ref(),
-                                        &mut stream_ctx_moved,
-                                    ) {
-                                        Ok(converted) => {
-                                            if !converted.is_empty() {
-                                                transformed_chunks.push(Bytes::from(converted));
+                            let mut transformed_chunks = Vec::new();
+                            while let Some(event) = pop_sse_event(&mut sse_pending) {
+                                let upstream_event_detail = stream_debug_update_upstream_event(
+                                    &mut stream_debug,
+                                    event.as_ref(),
+                                );
+                                stream_debug_terminal(
+                                    &stream_trace_id,
+                                    "upstream_event",
+                                    json!({
+                                        "index": stream_debug.upstream_event_count,
+                                        "detail": upstream_event_detail,
+                                        "pendingBytesAfterPop": sse_pending.len(),
+                                    }),
+                                );
+                                if stream_debug.upstream_event_count == 1 {
+                                    append_processing_log_with_stream_debug(
+                                        &stream_state,
+                                        &stream_request_timestamp,
+                                        &stream_trace_id,
+                                        &stream_method,
+                                        &stream_parsed_path,
+                                        &stream_group_name,
+                                        &stream_rule,
+                                        &stream_entry,
+                                        Some(&stream_requested_model),
+                                        Some(&stream_target_model),
+                                        Some(&stream_upstream_url),
+                                        Some(stream_request_headers.clone()),
+                                        Some(stream_forward_request_headers.clone()),
+                                        Some(stream_request_body.clone()),
+                                        Some(stream_upstream_body.clone()),
+                                        stream_capture_body,
+                                        Some(stream_debug_summary_json(&stream_debug)),
+                                    );
+                                }
+                                match transform_sse_event(
+                                    stream_transformer.as_ref(),
+                                    event.as_ref(),
+                                    &mut stream_ctx_moved,
+                                ) {
+                                    Ok(converted) => {
+                                        if !converted.is_empty() {
+                                            let transformed_detail =
+                                                stream_debug_update_transformed_chunk(
+                                                    &mut stream_debug,
+                                                    converted.as_slice(),
+                                                );
+                                            stream_debug_terminal(
+                                                &stream_trace_id,
+                                                "transform_ok",
+                                                json!({
+                                                    "index": stream_debug.upstream_event_count,
+                                                    "detail": transformed_detail,
+                                                }),
+                                            );
+                                            if stream_debug.transformed_chunk_count == 1 {
+                                                append_processing_log_with_stream_debug(
+                                                    &stream_state,
+                                                    &stream_request_timestamp,
+                                                    &stream_trace_id,
+                                                    &stream_method,
+                                                    &stream_parsed_path,
+                                                    &stream_group_name,
+                                                    &stream_rule,
+                                                    &stream_entry,
+                                                    Some(&stream_requested_model),
+                                                    Some(&stream_target_model),
+                                                    Some(&stream_upstream_url),
+                                                    Some(stream_request_headers.clone()),
+                                                    Some(stream_forward_request_headers.clone()),
+                                                    Some(stream_request_body.clone()),
+                                                    Some(stream_upstream_body.clone()),
+                                                    stream_capture_body,
+                                                    Some(stream_debug_summary_json(&stream_debug)),
+                                                );
                                             }
+                                            transformed_chunks.push(Bytes::from(converted));
+                                        } else {
+                                            stream_debug_terminal(
+                                                &stream_trace_id,
+                                                "transform_ok",
+                                                json!({
+                                                    "index": stream_debug.upstream_event_count,
+                                                    "detail": {
+                                                        "bytes": 0,
+                                                        "eventCount": 0
+                                                    },
+                                                }),
+                                            );
                                         }
-                                        Err(_) => {
-                                            stream_failed = true;
+                                    }
+                                    Err(err) => {
+                                        stream_failed = true;
+                                        stream_debug_terminal(
+                                            &stream_trace_id,
+                                            "transform_error",
+                                            json!({
+                                                "index": stream_debug.upstream_event_count,
+                                                "message": err,
+                                            }),
+                                        );
+                                        let finalizer = finalize_stream_transform(
+                                            &stream_transformer_name,
+                                            &mut stream_ctx_moved,
+                                        );
+                                        if !finalizer.is_empty() {
+                                            stream_debug.finalizer_count += 1;
+                                            stream_debug.finalizer_bytes += finalizer.len();
+                                            let finalizer_detail =
+                                                stream_debug_update_transformed_chunk(
+                                                    &mut stream_debug,
+                                                    finalizer.as_slice(),
+                                                );
+                                            stream_debug_terminal(
+                                                &stream_trace_id,
+                                                "finalizer",
+                                                json!({
+                                                    "cause": "transform_error",
+                                                    "detail": finalizer_detail,
+                                                }),
+                                            );
+                                            capture_stream_chunk(
+                                                finalizer.as_slice(),
+                                                stream_capture_body,
+                                                &mut stream_transformed_response_bytes,
+                                                &mut stream_transformed_response_truncated,
+                                                stream_debug_capture_body,
+                                                &mut stream_transformed_response_debug_bytes,
+                                            );
+                                            if tx.send(Ok(Bytes::from(finalizer))).await.is_err() {
+                                                downstream_closed = true;
+                                            }
+                                        } else {
                                             let _ = tx
                                                 .send(Err(std::io::Error::new(
                                                     std::io::ErrorKind::Other,
                                                     "stream transform failed",
                                                 )))
                                                 .await;
-                                            break;
                                         }
+                                        break;
                                     }
                                 }
-
-                                if stream_failed {
-                                    break;
-                                }
-                                transformed_chunks
                             }
+
+                            if stream_failed {
+                                break;
+                            }
+                            transformed_chunks
                         };
 
                         for outgoing in outgoing_chunks {
-                            if stream_capture_body && !stream_body_truncated {
-                                let remaining =
-                                    MAX_STREAM_LOG_BODY_BYTES.saturating_sub(stream_body.len());
-                                if remaining == 0 {
-                                    stream_body_truncated = true;
-                                } else if outgoing.len() <= remaining {
-                                    stream_body.extend_from_slice(outgoing.as_ref());
-                                } else {
-                                    stream_body.extend_from_slice(&outgoing.as_ref()[..remaining]);
-                                    stream_body_truncated = true;
-                                }
-                            }
-                            if stream_debug_capture_body {
-                                stream_debug_body.extend_from_slice(outgoing.as_ref());
-                            }
+                            capture_stream_chunk(
+                                outgoing.as_ref(),
+                                stream_capture_body,
+                                &mut stream_transformed_response_bytes,
+                                &mut stream_transformed_response_truncated,
+                                stream_debug_capture_body,
+                                &mut stream_transformed_response_debug_bytes,
+                            );
+                            stream_debug.downstream_send_count += 1;
+                            stream_debug_terminal(
+                                &stream_trace_id,
+                                "downstream_send",
+                                json!({
+                                    "index": stream_debug.downstream_send_count,
+                                    "bytes": outgoing.len(),
+                                }),
+                            );
                             if tx.send(Ok(outgoing)).await.is_err() {
                                 downstream_closed = true;
                                 break;
@@ -661,30 +1056,109 @@ pub(super) async fn handle_proxy_request(
                         }
                     }
                     Ok(None) => {
-                        if !matches!(stream_transform, StreamTransform::None)
-                            && !sse_pending.is_empty()
-                        {
+                        if stream_requires_buffer && !sse_pending.is_empty() {
                             let tail_event = std::mem::take(&mut sse_pending);
                             match transform_sse_event(
-                                stream_transform,
+                                stream_transformer.as_ref(),
                                 tail_event.as_ref(),
                                 &mut stream_ctx_moved,
                             ) {
                                 Ok(converted) => {
-                                    if !converted.is_empty()
-                                        && tx.send(Ok(Bytes::from(converted))).await.is_err()
-                                    {
-                                        downstream_closed = true;
+                                    if !converted.is_empty() {
+                                        capture_stream_chunk(
+                                            converted.as_slice(),
+                                            stream_capture_body,
+                                            &mut stream_transformed_response_bytes,
+                                            &mut stream_transformed_response_truncated,
+                                            stream_debug_capture_body,
+                                            &mut stream_transformed_response_debug_bytes,
+                                        );
+                                        if tx.send(Ok(Bytes::from(converted))).await.is_err() {
+                                            downstream_closed = true;
+                                        }
                                     }
                                 }
                                 Err(_) => {
                                     stream_failed = true;
-                                    let _ = tx
-                                        .send(Err(std::io::Error::new(
-                                            std::io::ErrorKind::Other,
-                                            "stream transform failed",
-                                        )))
-                                        .await;
+                                    stream_debug_terminal(
+                                        &stream_trace_id,
+                                        "tail_transform_error",
+                                        json!({
+                                            "message": "stream transform failed on tail event",
+                                        }),
+                                    );
+                                    let finalizer = finalize_stream_transform(
+                                        &stream_transformer_name,
+                                        &mut stream_ctx_moved,
+                                    );
+                                    if !finalizer.is_empty() {
+                                        stream_debug.finalizer_count += 1;
+                                        stream_debug.finalizer_bytes += finalizer.len();
+                                        let finalizer_detail =
+                                            stream_debug_update_transformed_chunk(
+                                                &mut stream_debug,
+                                                finalizer.as_slice(),
+                                            );
+                                        stream_debug_terminal(
+                                            &stream_trace_id,
+                                            "finalizer",
+                                            json!({
+                                                "cause": "tail_transform_error",
+                                                "detail": finalizer_detail,
+                                            }),
+                                        );
+                                        capture_stream_chunk(
+                                            finalizer.as_slice(),
+                                            stream_capture_body,
+                                            &mut stream_transformed_response_bytes,
+                                            &mut stream_transformed_response_truncated,
+                                            stream_debug_capture_body,
+                                            &mut stream_transformed_response_debug_bytes,
+                                        );
+                                        if tx.send(Ok(Bytes::from(finalizer))).await.is_err() {
+                                            downstream_closed = true;
+                                        }
+                                    } else {
+                                        let _ = tx
+                                            .send(Err(std::io::Error::new(
+                                                std::io::ErrorKind::Other,
+                                                "stream transform failed",
+                                            )))
+                                            .await;
+                                    }
+                                }
+                            }
+                        }
+                        if !downstream_closed {
+                            let finalizer = finalize_stream_transform(
+                                &stream_transformer_name,
+                                &mut stream_ctx_moved,
+                            );
+                            if !finalizer.is_empty() {
+                                stream_debug.finalizer_count += 1;
+                                stream_debug.finalizer_bytes += finalizer.len();
+                                let finalizer_detail = stream_debug_update_transformed_chunk(
+                                    &mut stream_debug,
+                                    finalizer.as_slice(),
+                                );
+                                stream_debug_terminal(
+                                    &stream_trace_id,
+                                    "finalizer",
+                                    json!({
+                                        "cause": "eof",
+                                        "detail": finalizer_detail,
+                                    }),
+                                );
+                                capture_stream_chunk(
+                                    finalizer.as_slice(),
+                                    stream_capture_body,
+                                    &mut stream_transformed_response_bytes,
+                                    &mut stream_transformed_response_truncated,
+                                    stream_debug_capture_body,
+                                    &mut stream_transformed_response_debug_bytes,
+                                );
+                                if tx.send(Ok(Bytes::from(finalizer))).await.is_err() {
+                                    downstream_closed = true;
                                 }
                             }
                         }
@@ -692,12 +1166,51 @@ pub(super) async fn handle_proxy_request(
                     }
                     Err(_) => {
                         stream_failed = true;
-                        let _ = tx
-                            .send(Err(std::io::Error::new(
-                                std::io::ErrorKind::Other,
-                                "stream read failed",
-                            )))
-                            .await;
+                        stream_debug_terminal(
+                            &stream_trace_id,
+                            "read_error",
+                            json!({
+                                "message": "stream read failed",
+                            }),
+                        );
+                        let finalizer = finalize_stream_transform(
+                            &stream_transformer_name,
+                            &mut stream_ctx_moved,
+                        );
+                        if !finalizer.is_empty() {
+                            stream_debug.finalizer_count += 1;
+                            stream_debug.finalizer_bytes += finalizer.len();
+                            let finalizer_detail = stream_debug_update_transformed_chunk(
+                                &mut stream_debug,
+                                finalizer.as_slice(),
+                            );
+                            stream_debug_terminal(
+                                &stream_trace_id,
+                                "finalizer",
+                                json!({
+                                    "cause": "read_error",
+                                    "detail": finalizer_detail,
+                                }),
+                            );
+                            capture_stream_chunk(
+                                finalizer.as_slice(),
+                                stream_capture_body,
+                                &mut stream_transformed_response_bytes,
+                                &mut stream_transformed_response_truncated,
+                                stream_debug_capture_body,
+                                &mut stream_transformed_response_debug_bytes,
+                            );
+                            if tx.send(Ok(Bytes::from(finalizer))).await.is_err() {
+                                downstream_closed = true;
+                            }
+                        } else {
+                            let _ = tx
+                                .send(Err(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    "stream read failed",
+                                )))
+                                .await;
+                        }
                         break;
                     }
                 }
@@ -706,6 +1219,17 @@ pub(super) async fn handle_proxy_request(
             if !stream_failed && !downstream_closed {
                 // Transformer finalization removed - passthrough mode
             }
+
+            stream_debug_terminal(
+                &stream_trace_id,
+                "complete",
+                json!({
+                    "streamFailed": stream_failed,
+                    "downstreamClosed": downstream_closed,
+                    "upstreamIsError": stream_upstream_is_error,
+                    "summary": stream_debug_summary_json(&stream_debug),
+                }),
+            );
 
             let token_usage = usage_acc.into_token_usage();
             if let Some(ref usage) = token_usage {
@@ -719,25 +1243,34 @@ pub(super) async fn handle_proxy_request(
             }
 
             let stream_response_body = if stream_capture_body {
-                Some(json!({
-                    "stream": true,
-                    "payload": String::from_utf8_lossy(&stream_body).to_string(),
-                    "truncated": stream_body_truncated,
-                }))
+                Some(build_stream_log_body(
+                    "upstream_raw",
+                    &stream_upstream_response_bytes,
+                    stream_upstream_response_truncated,
+                ))
             } else {
-                Some(json!({"stream": true}))
+                Some(json!({"stream": true, "source": "upstream_raw"}))
+            };
+            let stream_transformed_response_body = if stream_capture_body {
+                Some(build_stream_log_body(
+                    "downstream_transformed",
+                    &stream_transformed_response_bytes,
+                    stream_transformed_response_truncated,
+                ))
+            } else {
+                Some(json!({"stream": true, "source": "downstream_transformed"}))
             };
             let stream_debug_response_body = if stream_debug_capture_body {
-                Some(json!({
-                    "stream": true,
-                    "payload": String::from_utf8_lossy(&stream_debug_body).to_string(),
-                    "truncated": false,
-                }))
+                Some(build_stream_log_body(
+                    "upstream_raw",
+                    &stream_upstream_response_debug_bytes,
+                    false,
+                ))
             } else {
                 None
             };
             let mut response_headers = response_headers_sse(&stream_trace_id);
-            finalize_log(
+            finalize_log_with_stream_debug(
                 &stream_state,
                 &stream_request_timestamp,
                 &stream_trace_id,
@@ -754,6 +1287,7 @@ pub(super) async fn handle_proxy_request(
                 Some(stream_request_body),
                 Some(stream_upstream_body),
                 stream_response_body,
+                stream_transformed_response_body,
                 stream_debug_response_body,
                 if stream_failed {
                     Some(502)
@@ -773,6 +1307,7 @@ pub(super) async fn handle_proxy_request(
                     "ok"
                 },
                 stream_capture_body,
+                Some(stream_debug_summary_json(&stream_debug)),
             );
         });
 
@@ -826,6 +1361,7 @@ pub(super) async fn handle_proxy_request(
                     }
                 })),
                 None,
+                None,
                 Some(502),
                 Some(upstream_status),
                 Some(upstream_headers_plain.clone()),
@@ -878,6 +1414,7 @@ pub(super) async fn handle_proxy_request(
                     "upstream_raw": upstream_text.chars().take(200).collect::<String>(),
                 })),
                 None,
+                None,
                 Some(502),
                 Some(upstream_status),
                 Some(upstream_headers_plain.clone()),
@@ -924,6 +1461,7 @@ pub(super) async fn handle_proxy_request(
             Some(upstream_body.clone()),
             Some(upstream_json.clone()),
             None,
+            None,
             Some(upstream_status),
             Some(upstream_status),
             Some(upstream_headers_plain.clone()),
@@ -943,15 +1481,7 @@ pub(super) async fn handle_proxy_request(
         );
     }
 
-    let output_body = map_response_body(
-        &entry,
-        &target_protocol,
-        &upstream_json,
-        &requested_model,
-        &state,
-        &declared_tool_names,
-        enable_text_tool_call_fallback,
-    );
+    let output_body = map_response_body(transformer.as_ref(), &upstream_json);
 
     let token_usage = merge_token_usage(
         extract_token_usage(&upstream_json),
@@ -984,6 +1514,7 @@ pub(super) async fn handle_proxy_request(
         Some(upstream_headers),
         Some(request_body),
         Some(upstream_body),
+        Some(upstream_json.clone()),
         Some(output_body),
         None,
         Some(200),
@@ -1000,118 +1531,29 @@ pub(super) async fn handle_proxy_request(
 }
 
 /// Build upstream payload for the selected target protocol surface.
-///
-/// - Same-surface forwarding is pass-through plus resolved target model override.
-/// - Cross-surface forwarding uses canonical mapper conversion.
-/// - Cross-surface streaming keeps mapper output (`stream`), while SSE bytes are
-///   forwarded directly from upstream.
-/// - For `messages -> responses`, stream is forced to false for compatibility.
 pub(super) fn build_upstream_body(
-    entry: &PathEntry,
-    target_protocol: &RuleProtocol,
+    transformer: &dyn Transformer,
     request_body: &Value,
-    _strict_mode: bool,
-    target_model: &str,
-    _state: &ServiceState,
 ) -> Result<Value, String> {
-    use crate::transformer::convert::*;
-
     let request_bytes =
         serde_json::to_vec(request_body).map_err(|e| format!("serialize request: {}", e))?;
-
-    // Determine conversion based on entry and target
-    let converted = match (entry.endpoint, target_protocol) {
-        // OpenAI Responses -> Claude Messages
-        (EntryEndpoint::Responses, RuleProtocol::Anthropic) => {
-            claude_openai_responses::openai_responses_req_to_claude(&request_bytes, target_model)?
-        }
-        // Claude Messages -> OpenAI Responses
-        (EntryEndpoint::Messages, RuleProtocol::Openai) => {
-            claude_openai_responses::claude_req_to_openai_responses(&request_bytes, target_model)?
-        }
-        // Claude Messages -> OpenAI Chat Completions
-        (EntryEndpoint::Messages, RuleProtocol::OpenaiCompletion) => {
-            claude_openai::claude_req_to_openai(&request_bytes, target_model)?
-        }
-        // OpenAI Chat -> Claude Messages
-        (EntryEndpoint::ChatCompletions, RuleProtocol::Anthropic) => {
-            // First convert to Claude, then serialize
-            let claude_bytes = openai_claude::openai_resp_to_claude(&request_bytes)?;
-            claude_bytes
-        }
-        // OpenAI Responses -> OpenAI Chat Completions
-        (EntryEndpoint::Responses, RuleProtocol::OpenaiCompletion) => {
-            openai_chat_responses::openai_responses_req_to_chat(&request_bytes, target_model)?
-        }
-        // Same protocol, just update model
-        _ => {
-            return Ok(passthrough_with_model(request_body, target_model));
-        }
-    };
-
-    let mut result: Value =
-        serde_json::from_slice(&converted).map_err(|e| format!("parse converted: {}", e))?;
-
-    // Ensure model is set
-    if result.is_object() {
-        result["model"] = json!(target_model);
-    }
-
-    Ok(result)
+    let converted = transformer.transform_request(&request_bytes)?;
+    serde_json::from_slice(&converted).map_err(|e| format!("parse converted: {}", e))
 }
 
 /// Map upstream response body back to the downstream entry surface.
-fn map_response_body(
-    entry: &PathEntry,
-    target_protocol: &RuleProtocol,
-    upstream_json: &Value,
-    _request_model: &str,
-    _state: &ServiceState,
-    declared_tool_names: &HashSet<String>,
-    text_tool_call_fallback_enabled: bool,
-) -> Value {
-    use crate::transformer::convert::*;
-
+fn map_response_body(transformer: &dyn Transformer, upstream_json: &Value) -> Value {
     let response_bytes = match serde_json::to_vec(upstream_json) {
         Ok(b) => b,
         Err(_) => return upstream_json.clone(),
     };
 
-    // Determine conversion based on entry and target
-    let converted = match (entry.endpoint, target_protocol) {
-        // Claude Messages -> OpenAI Responses (response)
-        (EntryEndpoint::Responses, RuleProtocol::Anthropic) => {
-            claude_openai_responses::claude_resp_to_openai_responses(&response_bytes)
-        }
-        // OpenAI Responses -> Claude Messages (response)
-        (EntryEndpoint::Messages, RuleProtocol::Openai) => {
-            claude_openai_responses::openai_responses_resp_to_claude_with_options(
-                &response_bytes,
-                &claude_openai_responses::ResponsesToClaudeOptions {
-                    text_tool_call_fallback_enabled,
-                    allowed_tool_names: declared_tool_names.clone(),
-                },
-            )
-        }
-        // OpenAI Chat -> Claude Messages (response)
-        (EntryEndpoint::Messages, RuleProtocol::OpenaiCompletion) => {
-            openai_claude::openai_resp_to_claude(&response_bytes)
-        }
-        // Claude Messages -> OpenAI Chat (response)
-        (EntryEndpoint::ChatCompletions, RuleProtocol::Anthropic) => {
-            claude_openai_responses::claude_resp_to_openai_responses(&response_bytes)
-        }
-        // OpenAI Chat Completions -> OpenAI Responses (response)
-        (EntryEndpoint::Responses, RuleProtocol::OpenaiCompletion) => {
-            openai_chat_responses::openai_chat_resp_to_responses(&response_bytes)
-        }
-        _ => return upstream_json.clone(),
+    let converted = match transformer.transform_response(&response_bytes, false) {
+        Ok(converted) => converted,
+        Err(_) => return upstream_json.clone(),
     };
 
-    match converted {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| upstream_json.clone()),
-        Err(_) => upstream_json.clone(),
-    }
+    serde_json::from_slice(&converted).unwrap_or_else(|_| upstream_json.clone())
 }
 
 fn merge_token_usage(
@@ -1178,33 +1620,16 @@ fn extract_declared_tool_names(request_body: &Value) -> HashSet<String> {
 }
 
 /// Resolves request timeout ms for this module's workflow.
-pub(super) fn resolve_request_timeout_ms(
-    stream: bool,
-    entry: &PathEntry,
-    target_protocol: &RuleProtocol,
-) -> u64 {
+pub(super) fn resolve_request_timeout_ms(stream: bool, transformer_name: &str) -> u64 {
     if stream {
         return STREAM_REQUEST_TIMEOUT_MS;
     }
 
-    if matches!(entry.endpoint, EntryEndpoint::Messages)
-        && matches!(target_protocol, RuleProtocol::Openai)
-    {
+    if transformer_name == "cc_openai2" {
         return MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS;
     }
 
     NON_STREAM_REQUEST_TIMEOUT_MS
-}
-
-/// Preserve request object shape while enforcing resolved forwarded model.
-fn passthrough_with_model(request_body: &Value, target_model: &str) -> Value {
-    let mut with_model = if request_body.is_object() {
-        request_body.clone()
-    } else {
-        json!({})
-    };
-    with_model["model"] = json!(target_model);
-    with_model
 }
 
 /// Build immediate reject response and emit a minimal log entry.
@@ -1243,53 +1668,257 @@ async fn reject_and_log(
     resp
 }
 
-fn select_stream_transform(
-    entry_endpoint: EntryEndpoint,
+fn prepare_transformer_for_route(
+    entry: &PathEntry,
     target_protocol: &RuleProtocol,
-) -> StreamTransform {
-    match (entry_endpoint, target_protocol) {
-        (EntryEndpoint::Responses, RuleProtocol::Anthropic) => {
-            StreamTransform::ClaudeToOpenAIResponses
+    target_model: &str,
+    text_tool_call_fallback_enabled: bool,
+    declared_tool_names: &HashSet<String>,
+) -> Result<Arc<dyn Transformer>, String> {
+    let model = target_model.to_string();
+    let transformer: Arc<dyn Transformer> = match (entry.endpoint, target_protocol) {
+        (EntryEndpoint::Messages, RuleProtocol::Anthropic) => Arc::new(
+            crate::transformer::cc::claude::ClaudeTransformer::new(model),
+        ),
+        (EntryEndpoint::Messages, RuleProtocol::OpenaiCompletion) => Arc::new(
+            crate::transformer::cc::openai::OpenAITransformer::new(model),
+        ),
+        (EntryEndpoint::Messages, RuleProtocol::Openai) => {
+            Arc::new(crate::transformer::cc::openai2::OpenAI2Transformer::new(
+                model,
+                ResponsesToClaudeOptions {
+                    text_tool_call_fallback_enabled,
+                    allowed_tool_names: declared_tool_names.clone(),
+                },
+            ))
         }
         (EntryEndpoint::ChatCompletions, RuleProtocol::Anthropic) => {
-            StreamTransform::ClaudeToOpenAIChat
+            Arc::new(crate::transformer::cx::chat::claude::ClaudeTransformer::new(model))
+        }
+        (EntryEndpoint::ChatCompletions, RuleProtocol::OpenaiCompletion) => {
+            Arc::new(crate::transformer::cx::chat::openai::OpenAITransformer::new(model))
         }
         (EntryEndpoint::ChatCompletions, RuleProtocol::Openai) => {
-            StreamTransform::ResponsesToChatCompletions
+            Arc::new(crate::transformer::cx::chat::openai2::OpenAI2Transformer::new(model))
         }
-        (EntryEndpoint::Messages, RuleProtocol::Openai) => {
-            StreamTransform::ResponsesToClaudeMessages
+        (EntryEndpoint::Responses, RuleProtocol::Anthropic) => {
+            Arc::new(crate::transformer::cx::responses::claude::ClaudeTransformer::new(model))
         }
         (EntryEndpoint::Responses, RuleProtocol::OpenaiCompletion) => {
-            StreamTransform::ChatCompletionsToResponses
+            Arc::new(crate::transformer::cx::responses::openai::OpenAITransformer::new(model))
         }
-        _ => StreamTransform::None,
-    }
+        (EntryEndpoint::Responses, RuleProtocol::Openai) => {
+            Arc::new(crate::transformer::cx::responses::openai2::OpenAI2Transformer::new(model))
+        }
+    };
+
+    Ok(transformer)
+}
+
+fn stream_requires_sse_event_buffer(transformer_name: &str) -> bool {
+    !matches!(
+        transformer_name,
+        "cc_claude" | "cx_chat_openai" | "cx_resp_openai2"
+    )
 }
 
 fn transform_sse_event(
-    transform: StreamTransform,
+    transformer: &dyn Transformer,
     event: &[u8],
     ctx: &mut StreamContext,
 ) -> Result<Vec<u8>, String> {
-    match transform {
-        StreamTransform::None => Ok(event.to_vec()),
-        StreamTransform::ClaudeToOpenAIChat => {
-            claude_openai_stream::claude_stream_to_openai(event, ctx)
-        }
-        StreamTransform::ClaudeToOpenAIResponses => {
-            claude_openai_responses_stream::claude_stream_to_openai_responses(event, ctx)
-        }
-        StreamTransform::ChatCompletionsToResponses => {
-            openai_chat_responses_stream::openai_chat_stream_to_responses(event, ctx)
-        }
-        StreamTransform::ResponsesToChatCompletions => {
-            openai_chat_responses_stream::openai_responses_stream_to_chat(event, ctx)
-        }
-        StreamTransform::ResponsesToClaudeMessages => {
-            claude_openai_responses_stream::openai_responses_stream_to_claude(event, ctx)
+    transformer.transform_response_with_context(event, true, ctx)
+}
+
+fn finalize_stream_transform(transformer_name: &str, ctx: &mut StreamContext) -> Vec<u8> {
+    match transformer_name {
+        "cc_openai" => crate::transformer::convert::claude_openai::finalize_openai_stream_to_claude(ctx),
+        "cc_openai2" => crate::transformer::convert::claude_openai_responses_stream::finalize_openai_responses_stream_to_claude(ctx),
+        _ => Vec::new(),
+    }
+}
+
+fn capture_stream_chunk(
+    outgoing: &[u8],
+    stream_capture_body: bool,
+    stream_body: &mut Vec<u8>,
+    stream_body_truncated: &mut bool,
+    stream_debug_capture_body: bool,
+    stream_debug_body: &mut Vec<u8>,
+) {
+    if stream_capture_body && !*stream_body_truncated {
+        let remaining = MAX_STREAM_LOG_BODY_BYTES.saturating_sub(stream_body.len());
+        if remaining == 0 {
+            *stream_body_truncated = true;
+        } else if outgoing.len() <= remaining {
+            stream_body.extend_from_slice(outgoing);
+        } else {
+            stream_body.extend_from_slice(&outgoing[..remaining]);
+            *stream_body_truncated = true;
         }
     }
+    if stream_debug_capture_body {
+        stream_debug_body.extend_from_slice(outgoing);
+    }
+}
+
+fn build_stream_log_body(source: &str, payload: &[u8], truncated: bool) -> Value {
+    json!({
+        "stream": true,
+        "source": source,
+        "payload": String::from_utf8_lossy(payload).to_string(),
+        "truncated": truncated,
+    })
+}
+
+fn stream_debug_summary_json(state: &StreamDebugState) -> Value {
+    json!({
+        "enteredStreamMode": state.entered_stream_mode,
+        "transformerName": state.transformer_name,
+        "requiresBuffer": state.requires_buffer,
+        "probeSseEnabled": state.probe_sse_enabled,
+        "upstreamContentType": state.upstream_content_type,
+        "upstreamChunkCount": state.upstream_chunk_count,
+        "upstreamChunkBytes": state.upstream_chunk_bytes,
+        "upstreamEventCount": state.upstream_event_count,
+        "firstUpstreamEvent": state.first_upstream_event,
+        "firstUpstreamDataType": state.first_upstream_data_type,
+        "upstreamDoneSeen": state.upstream_done_seen,
+        "transformedChunkCount": state.transformed_chunk_count,
+        "transformedChunkBytes": state.transformed_chunk_bytes,
+        "transformedEventCount": state.transformed_event_count,
+        "firstTransformedEvent": state.first_transformed_event,
+        "firstTransformedDataType": state.first_transformed_data_type,
+        "transformedDoneSeen": state.transformed_done_seen,
+        "transformedMessageStartSeen": state.transformed_message_start_seen,
+        "transformedMessageDeltaSeen": state.transformed_message_delta_seen,
+        "transformedMessageStopSeen": state.transformed_message_stop_seen,
+        "downstreamSendCount": state.downstream_send_count,
+        "finalizerCount": state.finalizer_count,
+        "finalizerBytes": state.finalizer_bytes,
+    })
+}
+
+fn stream_debug_update_upstream_chunk(state: &mut StreamDebugState, payload: &[u8]) {
+    state.upstream_chunk_count += 1;
+    state.upstream_chunk_bytes += payload.len();
+}
+
+fn stream_debug_update_upstream_event(state: &mut StreamDebugState, payload: &[u8]) -> Value {
+    let summary = summarize_sse_payload(payload);
+    state.upstream_event_count += summary.event_count.max(1);
+    if state.first_upstream_event.is_none() {
+        state.first_upstream_event = summary.first_event.clone();
+    }
+    if state.first_upstream_data_type.is_none() {
+        state.first_upstream_data_type = summary.first_data_type.clone();
+    }
+    state.upstream_done_seen |= summary.done_seen;
+    json!({
+        "bytes": payload.len(),
+        "eventCount": summary.event_count,
+        "firstEvent": summary.first_event,
+        "firstDataType": summary.first_data_type,
+        "doneSeen": summary.done_seen,
+    })
+}
+
+fn stream_debug_update_transformed_chunk(state: &mut StreamDebugState, payload: &[u8]) -> Value {
+    let summary = summarize_sse_payload(payload);
+    state.transformed_chunk_count += 1;
+    state.transformed_chunk_bytes += payload.len();
+    state.transformed_event_count += summary.event_count;
+    if state.first_transformed_event.is_none() {
+        state.first_transformed_event = summary.first_event.clone();
+    }
+    if state.first_transformed_data_type.is_none() {
+        state.first_transformed_data_type = summary.first_data_type.clone();
+    }
+    state.transformed_done_seen |= summary.done_seen;
+    state.transformed_message_start_seen |= summary.message_start_seen;
+    state.transformed_message_delta_seen |= summary.message_delta_seen;
+    state.transformed_message_stop_seen |= summary.message_stop_seen;
+    json!({
+        "bytes": payload.len(),
+        "eventCount": summary.event_count,
+        "firstEvent": summary.first_event,
+        "firstDataType": summary.first_data_type,
+        "doneSeen": summary.done_seen,
+        "messageStartSeen": summary.message_start_seen,
+        "messageDeltaSeen": summary.message_delta_seen,
+        "messageStopSeen": summary.message_stop_seen,
+    })
+}
+
+fn stream_debug_terminal(trace_id: &str, phase: &str, detail: Value) {
+    eprintln!(
+        "[proxy][stream] trace={} phase={} detail={}",
+        trace_id, phase, detail
+    );
+}
+
+#[derive(Debug, Default)]
+struct SsePayloadSummary {
+    event_count: usize,
+    first_event: Option<String>,
+    first_data_type: Option<String>,
+    done_seen: bool,
+    message_start_seen: bool,
+    message_delta_seen: bool,
+    message_stop_seen: bool,
+}
+
+fn summarize_sse_payload(payload: &[u8]) -> SsePayloadSummary {
+    let normalized = String::from_utf8_lossy(payload).replace("\r\n", "\n");
+    let mut summary = SsePayloadSummary::default();
+
+    for raw_event in normalized.split("\n\n") {
+        let trimmed = raw_event.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        summary.event_count += 1;
+        for line in trimmed.lines() {
+            let line = line.trim_start();
+            if summary.first_event.is_none() {
+                if let Some(event_name) = line.strip_prefix("event:") {
+                    summary.first_event = Some(event_name.trim().to_string());
+                }
+            }
+
+            let Some(data_line) = line.strip_prefix("data:") else {
+                continue;
+            };
+            let data = data_line.trim();
+            if data == "[DONE]" {
+                summary.done_seen = true;
+                continue;
+            }
+            if data.is_empty() {
+                continue;
+            }
+            if let Ok(parsed) = serde_json::from_str::<Value>(data) {
+                if summary.first_data_type.is_none() {
+                    summary.first_data_type = parsed
+                        .get("type")
+                        .and_then(|value| value.as_str())
+                        .map(|value| value.to_string());
+                }
+                if parsed.get("type").and_then(|value| value.as_str()) == Some("message_start") {
+                    summary.message_start_seen = true;
+                }
+                if parsed.get("type").and_then(|value| value.as_str()) == Some("message_delta") {
+                    summary.message_delta_seen = true;
+                }
+                if parsed.get("type").and_then(|value| value.as_str()) == Some("message_stop") {
+                    summary.message_stop_seen = true;
+                }
+            }
+        }
+    }
+
+    summary
 }
 
 fn pop_sse_event(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
@@ -1337,9 +1966,11 @@ fn looks_like_sse_prelude(chunk: &[u8]) -> bool {
 mod tests {
     use super::{
         find_sse_delimiter, looks_like_sse_prelude, merge_token_usage, pop_sse_event,
-        select_stream_transform, EntryEndpoint, StreamTransform,
+        prepare_transformer_for_route, stream_requires_sse_event_buffer, EntryEndpoint, PathEntry,
     };
     use crate::models::{RuleProtocol, TokenUsage};
+    use crate::proxy::routing::EntryProtocol;
+    use std::collections::HashSet;
 
     #[test]
     fn pop_sse_event_handles_lf_delimiter() {
@@ -1389,19 +2020,81 @@ mod tests {
     }
 
     #[test]
-    fn select_stream_transform_maps_openai_cross_surface_correctly() {
-        assert!(matches!(
-            select_stream_transform(EntryEndpoint::Responses, &RuleProtocol::OpenaiCompletion),
-            StreamTransform::ChatCompletionsToResponses
-        ));
-        assert!(matches!(
-            select_stream_transform(EntryEndpoint::ChatCompletions, &RuleProtocol::Openai),
-            StreamTransform::ResponsesToChatCompletions
-        ));
-        assert!(matches!(
-            select_stream_transform(EntryEndpoint::Messages, &RuleProtocol::Openai),
-            StreamTransform::ResponsesToClaudeMessages
-        ));
+    fn prepare_transformer_for_route_maps_all_supported_routes() {
+        let cases = [
+            (
+                EntryEndpoint::Messages,
+                RuleProtocol::Anthropic,
+                "cc_claude",
+            ),
+            (
+                EntryEndpoint::Messages,
+                RuleProtocol::OpenaiCompletion,
+                "cc_openai",
+            ),
+            (EntryEndpoint::Messages, RuleProtocol::Openai, "cc_openai2"),
+            (
+                EntryEndpoint::ChatCompletions,
+                RuleProtocol::Anthropic,
+                "cx_chat_claude",
+            ),
+            (
+                EntryEndpoint::ChatCompletions,
+                RuleProtocol::OpenaiCompletion,
+                "cx_chat_openai",
+            ),
+            (
+                EntryEndpoint::ChatCompletions,
+                RuleProtocol::Openai,
+                "cx_chat_openai2",
+            ),
+            (
+                EntryEndpoint::Responses,
+                RuleProtocol::Anthropic,
+                "cx_resp_claude",
+            ),
+            (
+                EntryEndpoint::Responses,
+                RuleProtocol::OpenaiCompletion,
+                "cx_resp_openai",
+            ),
+            (
+                EntryEndpoint::Responses,
+                RuleProtocol::Openai,
+                "cx_resp_openai2",
+            ),
+        ];
+
+        for (endpoint, target_protocol, expected_name) in cases {
+            let entry = PathEntry {
+                protocol: if matches!(endpoint, EntryEndpoint::Messages) {
+                    EntryProtocol::Anthropic
+                } else {
+                    EntryProtocol::Openai
+                },
+                endpoint,
+            };
+
+            let transformer = prepare_transformer_for_route(
+                &entry,
+                &target_protocol,
+                "test-model",
+                true,
+                &HashSet::from(["bash".to_string()]),
+            )
+            .expect("transformer should exist");
+
+            assert_eq!(transformer.name(), expected_name);
+        }
+    }
+
+    #[test]
+    fn stream_requires_sse_event_buffer_respects_passthrough_transformers() {
+        assert!(!stream_requires_sse_event_buffer("cc_claude"));
+        assert!(!stream_requires_sse_event_buffer("cx_chat_openai"));
+        assert!(!stream_requires_sse_event_buffer("cx_resp_openai2"));
+        assert!(stream_requires_sse_event_buffer("cc_openai"));
+        assert!(stream_requires_sse_event_buffer("cc_openai2"));
     }
 
     #[test]

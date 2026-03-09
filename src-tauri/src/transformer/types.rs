@@ -63,9 +63,16 @@ pub struct OpenAIRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<OpenAIStreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<OpenAITool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAIStreamOptions {
+    pub include_usage: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,6 +123,8 @@ pub struct OpenAIDelta {
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<OpenAIToolCall>>,
 }
@@ -219,6 +228,9 @@ pub struct StreamContext {
     pub buffered_output_text: String,
     pub buffered_output_index: Option<i32>,
     pub fallback_tool_call_counter: i32,
+    pub assistant_payload_emitted: bool,
+    pub in_thinking_tag: bool,
+    pub thinking_buffer: String,
 }
 
 impl StreamContext {
@@ -247,6 +259,9 @@ impl StreamContext {
             buffered_output_text: String::new(),
             buffered_output_index: None,
             fallback_tool_call_counter: 0,
+            assistant_payload_emitted: false,
+            in_thinking_tag: false,
+            thinking_buffer: String::new(),
         }
     }
 }

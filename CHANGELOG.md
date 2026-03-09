@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.8 - 2026-03-09
+### Breaking Changes
+- feat: add AgentConfig DTO for agent management (4fe7ba4)
+### Features
+- feat: update app icons and header brand logo (4328627)
+- feat: optimize group integration snapshot layout (38cb33d)
+- feat: refine codex config handling and compact agent/group UI (aea0552)
+- feat(transformer): add openai2 adapters and stream observability (0fac59c)
+- feat: wire agents pages into app navigation (f66c0c6)
+- feat: redesign agents management pages (4f68f5b)
+- feat: integrate AgentManagementPanel in ServicePage (d05a01b)
+- feat: add AgentManagementPanel component (ed5ce36)
+- feat: add i18n for agent management (7c60437)
+- feat: add AgentConfig types for frontend (6fb7522)
+- feat: add API to write agent config files (1a3dae4)
+- feat: add API to read agent config files (072a6c9)
+- feat: add one-click client config write flow (056205c)
+- feat: improve provider testing and proxy/service compatibility (6136b87)
+- feat(transformer): complete Responses ↔ Chat Completions conversion (b8c2d95)
+- feat(transformer): add streaming support and debug documentation (491ba23)
+- feat(transformer): implement streaming conversion for OpenAI Responses API (749ab5f)
+- feat(transformer): add complete protocol conversion support (1246e0d)
+- feat(transformer): add streaming and Gemini support (213bebb)
+### Fixes
+- fix: preserve upstream response events in claude stream (fc4fb2f)
+- fix(proxy): keep draining upstream stream after client close (fa577fe)
+- fix: add WSL path handling for read_agent_config (f09a41d)
+- fix: harden responses stream handling and tool-call fallback (f075e30)
+- fix(proxy): improve token usage extraction compatibility (01a709f)
+- fix: align responses->chat path and improve debug logging (cece4ba)
+- fix(transformer): map developer role to user for API compatibility (30ed8be)
+- fix(transformer): map developer role to user for Claude compatibility (0267d73)
+- fix(transformer): correct OpenAI Responses <-> Claude conversion (fa596ba)
+- fix(pipeline): implement protocol conversion in request/response pipeline (c06c788)
+### Maintenance
+- style(integration): align conflict resolution with beta branch (62fd56f)
+- docs: reorganize planning documents (ef27148)
+- style: format code with cargo fmt (930550f)
+- refactor: remove dead code in config parsing (788da33)
+- other: Fix WSL config writes on Windows (6323c88)
+- style(rust): format code with cargo fmt (4b6848e)
+- chore(release): bump version to v0.2.7 (8a0225f)
+- chore: add debug dump artifacts (7ec3e27)
+- test(transformer): add unit tests and remove old mapper tests (ab4365a)
+- refactor(transformer): implement ccNexus architecture with Claude-centric conversion (d2b05d5)
+
 ## v0.2.7 - 2026-03-08
 ### Features
 - feat: add one-click client config write flow (056205c)

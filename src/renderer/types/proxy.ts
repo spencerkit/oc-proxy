@@ -203,6 +203,8 @@ export interface LogEntry {
   requestBody: unknown
   forwardRequestBody: unknown
   responseBody: unknown
+  transformedResponseBody: unknown
+  transformDebug?: unknown
   tokenUsage?: TokenUsage | null
   costSnapshot?: CostSnapshot | null
   httpStatus: number | null

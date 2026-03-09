@@ -18,6 +18,12 @@ function matchesKeyword(keyword: string, values: Array<string | null | undefined
   return values.some(value => value?.toLowerCase().includes(normalized))
 }
 
+function normalizeComparableUrl(raw?: string | null): string {
+  const value = raw?.trim()
+  if (!value) return ""
+  return value.replace(/\/+$/, "")
+}
+
 /**
  * ServicePage Component
  * Main page for managing proxy groups and providers
@@ -68,6 +74,10 @@ export const ServicePage: React.FC = () => {
   const [showIntegrationWriteModal, setShowIntegrationWriteModal] = useState(false)
   const [integrationTargets, setIntegrationTargets] = useState<IntegrationTarget[]>([])
   const [integrationLoading, setIntegrationLoading] = useState(false)
+  const [integrationStatusRefreshing, setIntegrationStatusRefreshing] = useState(false)
+  const [integrationTargetUrlById, setIntegrationTargetUrlById] = useState<Record<string, string>>(
+    {}
+  )
   const [integrationWriting, setIntegrationWriting] = useState(false)
   const [integrationAddingKind, setIntegrationAddingKind] = useState<IntegrationClientKind | null>(
     null
@@ -88,7 +98,6 @@ export const ServicePage: React.FC = () => {
     )
   }, [groupSearchValue, groups])
   const activeGroup = groups.find(group => group.id === activeGroupId) ?? null
-  const activeGroupModels = Array.isArray(activeGroup?.models) ? activeGroup.models : []
   const pendingDeleteProvider =
     activeGroup?.providers.find(item => item.id === pendingDeleteProviderId) ?? null
   const integrationSections = useMemo(
@@ -402,6 +411,30 @@ export const ServicePage: React.FC = () => {
     }
   }, [showToast, t])
 
+  const refreshIntegrationTargetStatus = React.useCallback(async (targets: IntegrationTarget[]) => {
+    if (!targets.length) {
+      setIntegrationTargetUrlById({})
+      return
+    }
+
+    setIntegrationStatusRefreshing(true)
+    try {
+      const results = await Promise.all(
+        targets.map(async target => {
+          try {
+            const file = await ipc.integrationReadAgentConfig(target.id)
+            return [target.id, file.parsedConfig?.url?.trim() || ""] as const
+          } catch {
+            return [target.id, ""] as const
+          }
+        })
+      )
+      setIntegrationTargetUrlById(Object.fromEntries(results))
+    } finally {
+      setIntegrationStatusRefreshing(false)
+    }
+  }, [])
+
   const openIntegrationWriteModal = async () => {
     if (!activeGroup) return
     setShowIntegrationWriteModal(true)
@@ -414,6 +447,24 @@ export const ServicePage: React.FC = () => {
     setShowIntegrationWriteModal(false)
     setSelectedIntegrationIds({})
   }
+
+  useEffect(() => {
+    if (!activeGroup) {
+      setIntegrationTargets([])
+      setIntegrationTargetUrlById({})
+      return
+    }
+    void loadIntegrationTargets()
+  }, [activeGroup, loadIntegrationTargets])
+
+  useEffect(() => {
+    if (!activeGroup) return
+    if (!integrationTargets.length) {
+      setIntegrationTargetUrlById({})
+      return
+    }
+    void refreshIntegrationTargetStatus(integrationTargets)
+  }, [activeGroup, integrationTargets, refreshIntegrationTargetStatus])
 
   const handleAddIntegrationTarget = async (kind: IntegrationClientKind) => {
     setIntegrationAddingKind(kind)
@@ -486,6 +537,7 @@ export const ServicePage: React.FC = () => {
           }),
           "success"
         )
+        await loadIntegrationTargets()
         setShowIntegrationWriteModal(false)
         setSelectedIntegrationIds({})
         return
@@ -523,7 +575,7 @@ export const ServicePage: React.FC = () => {
       case "claude":
         return "env.ANTHROPIC_BASE_URL"
       case "codex":
-        return "model_providers.aor_shared.base_url"
+        return "model_providers.<model_provider>.base_url"
       default:
         return "provider.aor_shared.options.baseURL"
     }
@@ -545,7 +597,33 @@ export const ServicePage: React.FC = () => {
   const preferredEntryUrl = React.useMemo(() => {
     return entryUrls.find(url => !url.includes("://localhost")) ?? entryUrls[0] ?? ""
   }, [entryUrls])
-
+  const entryUrlSet = useMemo(
+    () => new Set(entryUrls.map(url => normalizeComparableUrl(url)).filter(Boolean)),
+    [entryUrls]
+  )
+  const integrationSnapshotSections = useMemo(() => {
+    return integrationSections
+      .map(section => {
+        const targets = integrationTargetsByKind[section.kind]
+        const items = targets
+          .map(target => {
+            const configuredUrl = normalizeComparableUrl(integrationTargetUrlById[target.id])
+            const matched = configuredUrl ? entryUrlSet.has(configuredUrl) : false
+            return {
+              target,
+              matched,
+            }
+          })
+          .filter(item => item.matched)
+        return {
+          ...section,
+          total: targets.length,
+          matched: items.length,
+          items,
+        }
+      })
+      .filter(section => section.matched > 0)
+  }, [entryUrlSet, integrationSections, integrationTargetUrlById, integrationTargetsByKind])
   const activeGroupQuotaByProviderId = React.useMemo(() => {
     const map: Record<string, (typeof providerQuotas)[string] | undefined> = {}
     if (!activeGroup) return map
@@ -657,62 +735,107 @@ export const ServicePage: React.FC = () => {
           <>
             <div className={styles.groupHeader}>
               <div className={styles.groupInfo}>
-                <h2>{activeGroup.name}</h2>
-                <div className={styles.groupMeta}>
-                  <span className={styles.metaChip}>/{activeGroup.id}</span>
-                  <span className={styles.metaChip}>
-                    {t("servicePage.rulesCount", { count: activeGroup.providers.length })}
-                  </span>
-                  <span className={styles.metaChip}>
-                    {t("servicePage.modelsCount", { count: activeGroupModels.length })}
-                  </span>
-                </div>
-                <div className={styles.entryUrl}>
-                  <div className={styles.entryUrlList}>
-                    {entryUrls.map(url => (
-                      <div key={url} className={styles.entryUrlItem}>
-                        <code>{url}</code>
-                        <Button
-                          variant="ghost"
-                          size="small"
-                          icon={Copy}
-                          className={styles.entryUrlCopyButton}
-                          onClick={() => handleCopyEntryUrl(url)}
-                          title={t("servicePage.copyEntryUrl")}
-                          aria-label={`${t("servicePage.copyEntryUrl")}: ${url}`}
-                        />
-                      </div>
-                    ))}
+                <div className={styles.groupTitleRow}>
+                  <h2>{activeGroup.name}</h2>
+                  <div className={styles.groupActions}>
+                    <Button
+                      variant="default"
+                      size="small"
+                      icon={Upload}
+                      onClick={() => {
+                        void openIntegrationWriteModal()
+                      }}
+                      title={t("integration.openWrite")}
+                      aria-label={t("integration.openWrite")}
+                    />
+                    <Button
+                      variant="default"
+                      size="small"
+                      icon={Pencil}
+                      onClick={() => navigate(`/groups/${activeGroup.id}/edit`)}
+                      title={t("servicePage.editGroup")}
+                      aria-label={t("servicePage.editGroup")}
+                    />
+                    <Button
+                      variant="danger"
+                      size="small"
+                      icon={Trash2}
+                      onClick={() => setShowDeleteGroupModal(true)}
+                      title={t("servicePage.deleteGroup")}
+                      aria-label={t("servicePage.deleteGroup")}
+                    />
                   </div>
                 </div>
-              </div>
-              <div className={styles.groupActions}>
-                <Button
-                  variant="default"
-                  size="small"
-                  icon={Upload}
-                  onClick={() => {
-                    void openIntegrationWriteModal()
-                  }}
-                  title={t("integration.openWrite")}
-                  aria-label={t("integration.openWrite")}
-                />
-                <Button
-                  variant="default"
-                  size="small"
-                  icon={Pencil}
-                  onClick={() => navigate(`/groups/${activeGroup.id}/edit`)}
-                  title={t("servicePage.editGroup")}
-                  aria-label={t("servicePage.editGroup")}
-                />
-                <Button
-                  variant="danger"
-                  size="small"
-                  icon={Trash2}
-                  onClick={() => setShowDeleteGroupModal(true)}
-                  title={t("servicePage.deleteGroup")}
-                  aria-label={t("servicePage.deleteGroup")}
-                />
+                <div className={styles.groupInfoGrid}>
+                  <div className={styles.entryUrl}>
+                    <div className={styles.infoPanelTitle}>{t("servicePage.entryUrl")}</div>
+                    <div className={styles.entryUrlList}>
+                      {entryUrls.map(url => (
+                        <div key={url} className={styles.entryUrlItem}>
+                          <code>{url}</code>
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            icon={Copy}
+                            className={styles.entryUrlCopyButton}
+                            onClick={() => handleCopyEntryUrl(url)}
+                            title={t("servicePage.copyEntryUrl")}
+                            aria-label={`${t("servicePage.copyEntryUrl")}: ${url}`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className={styles.integrationSnapshot}>
+                    <div className={styles.integrationSnapshotHeader}>
+                      <span className={styles.integrationSnapshotTitle}>
+                        {t("integration.snapshotTitle")}
+                      </span>
+                      <Button
+                        size="small"
+                        variant="ghost"
+                        onClick={() => {
+                          void refreshIntegrationTargetStatus(integrationTargets)
+                        }}
+                        loading={integrationStatusRefreshing}
+                        disabled={integrationLoading || integrationTargets.length === 0}
+                      >
+                        {t("integration.snapshotRefresh")}
+                      </Button>
+                    </div>
+
+                    {integrationLoading ? (
+                      <div className={styles.integrationSnapshotEmpty}>{t("common.loading")}</div>
+                    ) : integrationSnapshotSections.length === 0 ? (
+                      <div className={styles.integrationSnapshotEmpty}>
+                        {t("integration.snapshotEmpty")}
+                      </div>
+                    ) : (
+                      <div className={styles.integrationSnapshotSections}>
+                        {integrationSnapshotSections.map(section => (
+                          <div key={section.kind} className={styles.integrationSnapshotSection}>
+                            <ul className={styles.integrationSnapshotList}>
+                              {section.items.map(item => (
+                                <li key={item.target.id} className={styles.integrationSnapshotItem}>
+                                  <span className={styles.integrationSnapshotAgent}>
+                                    {getIntegrationClientLabel(item.target.kind)}
+                                  </span>
+                                  <code
+                                    className={styles.integrationSnapshotPath}
+                                    title={item.target.configDir}
+                                  >
+                                    {item.target.configDir}
+                                  </code>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -734,7 +857,6 @@ export const ServicePage: React.FC = () => {
               onTestModel={handleTestProviderModel}
               testingProviderIds={testingProviderIds}
               onDelete={handleRequestDeleteProvider}
-              groupName={activeGroup.name}
               groupId={activeGroup.id}
               emptyMessage={t("servicePage.noRulesHint")}
             />

@@ -469,6 +469,8 @@ pub(super) fn log_simple(
         request_body: None,
         forward_request_body: None,
         response_body: response_body_for_log,
+        transformed_response_body: None,
+        transform_debug: None,
         token_usage: None,
         cost_snapshot: None,
         http_status,
@@ -503,6 +505,47 @@ pub(super) fn append_processing_log(
     request_body: Option<Value>,
     forward_request_body: Option<Value>,
     capture_body: bool,
+) {
+    append_processing_log_with_stream_debug(
+        state,
+        timestamp,
+        trace_id,
+        method,
+        parsed_path,
+        group_name,
+        rule,
+        entry,
+        model,
+        forwarded_model,
+        forwarding_address,
+        request_headers,
+        forward_request_headers,
+        request_body,
+        forward_request_body,
+        capture_body,
+        None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn append_processing_log_with_stream_debug(
+    state: &ServiceState,
+    timestamp: &str,
+    trace_id: &str,
+    method: &axum::http::Method,
+    parsed_path: &ParsedPath,
+    group_name: &str,
+    rule: &Rule,
+    entry: &PathEntry,
+    model: Option<&str>,
+    forwarded_model: Option<&str>,
+    forwarding_address: Option<&str>,
+    request_headers: Option<HashMap<String, String>>,
+    forward_request_headers: Option<HashMap<String, String>>,
+    request_body: Option<Value>,
+    forward_request_body: Option<Value>,
+    capture_body: bool,
+    stream_debug: Option<Value>,
 ) {
     let request_body_for_log = if capture_body {
         request_body.clone()
@@ -544,6 +587,14 @@ pub(super) fn append_processing_log(
         request_body: request_body_for_log,
         forward_request_body: forward_request_body_for_log,
         response_body: None,
+        transformed_response_body: None,
+        transform_debug: build_transform_debug(
+            request_body.as_ref(),
+            forward_request_body.as_ref(),
+            None,
+            None,
+            stream_debug,
+        ),
         token_usage: None,
         cost_snapshot: None,
         http_status: None,
@@ -581,6 +632,7 @@ pub(super) fn finalize_log(
     request_body: Option<Value>,
     forward_request_body: Option<Value>,
     response_body: Option<Value>,
+    transformed_response_body: Option<Value>,
     debug_response_body: Option<Value>,
     http_status: Option<u16>,
     upstream_status: Option<u16>,
@@ -590,6 +642,67 @@ pub(super) fn finalize_log(
     duration_ms: u64,
     status: &str,
     capture_body: bool,
+) {
+    finalize_log_with_stream_debug(
+        state,
+        timestamp,
+        trace_id,
+        method,
+        parsed_path,
+        group_name,
+        rule,
+        entry,
+        model,
+        forwarded_model,
+        forwarding_address,
+        request_headers,
+        forward_request_headers,
+        request_body,
+        forward_request_body,
+        response_body,
+        transformed_response_body,
+        debug_response_body,
+        http_status,
+        upstream_status,
+        upstream_headers,
+        response_headers,
+        token_usage,
+        duration_ms,
+        status,
+        capture_body,
+        None,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn finalize_log_with_stream_debug(
+    state: &ServiceState,
+    timestamp: &str,
+    trace_id: &str,
+    method: &axum::http::Method,
+    parsed_path: &ParsedPath,
+    group_name: &str,
+    rule: &Rule,
+    entry: &PathEntry,
+    model: Option<&str>,
+    forwarded_model: Option<&str>,
+    forwarding_address: Option<&str>,
+    request_headers: Option<HashMap<String, String>>,
+    forward_request_headers: Option<HashMap<String, String>>,
+    request_body: Option<Value>,
+    forward_request_body: Option<Value>,
+    response_body: Option<Value>,
+    transformed_response_body: Option<Value>,
+    debug_response_body: Option<Value>,
+    http_status: Option<u16>,
+    upstream_status: Option<u16>,
+    upstream_headers: Option<HashMap<String, String>>,
+    response_headers: Option<HashMap<String, String>>,
+    token_usage: Option<TokenUsage>,
+    duration_ms: u64,
+    status: &str,
+    capture_body: bool,
+    stream_debug: Option<Value>,
 ) {
     let request_body_for_log = if capture_body {
         request_body.clone()
@@ -606,11 +719,23 @@ pub(super) fn finalize_log(
     } else {
         None
     };
+    let transformed_response_body_for_log = if capture_body {
+        transformed_response_body.clone()
+    } else {
+        None
+    };
     let debug_response_body_for_dev = debug_response_body.or_else(|| response_body.clone());
 
     let cost_snapshot = token_usage
         .as_ref()
         .map(|usage| build_cost_snapshot(rule, usage));
+    let transform_debug = build_transform_debug(
+        request_body.as_ref(),
+        forward_request_body.as_ref(),
+        response_body.as_ref(),
+        transformed_response_body.as_ref(),
+        stream_debug,
+    );
 
     let entry = LogEntry {
         timestamp: timestamp.to_string(),
@@ -642,6 +767,8 @@ pub(super) fn finalize_log(
         request_body: request_body_for_log,
         forward_request_body: forward_request_body_for_log,
         response_body: response_body_for_log,
+        transformed_response_body: transformed_response_body_for_log,
+        transform_debug,
         token_usage,
         cost_snapshot,
         http_status,
@@ -653,10 +780,245 @@ pub(super) fn finalize_log(
     dev_entry.request_body = request_body;
     dev_entry.forward_request_body = forward_request_body;
     dev_entry.response_body = debug_response_body_for_dev;
+    dev_entry.transformed_response_body = transformed_response_body;
     state
         .log_store
         .upsert_by_trace_id_with_dev_entry(entry.clone(), Some(dev_entry));
     state.stats_store.append_log(&entry);
+}
+
+fn build_transform_debug(
+    request_body: Option<&Value>,
+    forward_request_body: Option<&Value>,
+    response_body: Option<&Value>,
+    transformed_response_body: Option<&Value>,
+    stream_debug: Option<Value>,
+) -> Option<Value> {
+    if request_body.is_none()
+        && forward_request_body.is_none()
+        && response_body.is_none()
+        && transformed_response_body.is_none()
+        && stream_debug.is_none()
+    {
+        return None;
+    }
+
+    let mut debug = json!({
+        "request": {
+            "originalStream": request_body.and_then(|body| body.get("stream")).cloned(),
+            "forwardStream": forward_request_body.and_then(|body| body.get("stream")).cloned(),
+            "originalToolChoice": request_body.and_then(|body| body.get("tool_choice")).cloned(),
+            "forwardToolChoice": forward_request_body.and_then(|body| body.get("tool_choice")).cloned(),
+            "forwardToolCount": forward_request_body
+                .and_then(|body| body.get("tools"))
+                .and_then(|tools| tools.as_array())
+                .map(|tools| tools.len()),
+            "forwardInputCount": forward_request_body
+                .and_then(|body| body.get("input"))
+                .and_then(|input| input.as_array())
+                .map(|input| input.len()),
+            "hasPriorToolResult": request_body.map(request_has_tool_result),
+        },
+        "response": {
+            "responseBodyKind": response_body.map(body_kind),
+            "responseBodySource": response_body.and_then(body_source),
+            "responseStopReason": response_body.and_then(extract_response_stop_reason),
+            "responseHasFunctionCall": response_body.map(body_has_function_call),
+            "responseHasToolUse": response_body.map(body_has_tool_use),
+            "transformedBodyKind": transformed_response_body.map(body_kind),
+            "transformedBodySource": transformed_response_body.and_then(body_source),
+            "transformedStopReason": transformed_response_body.and_then(extract_response_stop_reason),
+            "transformedHasFunctionCall": transformed_response_body.map(body_has_function_call),
+            "transformedHasToolUse": transformed_response_body.map(body_has_tool_use),
+            "responseStreamEventCount": response_body.and_then(stream_event_count),
+            "transformedStreamEventCount": transformed_response_body.and_then(stream_event_count),
+            "responseFirstStreamEvent": response_body.and_then(first_stream_event_name),
+            "transformedFirstStreamEvent": transformed_response_body.and_then(first_stream_event_name),
+            "responseFirstDataType": response_body.and_then(first_stream_data_type),
+            "transformedFirstDataType": transformed_response_body.and_then(first_stream_data_type),
+            "responseHasDone": response_body.map(stream_has_done),
+            "transformedHasDone": transformed_response_body.map(stream_has_done),
+            "transformedHasMessageStart": transformed_response_body.map(|body| stream_payload_contains(body, "\"type\":\"message_start\"")),
+            "transformedHasMessageDelta": transformed_response_body.map(|body| stream_payload_contains(body, "\"type\":\"message_delta\"")),
+            "transformedHasMessageStop": transformed_response_body.map(|body| stream_payload_contains(body, "\"type\":\"message_stop\"")),
+            "streamPayloadDiffers": match (response_body.and_then(stream_payload), transformed_response_body.and_then(stream_payload)) {
+                (Some(raw), Some(transformed)) => Some(raw != transformed),
+                _ => None,
+            },
+        }
+    });
+
+    if let Some(stream_debug) = stream_debug {
+        if let Some(object) = debug.as_object_mut() {
+            object.insert("stream".to_string(), stream_debug);
+        }
+    }
+
+    Some(debug)
+}
+
+fn request_has_tool_result(request_body: &Value) -> bool {
+    if let Some(messages) = request_body
+        .get("messages")
+        .and_then(|messages| messages.as_array())
+    {
+        return messages.iter().any(|message| {
+            message
+                .get("content")
+                .and_then(|content| content.as_array())
+                .map(|blocks| {
+                    blocks.iter().any(|block| {
+                        block.get("type").and_then(|value| value.as_str()) == Some("tool_result")
+                    })
+                })
+                .unwrap_or(false)
+        });
+    }
+
+    request_body
+        .get("input")
+        .and_then(|input| input.as_array())
+        .map(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(|value| value.as_str()) == Some("function_call_output")
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn body_kind(body: &Value) -> &'static str {
+    if stream_payload(body).is_some() {
+        "stream"
+    } else if body.is_object() || body.is_array() {
+        "json"
+    } else {
+        "scalar"
+    }
+}
+
+fn body_source(body: &Value) -> Option<String> {
+    body.get("source")
+        .and_then(|source| source.as_str())
+        .map(|source| source.to_string())
+}
+
+fn extract_response_stop_reason(body: &Value) -> Option<String> {
+    if let Some(payload) = stream_payload(body) {
+        return detect_stream_stop_reason(payload).map(|reason| reason.to_string());
+    }
+
+    body.get("stop_reason")
+        .or_else(|| body.get("finish_reason"))
+        .and_then(|reason| reason.as_str())
+        .map(|reason| reason.to_string())
+}
+
+fn body_has_function_call(body: &Value) -> bool {
+    if let Some(payload) = stream_payload(body) {
+        return payload.contains("\"type\":\"function_call\"")
+            || payload.contains("response.function_call_arguments.delta")
+            || payload.contains("response.function_call_arguments.done");
+    }
+
+    serde_json::to_string(body)
+        .map(|text| {
+            text.contains("\"type\":\"function_call\"")
+                || text.contains("\"finish_reason\":\"tool_calls\"")
+        })
+        .unwrap_or(false)
+}
+
+fn body_has_tool_use(body: &Value) -> bool {
+    if let Some(payload) = stream_payload(body) {
+        return payload.contains("\"type\":\"tool_use\"")
+            || payload.contains("\"stop_reason\":\"tool_use\"");
+    }
+
+    serde_json::to_string(body)
+        .map(|text| text.contains("\"type\":\"tool_use\""))
+        .unwrap_or(false)
+}
+
+fn stream_payload(body: &Value) -> Option<&str> {
+    if body.get("stream").and_then(|stream| stream.as_bool()) == Some(true) {
+        return body.get("payload").and_then(|payload| payload.as_str());
+    }
+    None
+}
+
+fn stream_event_count(body: &Value) -> Option<usize> {
+    let payload = stream_payload(body)?;
+    Some(split_stream_events(payload).len())
+}
+
+fn first_stream_event_name(body: &Value) -> Option<String> {
+    let payload = stream_payload(body)?;
+    let first = split_stream_events(payload).into_iter().next()?;
+    for line in first.lines() {
+        if let Some(value) = line.trim_start().strip_prefix("event:") {
+            return Some(value.trim().to_string());
+        }
+    }
+    first_stream_data_type(body)
+}
+
+fn first_stream_data_type(body: &Value) -> Option<String> {
+    let payload = stream_payload(body)?;
+    let first = split_stream_events(payload).into_iter().next()?;
+    for line in first.lines() {
+        let Some(value) = line.trim_start().strip_prefix("data:") else {
+            continue;
+        };
+        let data = value.trim();
+        if data.is_empty() || data == "[DONE]" {
+            continue;
+        }
+        if let Ok(parsed) = serde_json::from_str::<Value>(data) {
+            if let Some(kind) = parsed.get("type").and_then(|value| value.as_str()) {
+                return Some(kind.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn stream_has_done(body: &Value) -> bool {
+    stream_payload_contains(body, "[DONE]")
+}
+
+fn stream_payload_contains(body: &Value, needle: &str) -> bool {
+    stream_payload(body)
+        .map(|payload| payload.contains(needle))
+        .unwrap_or(false)
+}
+
+fn split_stream_events(payload: &str) -> Vec<String> {
+    payload
+        .replace("\r\n", "\n")
+        .split("\n\n")
+        .filter_map(|event| {
+            let trimmed = event.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
+}
+
+fn detect_stream_stop_reason(payload: &str) -> Option<&'static str> {
+    if payload.contains("\"stop_reason\":\"tool_use\"")
+        || payload.contains("\"finish_reason\":\"tool_calls\"")
+    {
+        return Some("tool_use");
+    }
+    if payload.contains("\"stop_reason\":\"end_turn\"")
+        || payload.contains("\"finish_reason\":\"stop\"")
+    {
+        return Some("end_turn");
+    }
+    None
 }
 
 /// Builds cost snapshot.

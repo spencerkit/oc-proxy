@@ -18,24 +18,17 @@
   flex: 1;
 }
 
-.title {
-  font-family: var(--font-display);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-  margin: 0;
-  white-space: nowrap;
-  letter-spacing: -0.01em;
+.brand {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
 }
 
-.subtitle {
-  font-family: var(--font-body);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-normal);
-  color: var(--text-tertiary);
-  margin-top: 1px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+.brandLogo {
+  display: block;
+  height: 30px;
+  width: auto;
+  max-width: min(340px, 30vw);
 }
 
 /* Service Status */
@@ -243,8 +236,9 @@
     gap: var(--sp-3);
   }
 
-  .subtitle {
-    display: none;
+  .brandLogo {
+    height: 28px;
+    max-width: min(300px, 30vw);
   }
 
   .serverAddress {
@@ -286,8 +280,9 @@
     padding: var(--sp-3) var(--sp-4);
   }
 
-  .title {
-    font-size: var(--text-lg);
+  .brandLogo {
+    height: 24px;
+    max-width: min(220px, 48vw);
   }
 
   .navButton {

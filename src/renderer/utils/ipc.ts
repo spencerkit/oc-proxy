@@ -1,4 +1,6 @@
 import type {
+  AgentConfig,
+  AgentConfigFile,
   AppInfo,
   ClipboardTextResult,
   GroupBackupExportResult,
@@ -19,6 +21,7 @@ import type {
   SaveConfigResult,
   StatsDimension,
   StatsSummaryResult,
+  WriteAgentConfigResult,
 } from "@/types"
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>
@@ -239,6 +242,32 @@ export const ipc = {
     return getInvoke()<IntegrationWriteResult>("integration_write_group_entry", {
       groupId,
       targetIds,
+    })
+  },
+
+  integrationReadAgentConfig(targetId: string): Promise<AgentConfigFile> {
+    return getInvoke()<AgentConfigFile>("integration_read_agent_config", { targetId })
+  },
+
+  integrationWriteAgentConfig(
+    targetId: string,
+    config: AgentConfig
+  ): Promise<WriteAgentConfigResult> {
+    return getInvoke()<WriteAgentConfigResult>("integration_write_agent_config", {
+      targetId,
+      config,
+    })
+  },
+
+  integrationWriteAgentConfigSource(
+    targetId: string,
+    content: string,
+    sourceId?: string
+  ): Promise<WriteAgentConfigResult> {
+    return getInvoke()<WriteAgentConfigResult>("integration_write_agent_config_source", {
+      targetId,
+      content,
+      sourceId,
     })
   },
 }

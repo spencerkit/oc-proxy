@@ -2,18 +2,41 @@
 //! Service-layer operations for external client integrations.
 //! Handles target persistence and one-click write for Claude/Codex/OpenCode configs.
 
+use crate::api::dto::{AgentConfig, AgentConfigFile, AgentSourceFile, WriteAgentConfigResult};
 use crate::app_state::SharedState;
 use crate::models::{
     IntegrationClientKind, IntegrationTarget, IntegrationWriteItem, IntegrationWriteResult,
     ProxyConfig,
 };
 use crate::services::{AppError, AppResult};
+use crate::wsl;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::net::{Ipv4Addr, UdpSocket};
 use std::path::{Path, PathBuf};
 use toml_edit::{value, DocumentMut, Item, Table};
 use url::Url;
+
+const SOURCE_PRIMARY: &str = "primary";
+const SOURCE_AUTH: &str = "auth";
+
+/// Writes debug log to a file in app data directory.
+fn write_debug_log(message: &str) {
+    // Try to write to a log file in temp directory
+    if let Ok(log_dir) = std::env::var("LOCALAPPDATA") {
+        let log_dir = PathBuf::from(log_dir).join("art.shier.aiopenrouter");
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_path = log_dir.join("wsl-debug.log");
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+            let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f");
+            let _ = writeln!(file, "[{}] {}", timestamp, message);
+        }
+    }
+    // Also print to stderr
+    eprintln!("{}", message);
+}
 
 /// Performs list targets.
 pub fn list_targets(state: &SharedState) -> Vec<IntegrationTarget> {
@@ -233,20 +256,89 @@ fn is_loopback_or_localhost_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
+fn is_wsl_path(path: &Path) -> bool {
+    wsl::is_wsl_path(path)
+}
+
+/// Writes content to a file, handling WSL paths by using WSL command.
+fn write_file_content(file_path: &Path, content: &str) -> AppResult<()> {
+    let file_path_str = file_path.to_string_lossy();
+    write_debug_log(&format!(
+        "write_file_content called with path: {}",
+        file_path_str
+    ));
+
+    if is_wsl_path(file_path) {
+        if let Some(resolved) = wsl::resolve_path(file_path) {
+            write_debug_log(&format!(
+                "Writing via WSL distro={}, path={}",
+                resolved.distro, resolved.linux_path
+            ));
+        }
+        wsl::write_file(file_path, content).map_err(|e| {
+            write_debug_log(&format!("ERROR: WSL write failed: {}", e));
+            AppError::external(format!(
+                "write WSL file failed ({}): {e}",
+                file_path.display()
+            ))
+        })?;
+        write_debug_log("Write successful!");
+        return Ok(());
+    }
+
+    write_debug_log("Non-WSL path, using std::fs");
+
+    // Normal file write for non-WSL paths
+    // Create parent directory if needed
+    if let Some(parent) = file_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::external(format!("create directory failed: {}", e)))?;
+    }
+
+    std::fs::write(file_path, content)
+        .map_err(|e| AppError::external(format!("write file failed: {}", e)))
+}
+
+fn normalize_wsl_path(path: &Path) -> Option<PathBuf> {
+    wsl::normalize_windows_path(path)
+}
+
 /// Writes one target entry URL by kind.
 fn write_target_entry(target: &IntegrationTarget, entry_url: &str) -> AppResult<PathBuf> {
-    let config_dir = PathBuf::from(target.config_dir.trim());
-    if !config_dir.exists() {
-        return Err(AppError::external(format!(
-            "config directory does not exist: {}",
-            config_dir.display()
-        )));
-    }
-    if !config_dir.is_dir() {
-        return Err(AppError::external(format!(
-            "config directory is not a folder: {}",
-            config_dir.display()
-        )));
+    write_debug_log(&format!(
+        "write_target_entry called, config_dir: {}",
+        target.config_dir
+    ));
+    let config_dir_raw = PathBuf::from(target.config_dir.trim());
+
+    // Try to normalize WSL path - convert \\?\UNC\wsl.localhost\ to \\wsl$\
+    let config_dir = match normalize_wsl_path(&config_dir_raw) {
+        Some(normalized) => {
+            write_debug_log(&format!("Normalized path to: {}", normalized.display()));
+            normalized
+        }
+        None => {
+            write_debug_log("Not a WSL path, using raw");
+            config_dir_raw.clone()
+        }
+    };
+
+    write_debug_log(&format!("Final config_dir: {}", config_dir.display()));
+
+    if !is_wsl_path(&config_dir) {
+        if !config_dir.exists() {
+            return Err(AppError::external(format!(
+                "config directory does not exist: {}",
+                config_dir.display()
+            )));
+        }
+
+        if !config_dir.is_dir() {
+            return Err(AppError::external(format!(
+                "config directory is not a folder: {}",
+                config_dir.display()
+            )));
+        }
     }
 
     match target.kind {
@@ -271,7 +363,7 @@ fn write_claude_settings(config_dir: &Path, entry_url: &str) -> AppResult<PathBu
 
 /// Writes OpenCode provider.aor_shared.options.baseURL.
 fn write_opencode_config(config_dir: &Path, entry_url: &str) -> AppResult<PathBuf> {
-    let file_path = resolve_opencode_config_path(config_dir);
+    let file_path = resolve_opencode_config_path(config_dir)?;
     let mut root = read_json_like_object(&file_path)?;
     let provider = ensure_child_object(&mut root, "provider");
     let aor_shared = ensure_child_object(provider, "aor_shared");
@@ -281,66 +373,108 @@ fn write_opencode_config(config_dir: &Path, entry_url: &str) -> AppResult<PathBu
     Ok(file_path)
 }
 
-/// Writes Codex model_providers.aor_shared.base_url.
+/// Writes Codex model_providers.<model_provider>.base_url.
 fn write_codex_config(config_dir: &Path, entry_url: &str) -> AppResult<PathBuf> {
     let file_path = config_dir.join("config.toml");
     let mut doc = read_toml_document(&file_path)?;
-    if !doc["model_providers"].is_table() {
-        doc["model_providers"] = Item::Table(Table::new());
-    }
-    if !doc["model_providers"]["aor_shared"].is_table() {
-        doc["model_providers"]["aor_shared"] = Item::Table(Table::new());
-    }
-    doc["model_providers"]["aor_shared"]["base_url"] = value(entry_url);
+    let provider_name = resolve_codex_provider_name_from_doc(&doc)?;
+    let model_providers = ensure_toml_table(doc.as_table_mut(), "model_providers");
+    let provider_table = ensure_toml_table(model_providers, &provider_name);
+    provider_table["base_url"] = value(entry_url);
 
-    if let Some(parent) = file_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::external(format!(
-                "create codex config dir failed ({}): {e}",
-                parent.display()
-            ))
-        })?;
-    }
     let mut output = doc.to_string();
     if !output.ends_with('\n') {
         output.push('\n');
     }
-    std::fs::write(&file_path, output).map_err(|e| {
-        AppError::external(format!(
-            "write codex config failed ({}): {e}",
-            file_path.display()
-        ))
-    })?;
+
+    write_file_content(&file_path, &output)?;
     Ok(file_path)
 }
 
+fn resolve_codex_provider_name_from_map(config_root: &Map<String, Value>) -> Option<String> {
+    config_root
+        .get("model_provider")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(String::from)
+}
+
+fn resolve_codex_provider_name_from_doc(doc: &DocumentMut) -> AppResult<String> {
+    let explicit = doc
+        .get("model_provider")
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(String::from);
+    if let Some(name) = explicit {
+        return Ok(name);
+    }
+    Err(AppError::validation(
+        "codex config missing required `model_provider`".to_string(),
+    ))
+}
+
 /// Resolves OpenCode config file path.
-fn resolve_opencode_config_path(config_dir: &Path) -> PathBuf {
+fn resolve_opencode_config_path(config_dir: &Path) -> AppResult<PathBuf> {
     let jsonc = config_dir.join("opencode.jsonc");
+    if is_wsl_path(config_dir) {
+        if wsl::is_file(&jsonc).map_err(|e| {
+            AppError::external(format!(
+                "check WSL config file failed ({}): {e}",
+                jsonc.display()
+            ))
+        })? {
+            return Ok(jsonc);
+        }
+
+        let json = config_dir.join("opencode.json");
+        if wsl::is_file(&json).map_err(|e| {
+            AppError::external(format!(
+                "check WSL config file failed ({}): {e}",
+                json.display()
+            ))
+        })? {
+            return Ok(json);
+        }
+
+        return Ok(json);
+    }
+
     if jsonc.exists() {
-        return jsonc;
+        return Ok(jsonc);
     }
     let json = config_dir.join("opencode.json");
     if json.exists() {
-        return json;
+        return Ok(json);
     }
-    json
+    Ok(json)
 }
 
-/// Reads JSON or JSONC object from file.
-fn read_json_like_object(file_path: &Path) -> AppResult<Map<String, Value>> {
-    if !file_path.exists() {
-        return Ok(Map::new());
+/// Reads raw file content from local or WSL paths.
+fn read_file_content(file_path: &Path) -> AppResult<Option<String>> {
+    if is_wsl_path(file_path) {
+        return read_file_via_wsl(file_path);
     }
+
+    if !file_path.exists() {
+        return Ok(None);
+    }
+
     let raw = std::fs::read_to_string(file_path).map_err(|e| {
         AppError::external(format!("read file failed ({}): {e}", file_path.display()))
     })?;
-    if raw.trim().is_empty() {
+    Ok(Some(raw))
+}
+
+/// Parses JSON or JSONC text into an object map.
+fn parse_json_like_content(content: &str, file_path: &Path) -> AppResult<Map<String, Value>> {
+    if content.trim().is_empty() {
         return Ok(Map::new());
     }
 
-    let parsed = serde_json::from_str::<Value>(&raw)
-        .or_else(|_| json5::from_str::<Value>(&raw))
+    let parsed = serde_json::from_str::<Value>(content)
+        .or_else(|_| json5::from_str::<Value>(content))
         .map_err(|e| {
             AppError::validation(format!(
                 "parse JSON config failed ({}): {e}",
@@ -356,23 +490,58 @@ fn read_json_like_object(file_path: &Path) -> AppResult<Map<String, Value>> {
     Ok(map)
 }
 
+/// Reads JSON or JSONC object from file.
+fn read_json_like_object(file_path: &Path) -> AppResult<Map<String, Value>> {
+    let Some(content) = read_file_content(file_path)? else {
+        return Ok(Map::new());
+    };
+    parse_json_like_content(&content, file_path)
+}
+
 /// Reads TOML document from file.
 fn read_toml_document(file_path: &Path) -> AppResult<DocumentMut> {
-    if !file_path.exists() {
+    let Some(content) = read_file_content(file_path)? else {
+        return Ok(DocumentMut::new());
+    };
+    parse_toml_content(&content, file_path)
+}
+
+/// Parses TOML text into a mutable document.
+fn parse_toml_content(content: &str, file_path: &Path) -> AppResult<DocumentMut> {
+    if content.trim().is_empty() {
         return Ok(DocumentMut::new());
     }
-    let raw = std::fs::read_to_string(file_path).map_err(|e| {
-        AppError::external(format!("read file failed ({}): {e}", file_path.display()))
-    })?;
-    if raw.trim().is_empty() {
-        return Ok(DocumentMut::new());
-    }
-    raw.parse::<DocumentMut>().map_err(|e| {
+
+    content.parse::<DocumentMut>().map_err(|e| {
         AppError::validation(format!(
             "parse TOML config failed ({}): {e}",
             file_path.display()
         ))
     })
+}
+
+/// Reads file content via WSL command.
+fn read_file_via_wsl(file_path: &Path) -> AppResult<Option<String>> {
+    if let Some(resolved) = wsl::resolve_path(file_path) {
+        write_debug_log(&format!(
+            "Reading via WSL distro={}, path={}",
+            resolved.distro, resolved.linux_path
+        ));
+    }
+
+    let content = wsl::read_file(file_path).map_err(|e| {
+        write_debug_log(&format!("ERROR: WSL read failed: {}", e));
+        AppError::external(format!(
+            "read WSL file failed ({}): {e}",
+            file_path.display()
+        ))
+    })?;
+    if let Some(ref content) = content {
+        write_debug_log(&format!("Read {} bytes", content.len()));
+    } else {
+        write_debug_log("WSL file not found");
+    }
+    Ok(content)
 }
 
 /// Ensures child key is a JSON object.
@@ -398,17 +567,723 @@ fn ensure_object(value: &mut Value) -> &mut Map<String, Value> {
 
 /// Writes JSON object to file.
 fn write_json_object(file_path: &Path, root: &Map<String, Value>) -> AppResult<()> {
-    if let Some(parent) = file_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::external(format!(
-                "create config dir failed ({}): {e}",
-                parent.display()
-            ))
-        })?;
-    }
     let text = serde_json::to_string_pretty(&Value::Object(root.clone()))
         .map_err(|e| AppError::internal(format!("serialize JSON failed: {e}")))?;
-    std::fs::write(file_path, text).map_err(|e| {
-        AppError::external(format!("write file failed ({}): {e}", file_path.display()))
+    write_file_content(file_path, &text)
+}
+
+fn ensure_toml_table<'a>(parent: &'a mut Table, key: &str) -> &'a mut Table {
+    let item = parent.entry(key).or_insert(Item::Table(Table::new()));
+    if !item.is_table() {
+        *item = Item::Table(Table::new());
+    }
+    item.as_table_mut()
+        .expect("table must exist after normalization")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn codex_config_shape_can_be_created_from_empty_document() {
+        let mut doc = DocumentMut::new();
+        doc["model_provider"] = value("custom_provider");
+        let model_providers = ensure_toml_table(doc.as_table_mut(), "model_providers");
+        let provider = ensure_toml_table(model_providers, "custom_provider");
+        provider["base_url"] = value("http://127.0.0.1:11434");
+
+        let output = doc.to_string();
+        assert!(output.contains("model_provider"));
+        assert!(output.contains("model_providers"));
+        assert!(output.contains("custom_provider"));
+        assert!(output.contains("base_url"));
+    }
+
+    #[test]
+    fn codex_config_reads_token_from_auth_json_first() {
+        let config_root = json!({
+            "model_provider": "custom_provider",
+            "model_providers": {
+                "custom_provider": {
+                    "base_url": "http://127.0.0.1:11434",
+                    "api_key": "legacy-token"
+                },
+                "aor_shared": {
+                    "base_url": "http://ignored.example"
+                }
+            },
+            "model": "gpt-5"
+        })
+        .as_object()
+        .cloned()
+        .expect("config root must be object");
+        let auth_root = json!({
+            "OPENAI_API_KEY": "auth-token"
+        })
+        .as_object()
+        .cloned()
+        .expect("auth root must be object");
+
+        let parsed = parse_codex_config_with_auth(&config_root, Some(&auth_root))
+            .expect("codex parse should succeed");
+
+        assert_eq!(parsed.api_token.as_deref(), Some("auth-token"));
+        assert_eq!(parsed.url.as_deref(), Some("http://127.0.0.1:11434"));
+        assert_eq!(parsed.model.as_deref(), Some("gpt-5"));
+    }
+
+    #[test]
+    fn codex_config_reads_legacy_api_key_when_auth_missing() {
+        let config_root = json!({
+            "model_provider": "custom_provider",
+            "model_providers": {
+                "custom_provider": {
+                    "base_url": "http://127.0.0.1:11434",
+                    "api_key": "legacy-token"
+                }
+            },
+            "model": "gpt-5"
+        })
+        .as_object()
+        .cloned()
+        .expect("config root must be object");
+
+        let parsed =
+            parse_codex_config_with_auth(&config_root, None).expect("codex parse should succeed");
+
+        assert_eq!(parsed.api_token.as_deref(), Some("legacy-token"));
+        assert_eq!(parsed.url.as_deref(), Some("http://127.0.0.1:11434"));
+    }
+
+    #[test]
+    fn write_codex_full_config_moves_token_to_auth_json_and_removes_legacy_key() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("oc-proxy-codex-{unique_id}"));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let config_path = temp_dir.join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"model_provider = "custom_provider"
+
+[model_providers.custom_provider]
+base_url = "http://legacy"
+api_key = "legacy-token"
+
+[model_providers.aor_shared]
+base_url = "http://should-not-change"
+"#,
+        )
+        .expect("seed config.toml");
+
+        let first = AgentConfig {
+            url: Some("http://127.0.0.1:8080/oc/test".to_string()),
+            api_token: Some("fresh-token".to_string()),
+            model: Some("gpt-5".to_string()),
+            timeout: None,
+            always_thinking_enabled: None,
+            include_coauthored_by: None,
+            skip_dangerous_mode_permission_prompt: None,
+        };
+        write_codex_full_config(&temp_dir, &first).expect("first write should succeed");
+
+        let updated_config = std::fs::read_to_string(&config_path).expect("read config.toml");
+        assert!(updated_config.contains("model_provider = \"custom_provider\""));
+        assert!(updated_config.contains("base_url = \"http://127.0.0.1:8080/oc/test\""));
+        assert!(updated_config.contains("[model_providers.custom_provider]"));
+        assert!(updated_config.contains("[model_providers.aor_shared]"));
+        assert!(updated_config.contains("http://should-not-change"));
+        assert!(updated_config.contains("model = \"gpt-5\""));
+        assert!(!updated_config.contains("api_key"));
+
+        let auth_path = temp_dir.join("auth.json");
+        let auth_raw = std::fs::read_to_string(&auth_path).expect("read auth.json");
+        let auth_doc = serde_json::from_str::<Value>(&auth_raw).expect("auth.json must be valid");
+        assert_eq!(auth_doc["OPENAI_API_KEY"].as_str(), Some("fresh-token"));
+
+        let second = AgentConfig {
+            url: Some("http://127.0.0.1:8080/oc/test".to_string()),
+            api_token: None,
+            model: Some("gpt-5".to_string()),
+            timeout: None,
+            always_thinking_enabled: None,
+            include_coauthored_by: None,
+            skip_dangerous_mode_permission_prompt: None,
+        };
+        write_codex_full_config(&temp_dir, &second).expect("second write should succeed");
+
+        let auth_raw = std::fs::read_to_string(&auth_path).expect("read auth.json after clear");
+        let auth_doc =
+            serde_json::from_str::<Value>(&auth_raw).expect("auth.json must remain valid");
+        assert!(auth_doc.get("OPENAI_API_KEY").is_none());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn write_codex_full_config_requires_model_provider() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("oc-proxy-codex-no-provider-{unique_id}"));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let config_path = temp_dir.join("config.toml");
+        std::fs::write(&config_path, "").expect("seed empty config.toml");
+
+        let config = AgentConfig {
+            url: Some("http://127.0.0.1:8080/oc/test".to_string()),
+            api_token: Some("fresh-token".to_string()),
+            model: Some("gpt-5".to_string()),
+            timeout: None,
+            always_thinking_enabled: None,
+            include_coauthored_by: None,
+            skip_dangerous_mode_permission_prompt: None,
+        };
+
+        let err = write_codex_full_config(&temp_dir, &config).expect_err("write should fail");
+        assert!(err.to_string().contains("model_provider"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+}
+
+/// Reads Agent configuration file content.
+pub fn read_agent_config(state: &SharedState, target_id: &str) -> AppResult<AgentConfigFile> {
+    let targets = state.integration_store.list();
+    let target = targets
+        .into_iter()
+        .find(|t| t.id == target_id)
+        .ok_or_else(|| AppError::not_found(format!("target not found: {}", target_id)))?;
+
+    let config_dir = PathBuf::from(&target.config_dir);
+
+    // Normalize config_dir for WSL paths
+    let config_dir = match normalize_wsl_path(&config_dir) {
+        Some(normalized) => normalized,
+        None => config_dir,
+    };
+
+    let file_path = resolve_agent_config_file_path(&target.kind, &config_dir)?;
+    let content = read_file_content(&file_path)?.unwrap_or_default();
+    let source_files = build_agent_source_files(&target.kind, &config_dir, &file_path, &content)?;
+    let parsed_root = parse_agent_config_content(&target.kind, &content, &file_path).ok();
+    let parsed_config = match target.kind {
+        IntegrationClientKind::Codex => {
+            let auth_file_path = resolve_codex_auth_file_path(&config_dir);
+            let auth_content = read_file_content(&auth_file_path)?.unwrap_or_default();
+            let auth_root = parse_codex_auth_root(&auth_content, &auth_file_path).ok();
+
+            if let Some(root) = parsed_root.as_ref() {
+                parse_codex_config_with_auth(root, auth_root.as_ref()).ok()
+            } else {
+                None
+            }
+        }
+        _ => parsed_root
+            .as_ref()
+            .and_then(|root| parse_agent_config(&target.kind, root).ok()),
+    };
+
+    Ok(AgentConfigFile {
+        target_id: target.id,
+        kind: target.kind,
+        config_dir: target.config_dir,
+        file_path: file_path.to_string_lossy().to_string(),
+        content,
+        source_files,
+        updated_at: Some(target.updated_at),
+        parsed_config,
     })
+}
+
+fn resolve_agent_config_file_path(
+    kind: &IntegrationClientKind,
+    config_dir: &Path,
+) -> AppResult<PathBuf> {
+    match kind {
+        IntegrationClientKind::Claude => Ok(config_dir.join("settings.json")),
+        IntegrationClientKind::Codex => Ok(config_dir.join("config.toml")),
+        IntegrationClientKind::Opencode => resolve_opencode_config_path(config_dir),
+    }
+}
+
+fn resolve_codex_auth_file_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("auth.json")
+}
+
+fn resolve_agent_source_file_path(
+    kind: &IntegrationClientKind,
+    config_dir: &Path,
+    source_id: Option<&str>,
+) -> AppResult<PathBuf> {
+    if let Some(source) = source_id.map(str::trim).filter(|value| !value.is_empty()) {
+        return match (kind, source) {
+            (IntegrationClientKind::Codex, SOURCE_AUTH) => {
+                Ok(resolve_codex_auth_file_path(config_dir))
+            }
+            (_, SOURCE_PRIMARY) => resolve_agent_config_file_path(kind, config_dir),
+            (_, _) => Err(AppError::validation(format!(
+                "unsupported source id: {source}"
+            ))),
+        };
+    }
+    resolve_agent_config_file_path(kind, config_dir)
+}
+
+fn build_agent_source_files(
+    kind: &IntegrationClientKind,
+    config_dir: &Path,
+    primary_file_path: &Path,
+    primary_content: &str,
+) -> AppResult<Vec<AgentSourceFile>> {
+    let mut files = vec![AgentSourceFile {
+        source_id: SOURCE_PRIMARY.to_string(),
+        label: primary_file_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("config")
+            .to_string(),
+        file_path: primary_file_path.to_string_lossy().to_string(),
+        content: primary_content.to_string(),
+    }];
+
+    if matches!(kind, IntegrationClientKind::Codex) {
+        let auth_file_path = resolve_codex_auth_file_path(config_dir);
+        let auth_content = read_file_content(&auth_file_path)?.unwrap_or_default();
+        files.push(AgentSourceFile {
+            source_id: SOURCE_AUTH.to_string(),
+            label: "auth.json".to_string(),
+            file_path: auth_file_path.to_string_lossy().to_string(),
+            content: auth_content,
+        });
+    }
+
+    Ok(files)
+}
+
+fn parse_agent_config_content(
+    kind: &IntegrationClientKind,
+    content: &str,
+    file_path: &Path,
+) -> AppResult<Map<String, Value>> {
+    match kind {
+        IntegrationClientKind::Claude | IntegrationClientKind::Opencode => {
+            parse_json_like_content(content, file_path)
+        }
+        IntegrationClientKind::Codex => {
+            let doc = parse_toml_content(content, file_path)?;
+            Ok(toml_to_map(&doc))
+        }
+    }
+}
+
+/// Converts TOML DocumentMut to a JSON-like Map.
+fn toml_to_map(doc: &DocumentMut) -> Map<String, Value> {
+    let mut map = Map::new();
+    for (key, item) in doc.as_table() {
+        map.insert(key.to_string(), toml_item_to_value(item));
+    }
+    map
+}
+
+fn toml_item_to_value(item: &toml_edit::Item) -> Value {
+    match item {
+        toml_edit::Item::None => Value::Null,
+        toml_edit::Item::Value(v) => toml_value_to_value(v),
+        toml_edit::Item::Table(t) => {
+            let mut map = Map::new();
+            for (k, v) in t {
+                map.insert(k.to_string(), toml_item_to_value(v));
+            }
+            Value::Object(map)
+        }
+        toml_edit::Item::ArrayOfTables(arr) => Value::Array(
+            arr.iter()
+                .map(|t| {
+                    let mut map = Map::new();
+                    for (k, v) in t {
+                        map.insert(k.to_string(), toml_item_to_value(v));
+                    }
+                    Value::Object(map)
+                })
+                .collect(),
+        ),
+    }
+}
+
+fn toml_value_to_value(v: &toml_edit::Value) -> Value {
+    match v {
+        toml_edit::Value::String(s) => Value::String(s.value().to_string()),
+        toml_edit::Value::Integer(i) => Value::Number((*i.value()).into()),
+        toml_edit::Value::Float(f) => serde_json::Number::from_f64(*f.value())
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        toml_edit::Value::Boolean(b) => Value::Bool(*b.value()),
+        toml_edit::Value::Datetime(dt) => Value::String(dt.value().to_string()),
+        toml_edit::Value::Array(arr) => Value::Array(arr.iter().map(toml_value_to_value).collect()),
+        toml_edit::Value::InlineTable(t) => {
+            let mut map = Map::new();
+            for (k, v) in t {
+                map.insert(k.to_string(), toml_value_to_value(v));
+            }
+            Value::Object(map)
+        }
+    }
+}
+
+/// Parses configuration into AgentConfig.
+fn parse_agent_config(
+    kind: &IntegrationClientKind,
+    root: &Map<String, Value>,
+) -> AppResult<AgentConfig> {
+    match kind {
+        IntegrationClientKind::Claude => parse_claude_config(root),
+        IntegrationClientKind::Opencode => parse_opencode_config(root),
+        IntegrationClientKind::Codex => parse_codex_config(root),
+    }
+}
+
+/// Parses Claude config from JSON-like Map.
+fn parse_claude_config(root: &Map<String, Value>) -> AppResult<AgentConfig> {
+    // Extract env field
+    let env = root.get("env").and_then(|v| v.as_object());
+    let url = env
+        .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let api_token = env
+        .and_then(|e| e.get("ANTHROPIC_AUTH_TOKEN"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let model = env
+        .and_then(|e| e.get("ANTHROPIC_MODEL"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let timeout = env
+        .and_then(|e| e.get("API_TIMEOUT_MS"))
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<u64>().ok());
+
+    // Extract behavior options
+    let always_thinking_enabled = root.get("alwaysThinkingEnabled").and_then(|v| v.as_bool());
+    let include_coauthored_by = root.get("includeCoAuthoredBy").and_then(|v| v.as_bool());
+    let skip_dangerous_mode_permission_prompt = root
+        .get("skipDangerousModePermissionPrompt")
+        .and_then(|v| v.as_bool());
+
+    Ok(AgentConfig {
+        url,
+        api_token,
+        model,
+        timeout,
+        always_thinking_enabled,
+        include_coauthored_by,
+        skip_dangerous_mode_permission_prompt,
+    })
+}
+
+/// Parses OpenCode config from JSON-like Map.
+fn parse_opencode_config(root: &Map<String, Value>) -> AppResult<AgentConfig> {
+    // Extract provider.aor_shared config
+    let provider = root.get("provider").and_then(|v| v.as_object());
+    let aor_shared = provider
+        .and_then(|p| p.get("aor_shared"))
+        .and_then(|v| v.as_object());
+    let url = aor_shared
+        .and_then(|a| a.get("options"))
+        .and_then(|o| o.get("baseURL"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let timeout = aor_shared
+        .and_then(|a| a.get("options"))
+        .and_then(|o| o.get("timeout"))
+        .and_then(|v| v.as_u64());
+    let model = root.get("model").and_then(|v| v.as_str()).map(String::from);
+
+    Ok(AgentConfig {
+        url,
+        api_token: None,
+        model,
+        timeout,
+        always_thinking_enabled: None,
+        include_coauthored_by: None,
+        skip_dangerous_mode_permission_prompt: None,
+    })
+}
+
+/// Parses Codex config from JSON-like Map.
+fn parse_codex_config(root: &Map<String, Value>) -> AppResult<AgentConfig> {
+    parse_codex_config_with_auth(root, None)
+}
+
+fn parse_codex_config_with_auth(
+    config_root: &Map<String, Value>,
+    auth_root: Option<&Map<String, Value>>,
+) -> AppResult<AgentConfig> {
+    let model_providers = config_root
+        .get("model_providers")
+        .and_then(|v| v.as_object());
+    let provider_name = resolve_codex_provider_name_from_map(config_root);
+    let provider = provider_name
+        .as_deref()
+        .and_then(|name| model_providers.and_then(|providers| providers.get(name)))
+        .and_then(|v| v.as_object());
+
+    let url = provider
+        .and_then(|a| a.get("base_url"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let legacy_token = provider
+        .and_then(|a| a.get("api_key"))
+        .and_then(|v| v.as_str());
+    let api_token = auth_root
+        .and_then(|auth| auth.get("OPENAI_API_KEY"))
+        .and_then(|v| v.as_str())
+        .or(legacy_token)
+        .map(String::from);
+    let model = config_root
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    Ok(AgentConfig {
+        url,
+        api_token,
+        model,
+        timeout: None,
+        always_thinking_enabled: None,
+        include_coauthored_by: None,
+        skip_dangerous_mode_permission_prompt: None,
+    })
+}
+
+fn parse_codex_auth_root(content: &str, file_path: &Path) -> AppResult<Map<String, Value>> {
+    parse_json_like_content(content, file_path)
+}
+
+/// Writes Agent configuration to file.
+pub fn write_agent_config(
+    state: &SharedState,
+    target_id: &str,
+    config: AgentConfig,
+) -> AppResult<WriteAgentConfigResult> {
+    let targets = state.integration_store.list();
+    let target = targets
+        .into_iter()
+        .find(|t| t.id == target_id)
+        .ok_or_else(|| AppError::not_found(format!("target not found: {}", target_id)))?;
+
+    let config_dir = PathBuf::from(&target.config_dir);
+
+    // Normalize WSL path
+    let config_dir = match normalize_wsl_path(&config_dir) {
+        Some(normalized) => normalized,
+        None => config_dir,
+    };
+
+    let file_path = match target.kind {
+        IntegrationClientKind::Claude => write_claude_full_config(&config_dir, &config)?,
+        IntegrationClientKind::Opencode => write_opencode_full_config(&config_dir, &config)?,
+        IntegrationClientKind::Codex => write_codex_full_config(&config_dir, &config)?,
+    };
+
+    // Update stored config
+    let _ =
+        state
+            .integration_store
+            .update_target_config(target_id, target.config_dir, Some(config));
+
+    Ok(WriteAgentConfigResult {
+        ok: true,
+        target_id: target_id.to_string(),
+        file_path: file_path.to_string_lossy().to_string(),
+        message: None,
+    })
+}
+
+/// Writes raw agent configuration source to file and refreshes parsed store config.
+pub fn write_agent_config_source(
+    state: &SharedState,
+    target_id: &str,
+    content: &str,
+    source_id: Option<&str>,
+) -> AppResult<WriteAgentConfigResult> {
+    let targets = state.integration_store.list();
+    let target = targets
+        .into_iter()
+        .find(|t| t.id == target_id)
+        .ok_or_else(|| AppError::not_found(format!("target not found: {}", target_id)))?;
+
+    let config_dir = PathBuf::from(&target.config_dir);
+    let config_dir = match normalize_wsl_path(&config_dir) {
+        Some(normalized) => normalized,
+        None => config_dir,
+    };
+
+    let normalized_source_id = source_id.map(str::trim).filter(|value| !value.is_empty());
+    let file_path =
+        resolve_agent_source_file_path(&target.kind, &config_dir, normalized_source_id)?;
+    let parsed_root = if matches!(target.kind, IntegrationClientKind::Codex)
+        && normalized_source_id == Some(SOURCE_AUTH)
+    {
+        parse_codex_auth_root(content, &file_path)?
+    } else {
+        parse_agent_config_content(&target.kind, content, &file_path)?
+    };
+    write_file_content(&file_path, content)?;
+
+    let parsed_config = match target.kind {
+        IntegrationClientKind::Codex => {
+            let config_file_path = resolve_agent_config_file_path(&target.kind, &config_dir)?;
+            let config_content = read_file_content(&config_file_path)?.unwrap_or_default();
+            let config_root =
+                parse_agent_config_content(&target.kind, &config_content, &config_file_path).ok();
+
+            let auth_file_path = resolve_codex_auth_file_path(&config_dir);
+            let auth_root = if normalized_source_id == Some(SOURCE_AUTH) {
+                Some(parsed_root)
+            } else {
+                let auth_content = read_file_content(&auth_file_path)?.unwrap_or_default();
+                parse_codex_auth_root(&auth_content, &auth_file_path).ok()
+            };
+
+            config_root
+                .as_ref()
+                .and_then(|root| parse_codex_config_with_auth(root, auth_root.as_ref()).ok())
+        }
+        _ => parse_agent_config(&target.kind, &parsed_root).ok(),
+    };
+    let _ =
+        state
+            .integration_store
+            .update_target_config(target_id, target.config_dir, parsed_config);
+
+    Ok(WriteAgentConfigResult {
+        ok: true,
+        target_id: target_id.to_string(),
+        file_path: file_path.to_string_lossy().to_string(),
+        message: None,
+    })
+}
+
+fn write_claude_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult<PathBuf> {
+    let file_path = config_dir.join("settings.json");
+    let mut root = read_json_like_object(&file_path)?;
+
+    // Write env
+    let env = ensure_child_object(&mut root, "env");
+    if let Some(url) = &config.url {
+        env.insert("ANTHROPIC_BASE_URL".to_string(), Value::String(url.clone()));
+    }
+    if let Some(token) = &config.api_token {
+        env.insert(
+            "ANTHROPIC_AUTH_TOKEN".to_string(),
+            Value::String(token.clone()),
+        );
+    }
+    if let Some(model) = &config.model {
+        env.insert("ANTHROPIC_MODEL".to_string(), Value::String(model.clone()));
+    }
+    if let Some(timeout) = config.timeout {
+        env.insert(
+            "API_TIMEOUT_MS".to_string(),
+            Value::String(timeout.to_string()),
+        );
+    }
+
+    // Write behavior options
+    if let Some(enabled) = config.always_thinking_enabled {
+        root.insert("alwaysThinkingEnabled".to_string(), Value::Bool(enabled));
+    }
+    if let Some(enabled) = config.include_coauthored_by {
+        root.insert("includeCoAuthoredBy".to_string(), Value::Bool(enabled));
+    }
+    if let Some(enabled) = config.skip_dangerous_mode_permission_prompt {
+        root.insert(
+            "skipDangerousModePermissionPrompt".to_string(),
+            Value::Bool(enabled),
+        );
+    }
+
+    write_json_object(&file_path, &root)?;
+    Ok(file_path)
+}
+
+fn write_opencode_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult<PathBuf> {
+    let file_path = resolve_opencode_config_path(config_dir)?;
+    let mut root = read_json_like_object(&file_path)?;
+
+    // Ensure provider structure
+    let provider = ensure_child_object(&mut root, "provider");
+    let aor_shared = ensure_child_object(provider, "aor_shared");
+    let options = ensure_child_object(aor_shared, "options");
+
+    if let Some(url) = &config.url {
+        options.insert("baseURL".to_string(), Value::String(url.clone()));
+    }
+    if let Some(timeout) = config.timeout {
+        options.insert("timeout".to_string(), Value::Number(timeout.into()));
+    }
+
+    // Write model at root level
+    if let Some(model) = &config.model {
+        root.insert("model".to_string(), Value::String(model.clone()));
+    }
+
+    write_json_object(&file_path, &root)?;
+    Ok(file_path)
+}
+
+fn write_codex_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult<PathBuf> {
+    let file_path = config_dir.join("config.toml");
+    let mut doc = read_toml_document(&file_path)?;
+    let provider_name = resolve_codex_provider_name_from_doc(&doc)?;
+
+    if !doc["model_providers"].is_table() {
+        doc["model_providers"] = Item::Table(Table::new());
+    }
+    if !doc["model_providers"][&provider_name].is_table() {
+        doc["model_providers"][&provider_name] = Item::Table(Table::new());
+    }
+
+    if let Some(url) = &config.url {
+        doc["model_providers"][&provider_name]["base_url"] = value(url);
+    }
+    // auth token is persisted in auth.json (OPENAI_API_KEY), not in config.toml.
+    if let Some(table) = doc["model_providers"][&provider_name].as_table_mut() {
+        table.remove("api_key");
+    }
+    if let Some(model) = &config.model {
+        doc["model"] = value(model);
+    }
+
+    let mut output = doc.to_string();
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    write_file_content(&file_path, &output)?;
+
+    let auth_file_path = resolve_codex_auth_file_path(config_dir);
+    let mut auth_root = read_json_like_object(&auth_file_path)?;
+    match config.api_token.as_deref() {
+        Some(token) if !token.trim().is_empty() => {
+            auth_root.insert(
+                "OPENAI_API_KEY".to_string(),
+                Value::String(token.trim().to_string()),
+            );
+        }
+        _ => {
+            auth_root.remove("OPENAI_API_KEY");
+        }
+    }
+    write_json_object(&auth_file_path, &auth_root)?;
+
+    Ok(file_path)
 }
