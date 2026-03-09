@@ -261,11 +261,13 @@ export const ipc = {
 
   integrationWriteAgentConfigSource(
     targetId: string,
-    content: string
+    content: string,
+    sourceId?: string
   ): Promise<WriteAgentConfigResult> {
     return getInvoke()<WriteAgentConfigResult>("integration_write_agent_config_source", {
       targetId,
       content,
+      sourceId,
     })
   },
 }

@@ -113,7 +113,7 @@ export const enUS = {
     },
     codex: {
       title: "Codex",
-      hint: "Default: ~/.codex; writes model_providers.aor_shared.base_url in config.toml.",
+      hint: "Default: ~/.codex; writes model_providers.<model_provider>.base_url in config.toml.",
     },
     opencode: {
       title: "OpenCode",
@@ -125,7 +125,8 @@ export const enUS = {
   agentManagement: {
     title: "Agent Management",
     eyebrow: "Client Configuration",
-    subtitle: "Manage Claude, Codex, and OpenCode config directories and baseline connection settings.",
+    subtitle:
+      "Manage Claude, Codex, and OpenCode config directories and baseline connection settings.",
     selectType: "Select Agent Type",
     selectAgent: "Select Agent",
     configured: "configured",
@@ -134,7 +135,8 @@ export const enUS = {
     configFile: "Config File",
     addConfigDir: "Add Configuration Directory",
     editConfig: "Edit Configuration",
-    editSubtitle: "Adjust structured connection settings or switch to raw source mode for direct file edits.",
+    editSubtitle:
+      "Adjust structured connection settings or switch to raw source mode for direct file edits.",
     deleteConfig: "Delete Configuration",
     writeConfig: "Write Configuration",
     formEditor: "Form Editor",
@@ -184,11 +186,20 @@ export const enUS = {
     connectionSection: "Connection Settings",
     runtimeSection: "Runtime Settings",
     runtimeHint: "These fields map to the baseline settings supported by the current agent.",
-    behaviorHint: "Claude-only behavior switches are written back to top-level settings.json fields.",
+    behaviorHint:
+      "Claude-only behavior switches are written back to top-level settings.json fields.",
     alwaysThinkingHint: "Enable thinking mode by default for supported requests.",
     coAuthoredByHint: "Include Co-Authored-By information when changes are generated.",
     skipPermissionHint: "Skip the extra confirmation before dangerous mode.",
-    sourceHint: "Edit the raw {{format}} content directly. Save validates the corresponding format first.",
+    sourceHint:
+      "Edit the raw {{format}} content directly. Save validates the corresponding format first.",
+    codexTokenHint: "Codex token is stored in auth.json as OPENAI_API_KEY.",
+    codexConfigSourceHint:
+      "config.toml stores endpoint and model settings; token is not stored in this file.",
+    codexAuthSourceHint:
+      "auth.json stores OPENAI_API_KEY. Clearing this key revokes local token usage.",
+    showToken: "Show Token",
+    hideToken: "Hide Token",
     unsavedChanges: "Unsaved changes",
     allChangesSaved: "Everything is synced",
     timeoutInvalid: "Timeout must be a non-negative integer",

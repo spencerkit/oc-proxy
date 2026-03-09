@@ -1,3 +1,4 @@
+import { Eye, EyeOff } from "lucide-react"
 import type React from "react"
 import { useCallback, useEffect, useState } from "react"
 import { Button, Input, Switch } from "@/components"
@@ -20,7 +21,7 @@ interface Props {
   onClose?: () => void
 }
 
-export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId, onClose }) => {
+export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
   const { t } = useTranslation()
   const [step, setStep] = useState<Step>("selectType")
   const [targets, setTargets] = useState<IntegrationTarget[]>([])
@@ -32,6 +33,7 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId, onClose }
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [showApiToken, setShowApiToken] = useState(false)
 
   // Form state
   const [formData, setFormData] = useState<AgentConfig>({
@@ -420,12 +422,27 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId, onClose }
             <label htmlFor="agent-api-token">{t("agentManagement.apiToken")}</label>
             <Input
               id="agent-api-token"
-              type="password"
+              type={showApiToken ? "text" : "password"}
               value={formData.apiToken}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 setFormData({ ...formData, apiToken: e.target.value })
               }
               placeholder="sk-..."
+              endAdornment={
+                <button
+                  type="button"
+                  className={styles.tokenVisibilityButton}
+                  onClick={() => setShowApiToken(current => !current)}
+                  aria-label={
+                    showApiToken ? t("agentManagement.hideToken") : t("agentManagement.showToken")
+                  }
+                  title={
+                    showApiToken ? t("agentManagement.hideToken") : t("agentManagement.showToken")
+                  }
+                >
+                  {showApiToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              }
             />
           </div>
 

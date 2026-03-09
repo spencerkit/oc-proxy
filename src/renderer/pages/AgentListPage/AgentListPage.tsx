@@ -1,5 +1,6 @@
 import { Bot, Braces, Code2, FolderPlus, Pencil, Trash2 } from "lucide-react"
-import React, { useCallback, useEffect, useMemo, useState } from "react"
+import type React from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button, Input, Modal } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
@@ -96,11 +97,6 @@ export const AgentListPage: React.FC = () => {
     [targets]
   )
 
-  const totalConfiguredTargets = useMemo(
-    () => targets.filter(target => getConfiguredFieldCount(target) > 0).length,
-    [targets]
-  )
-
   const handlePickDirectory = async (kind: IntegrationClientKind) => {
     try {
       const result = await ipc.integrationPickDirectory(undefined, kind)
@@ -169,17 +165,6 @@ export const AgentListPage: React.FC = () => {
           </div>
         </section>
 
-        <section className={styles.metrics}>
-          <div className={styles.metricCard}>
-            <span className={styles.metricValue}>{targets.length}</span>
-            <span className={styles.metricLabel}>{t("agentManagement.directoryCount")}</span>
-          </div>
-          <div className={styles.metricCard}>
-            <span className={styles.metricValue}>{totalConfiguredTargets}</span>
-            <span className={styles.metricLabel}>{t("agentManagement.configuredCount")}</span>
-          </div>
-        </section>
-
         <div className={styles.sectionGrid}>
           {AGENT_TYPES.map(kind => {
             const kindTargets = groupedTargets[kind]
@@ -201,7 +186,11 @@ export const AgentListPage: React.FC = () => {
 
                   <div className={styles.sectionHeaderMeta}>
                     <span className={styles.formatBadge}>{meta.format}</span>
-                    <Button size="small" icon={FolderPlus} onClick={() => handlePickDirectory(kind)}>
+                    <Button
+                      size="small"
+                      icon={FolderPlus}
+                      onClick={() => handlePickDirectory(kind)}
+                    >
                       {t("agentManagement.addConfigDir")}
                     </Button>
                   </div>
@@ -242,7 +231,9 @@ export const AgentListPage: React.FC = () => {
                 <div className={styles.targetList}>
                   {kindTargets.length === 0 ? (
                     <div className={styles.emptyState}>
-                      <p className={styles.emptyTitle}>{t("agentManagement.noDirectoriesConfigured")}</p>
+                      <p className={styles.emptyTitle}>
+                        {t("agentManagement.noDirectoriesConfigured")}
+                      </p>
                       <p className={styles.emptyHint}>{t("agentManagement.addFirstDirectory")}</p>
                     </div>
                   ) : (
@@ -256,7 +247,9 @@ export const AgentListPage: React.FC = () => {
                               <span className={styles.targetPath}>{target.configDir}</span>
                               <span
                                 className={`${styles.statusChip} ${
-                                  configuredFieldCount > 0 ? styles.statusConfigured : styles.statusDraft
+                                  configuredFieldCount > 0
+                                    ? styles.statusConfigured
+                                    : styles.statusDraft
                                 }`}
                               >
                                 {configuredFieldCount > 0
@@ -323,7 +316,11 @@ export const AgentListPage: React.FC = () => {
         title={t("agentManagement.deleteConfig")}
         footer={
           <>
-            <Button variant="ghost" onClick={() => setPendingDeleteTarget(null)} disabled={deleteLoading}>
+            <Button
+              variant="ghost"
+              onClick={() => setPendingDeleteTarget(null)}
+              disabled={deleteLoading}
+            >
               {t("agentManagement.cancel")}
             </Button>
             <Button variant="danger" loading={deleteLoading} onClick={handleDelete}>
@@ -334,7 +331,9 @@ export const AgentListPage: React.FC = () => {
       >
         <div className={styles.deleteModalBody}>
           <p>{t("agentManagement.deleteDialogMessage")}</p>
-          {pendingDeleteTarget && <code className={styles.deleteModalPath}>{pendingDeleteTarget.configDir}</code>}
+          {pendingDeleteTarget && (
+            <code className={styles.deleteModalPath}>{pendingDeleteTarget.configDir}</code>
+          )}
         </div>
       </Modal>
     </>

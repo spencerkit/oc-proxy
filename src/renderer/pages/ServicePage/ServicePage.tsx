@@ -88,7 +88,6 @@ export const ServicePage: React.FC = () => {
     )
   }, [groupSearchValue, groups])
   const activeGroup = groups.find(group => group.id === activeGroupId) ?? null
-  const activeGroupModels = Array.isArray(activeGroup?.models) ? activeGroup.models : []
   const pendingDeleteProvider =
     activeGroup?.providers.find(item => item.id === pendingDeleteProviderId) ?? null
   const integrationSections = useMemo(
@@ -523,7 +522,7 @@ export const ServicePage: React.FC = () => {
       case "claude":
         return "env.ANTHROPIC_BASE_URL"
       case "codex":
-        return "model_providers.aor_shared.base_url"
+        return "model_providers.<model_provider>.base_url"
       default:
         return "provider.aor_shared.options.baseURL"
     }
@@ -658,15 +657,6 @@ export const ServicePage: React.FC = () => {
             <div className={styles.groupHeader}>
               <div className={styles.groupInfo}>
                 <h2>{activeGroup.name}</h2>
-                <div className={styles.groupMeta}>
-                  <span className={styles.metaChip}>/{activeGroup.id}</span>
-                  <span className={styles.metaChip}>
-                    {t("servicePage.rulesCount", { count: activeGroup.providers.length })}
-                  </span>
-                  <span className={styles.metaChip}>
-                    {t("servicePage.modelsCount", { count: activeGroupModels.length })}
-                  </span>
-                </div>
                 <div className={styles.entryUrl}>
                   <div className={styles.entryUrlList}>
                     {entryUrls.map(url => (
@@ -734,7 +724,6 @@ export const ServicePage: React.FC = () => {
               onTestModel={handleTestProviderModel}
               testingProviderIds={testingProviderIds}
               onDelete={handleRequestDeleteProvider}
-              groupName={activeGroup.name}
               groupId={activeGroup.id}
               emptyMessage={t("servicePage.noRulesHint")}
             />

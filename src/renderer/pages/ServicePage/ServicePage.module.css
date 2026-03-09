@@ -250,15 +250,16 @@
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: var(--sp-5);
+  padding: var(--sp-4);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 
 .groupTitle,
 .groupInfo h2 {
+  margin: 0;
   font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: var(--weight-medium);
@@ -267,29 +268,8 @@
 
 .groupInfo {
   min-width: 0;
-}
-
-.groupMeta {
-  display: flex;
-  align-items: center;
+  display: grid;
   gap: var(--sp-2);
-  margin: var(--sp-2) 0 var(--sp-3);
-}
-
-.metaChip {
-  display: inline-flex;
-  align-items: center;
-  max-width: 220px;
-  padding: 2px var(--sp-2);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .entryUrlRow {
@@ -585,6 +565,21 @@
   border-radius: var(--radius-full);
   background: var(--surface-active);
   flex-shrink: 0;
+}
+
+.ruleApiAddress {
+  display: inline-block;
+  flex: 0 1 280px;
+  max-width: 280px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  padding: 2px var(--sp-2);
+  background: transparent;
 }
 
 .ruleQuotaWrap {

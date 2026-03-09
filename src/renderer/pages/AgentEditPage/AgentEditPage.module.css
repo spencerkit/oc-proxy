@@ -300,6 +300,32 @@
   line-height: var(--leading-relaxed);
 }
 
+.tokenVisibilityButton {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.tokenVisibilityButton:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.tokenVisibilityButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .sourceMeta {
   display: inline-flex;
   align-items: center;
@@ -312,6 +338,45 @@
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+}
+
+.sourceFileTabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-sunken);
+  width: fit-content;
+}
+
+.sourceFileTab {
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.sourceFileTab:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.sourceFileTabActive {
+  background: var(--bg-raised);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.sourceHintText {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  color: var(--text-tertiary);
 }
 
 .sourceTextarea {

@@ -102,12 +102,22 @@ pub struct AgentConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentSourceFile {
+    pub source_id: String,
+    pub label: String,
+    pub file_path: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentConfigFile {
     pub target_id: String,
     pub kind: IntegrationClientKind,
     pub config_dir: String,
     pub file_path: String,
     pub content: String,
+    pub source_files: Vec<AgentSourceFile>,
     pub updated_at: Option<String>,
     pub parsed_config: Option<AgentConfig>,
 }

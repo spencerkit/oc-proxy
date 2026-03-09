@@ -255,8 +255,16 @@ export interface AgentConfigFile {
   configDir: string
   filePath: string
   content: string
+  sourceFiles: AgentSourceFile[]
   updatedAt?: string
   parsedConfig?: AgentConfig
+}
+
+export interface AgentSourceFile {
+  sourceId: string
+  label: string
+  filePath: string
+  content: string
 }
 
 export interface WriteAgentConfigResult {

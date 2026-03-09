@@ -1,9 +1,9 @@
-import { ArrowLeft, Bot, Braces, Code2, FileCode2, Save } from "lucide-react"
+import { ArrowLeft, Bot, Braces, Code2, Eye, EyeOff, FileCode2, Save } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { Button, Input, Switch } from "@/components"
 import { useTranslation } from "@/hooks"
-import type { AgentConfig, AgentConfigFile, IntegrationClientKind } from "@/types"
+import type { AgentConfig, AgentConfigFile, AgentSourceFile, IntegrationClientKind } from "@/types"
 import { ipc } from "@/utils/ipc"
 import styles from "./AgentEditPage.module.css"
 
@@ -70,15 +70,31 @@ function formatUpdatedAt(raw: string): string {
   }).format(date)
 }
 
-function buildSourcePlaceholder(kind: IntegrationClientKind): string {
+function buildSourcePlaceholder(kind: IntegrationClientKind, sourceId: string): string {
   switch (kind) {
     case "claude":
       return '{\n  "env": {\n    "ANTHROPIC_BASE_URL": "http://localhost:8080/oc/your-group"\n  }\n}\n'
     case "codex":
-      return '[model_providers.aor_shared]\nbase_url = "http://localhost:8080/oc/your-group"\n'
+      if (sourceId === "auth") {
+        return '{\n  "OPENAI_API_KEY": "sk-..."\n}\n'
+      }
+      return 'model_provider = "your_provider"\n\n[model_providers.your_provider]\nbase_url = "http://localhost:8080/oc/your-group"\n'
     case "opencode":
       return '{\n  "provider": {\n    "aor_shared": {\n      "options": {\n        "baseURL": "http://localhost:8080/oc/your-group"\n      }\n    }\n  }\n}\n'
   }
+}
+
+function buildSourceFiles(configFile?: AgentConfigFile | null): AgentSourceFile[] {
+  if (!configFile) return []
+  if (configFile.sourceFiles?.length) return configFile.sourceFiles
+  return [
+    {
+      sourceId: "primary",
+      label: configFile.filePath.split(/[\\/]/).at(-1) || "config",
+      filePath: configFile.filePath,
+      content: configFile.content,
+    },
+  ]
 }
 
 export const AgentEditPage: React.FC = () => {
@@ -94,7 +110,9 @@ export const AgentEditPage: React.FC = () => {
   const [success, setSuccess] = useState<string | null>(null)
   const [formData, setFormData] = useState<AgentConfig>(buildFormState())
   const [timeoutText, setTimeoutText] = useState("")
-  const [sourceContent, setSourceContent] = useState("")
+  const [showApiToken, setShowApiToken] = useState(false)
+  const [activeSourceId, setActiveSourceId] = useState("primary")
+  const [sourceDrafts, setSourceDrafts] = useState<Record<string, string>>({})
 
   const loadConfig = useCallback(async () => {
     if (!targetId) return
@@ -108,11 +126,17 @@ export const AgentEditPage: React.FC = () => {
       const nextFormState = buildFormState(result.parsedConfig)
       setFormData(nextFormState)
       setTimeoutText(
-        result.parsedConfig?.timeout !== undefined
-          ? String(result.parsedConfig.timeout)
-          : ""
+        result.parsedConfig?.timeout !== undefined ? String(result.parsedConfig.timeout) : ""
       )
-      setSourceContent(result.content)
+      const nextSourceFiles = buildSourceFiles(result)
+      setActiveSourceId(current =>
+        nextSourceFiles.some(file => file.sourceId === current)
+          ? current
+          : (nextSourceFiles[0]?.sourceId ?? "primary")
+      )
+      setSourceDrafts(
+        Object.fromEntries(nextSourceFiles.map(file => [file.sourceId, file.content]))
+      )
     } catch (err) {
       setError(String(err))
     } finally {
@@ -134,7 +158,14 @@ export const AgentEditPage: React.FC = () => {
   const supportsTimeout = kind !== "codex"
   const meta = AGENT_META[kind]
   const KindIcon = meta.icon
-  const sourcePlaceholder = buildSourcePlaceholder(kind)
+  const sourceFiles = useMemo(() => buildSourceFiles(configFile), [configFile])
+  const activeSourceFile = useMemo(
+    () => sourceFiles.find(file => file.sourceId === activeSourceId) ?? sourceFiles[0],
+    [activeSourceId, sourceFiles]
+  )
+  const sourceContent = activeSourceFile ? (sourceDrafts[activeSourceFile.sourceId] ?? "") : ""
+  const initialSourceContent = activeSourceFile?.content ?? ""
+  const sourcePlaceholder = buildSourcePlaceholder(kind, activeSourceFile?.sourceId ?? "primary")
   const timeoutError =
     timeoutText.trim().length > 0 && !/^\d+$/.test(timeoutText.trim())
       ? t("agentManagement.timeoutInvalid")
@@ -152,7 +183,6 @@ export const AgentEditPage: React.FC = () => {
     () => buildFormState(configFile?.parsedConfig),
     [configFile?.parsedConfig]
   )
-  const initialSourceContent = configFile?.content ?? ""
   const isFormDirty = serializeConfig(currentFormConfig) !== serializeConfig(initialFormConfig)
   const isSourceDirty = sourceContent !== initialSourceContent
   const statusMessage =
@@ -182,13 +212,17 @@ export const AgentEditPage: React.FC = () => {
   }
 
   const handleSaveSource = async () => {
-    if (!targetId || !isSourceDirty) return
+    if (!targetId || !activeSourceFile || !isSourceDirty) return
 
     setSaveMode("source")
     setError(null)
     setSuccess(null)
     try {
-      await ipc.integrationWriteAgentConfigSource(targetId, sourceContent)
+      await ipc.integrationWriteAgentConfigSource(
+        targetId,
+        sourceContent,
+        activeSourceFile.sourceId
+      )
       await loadConfig()
       setSuccess(t("agentManagement.saveSuccess"))
     } catch (err) {
@@ -209,7 +243,7 @@ export const AgentEditPage: React.FC = () => {
   return (
     <div className={styles.page}>
       <section className={styles.hero}>
-        <button className={styles.backButton} onClick={() => navigate("/agents")}>
+        <button type="button" className={styles.backButton} onClick={() => navigate("/agents")}>
           <ArrowLeft size={16} strokeWidth={2} />
           <span>{t("agentManagement.back")}</span>
         </button>
@@ -226,21 +260,14 @@ export const AgentEditPage: React.FC = () => {
             <div className={styles.infoStack}>
               <div className={styles.infoRow}>
                 <span className={styles.infoLabel}>{t("agentManagement.configDir")}</span>
-                <code className={styles.infoValue}>{configFile?.configDir}</code>
-              </div>
-              <div className={styles.infoRow}>
-                <span className={styles.infoLabel}>{t("agentManagement.configFile")}</span>
-                <code className={styles.infoValue}>{configFile?.filePath}</code>
-              </div>
-              <div className={styles.infoMeta}>
-                <span className={styles.formatBadge}>{meta.format}</span>
-                {configFile?.updatedAt && (
-                  <span className={styles.metaText}>
-                    {t("agentManagement.lastUpdatedLabel", {
-                      value: formatUpdatedAt(configFile.updatedAt),
-                    })}
-                  </span>
-                )}
+                <code className={styles.infoValue}>
+                  {configFile?.configDir}
+                  {configFile?.updatedAt
+                    ? ` · ${t("agentManagement.lastUpdatedLabel", {
+                        value: formatUpdatedAt(configFile.updatedAt),
+                      })}`
+                    : ""}
+                </code>
               </div>
             </div>
           </div>
@@ -266,7 +293,9 @@ export const AgentEditPage: React.FC = () => {
             </button>
           </div>
 
-          <span className={`${styles.statusBadge} ${editMode === "form" && isFormDirty ? styles.statusDirty : ""} ${editMode === "source" && isSourceDirty ? styles.statusDirty : ""}`}>
+          <span
+            className={`${styles.statusBadge} ${editMode === "form" && isFormDirty ? styles.statusDirty : ""} ${editMode === "source" && isSourceDirty ? styles.statusDirty : ""}`}
+          >
             {statusMessage}
           </span>
         </div>
@@ -286,18 +315,40 @@ export const AgentEditPage: React.FC = () => {
                 <Input
                   label={t("agentManagement.url")}
                   value={formData.url}
-                  onChange={event => setFormData(current => ({ ...current, url: event.target.value }))}
+                  onChange={event =>
+                    setFormData(current => ({ ...current, url: event.target.value }))
+                  }
                   placeholder="http://localhost:8080/oc/group"
                   fullWidth
                 />
                 <Input
                   label={t("agentManagement.apiToken")}
-                  type="password"
+                  type={showApiToken ? "text" : "password"}
                   value={formData.apiToken}
+                  hint={kind === "codex" ? t("agentManagement.codexTokenHint") : undefined}
                   onChange={event =>
                     setFormData(current => ({ ...current, apiToken: event.target.value }))
                   }
                   placeholder="sk-..."
+                  endAdornment={
+                    <button
+                      type="button"
+                      className={styles.tokenVisibilityButton}
+                      onClick={() => setShowApiToken(current => !current)}
+                      aria-label={
+                        showApiToken
+                          ? t("agentManagement.hideToken")
+                          : t("agentManagement.showToken")
+                      }
+                      title={
+                        showApiToken
+                          ? t("agentManagement.hideToken")
+                          : t("agentManagement.showToken")
+                      }
+                    >
+                      {showApiToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  }
                   fullWidth
                 />
               </div>
@@ -313,7 +364,9 @@ export const AgentEditPage: React.FC = () => {
                 <Input
                   label={t("agentManagement.model")}
                   value={formData.model}
-                  onChange={event => setFormData(current => ({ ...current, model: event.target.value }))}
+                  onChange={event =>
+                    setFormData(current => ({ ...current, model: event.target.value }))
+                  }
                   placeholder="claude-sonnet-4-5-20250929"
                   fullWidth
                 />
@@ -388,18 +441,49 @@ export const AgentEditPage: React.FC = () => {
           <div className={styles.sourceLayout}>
             <div className={styles.sectionHeading}>
               <h2>{t("agentManagement.sourceEditor")}</h2>
-              <p>{t("agentManagement.sourceHint", { format: meta.format })}</p>
+              <p>
+                {t("agentManagement.sourceHint", {
+                  format: activeSourceFile?.label ?? meta.format,
+                })}
+              </p>
             </div>
+
+            {sourceFiles.length > 1 && (
+              <div className={styles.sourceFileTabs}>
+                {sourceFiles.map(file => (
+                  <button
+                    key={file.sourceId}
+                    type="button"
+                    className={`${styles.sourceFileTab} ${activeSourceFile?.sourceId === file.sourceId ? styles.sourceFileTabActive : ""}`}
+                    onClick={() => setActiveSourceId(file.sourceId)}
+                  >
+                    {file.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className={styles.sourceMeta}>
               <FileCode2 size={16} strokeWidth={2} />
-              <span>{meta.format}</span>
+              <span>{activeSourceFile?.filePath ?? meta.format}</span>
             </div>
+
+            {kind === "codex" && activeSourceFile?.sourceId === "primary" && (
+              <p className={styles.sourceHintText}>{t("agentManagement.codexConfigSourceHint")}</p>
+            )}
+            {kind === "codex" && activeSourceFile?.sourceId === "auth" && (
+              <p className={styles.sourceHintText}>{t("agentManagement.codexAuthSourceHint")}</p>
+            )}
 
             <textarea
               className={styles.sourceTextarea}
               value={sourceContent}
-              onChange={event => setSourceContent(event.target.value)}
+              onChange={event =>
+                setSourceDrafts(current => ({
+                  ...current,
+                  [activeSourceFile?.sourceId ?? "primary"]: event.target.value,
+                }))
+              }
               placeholder={sourcePlaceholder}
               spellCheck={false}
             />

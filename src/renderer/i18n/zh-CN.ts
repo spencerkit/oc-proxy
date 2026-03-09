@@ -113,7 +113,7 @@ export const zhCN = {
     },
     codex: {
       title: "Codex",
-      hint: "默认目录 ~/.codex；写入 config.toml 的 model_providers.aor_shared.base_url。",
+      hint: "默认目录 ~/.codex；写入 config.toml 的 model_providers.<model_provider>.base_url。",
     },
     opencode: {
       title: "OpenCode",
@@ -188,6 +188,11 @@ export const zhCN = {
     coAuthoredByHint: "提交或生成变更时附带 Co-Authored-By 信息。",
     skipPermissionHint: "跳过危险模式前的额外确认。",
     sourceHint: "直接编辑 {{format}} 原始内容。保存前会按对应格式校验。",
+    codexTokenHint: "Codex 的 token 存储在 auth.json 的 OPENAI_API_KEY 字段。",
+    codexConfigSourceHint: "config.toml 仅保存地址和模型配置，不保存 token。",
+    codexAuthSourceHint: "auth.json 保存 OPENAI_API_KEY；删除该键会清除本地 token。",
+    showToken: "显示 Token",
+    hideToken: "隐藏 Token",
     unsavedChanges: "有未保存的改动",
     allChangesSaved: "当前内容已同步",
     timeoutInvalid: "超时时间必须是非负整数",
