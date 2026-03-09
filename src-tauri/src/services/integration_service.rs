@@ -423,46 +423,30 @@ fn resolve_opencode_config_path(config_dir: &Path) -> AppResult<PathBuf> {
     Ok(json)
 }
 
-/// Reads JSON or JSONC object from file.
-fn read_json_like_object(file_path: &Path) -> AppResult<Map<String, Value>> {
-    // For WSL paths, read via wsl command
+/// Reads raw file content from local or WSL paths.
+fn read_file_content(file_path: &Path) -> AppResult<Option<String>> {
     if is_wsl_path(file_path) {
-        let Some(content) = read_file_via_wsl(file_path)? else {
-            return Ok(Map::new());
-        };
-        if content.trim().is_empty() {
-            return Ok(Map::new());
-        }
-        let parsed = serde_json::from_str::<Value>(&content)
-            .or_else(|_| json5::from_str::<Value>(&content))
-            .map_err(|e| {
-                AppError::validation(format!(
-                    "parse JSON config failed ({}): {e}",
-                    file_path.display()
-                ))
-            })?;
-        let Value::Object(map) = parsed else {
-            return Err(AppError::validation(format!(
-                "JSON config root must be object: {}",
-                file_path.display()
-            )));
-        };
-        return Ok(map);
+        return read_file_via_wsl(file_path);
     }
 
-    // Normal read for non-WSL paths
     if !file_path.exists() {
-        return Ok(Map::new());
+        return Ok(None);
     }
+
     let raw = std::fs::read_to_string(file_path).map_err(|e| {
         AppError::external(format!("read file failed ({}): {e}", file_path.display()))
     })?;
-    if raw.trim().is_empty() {
+    Ok(Some(raw))
+}
+
+/// Parses JSON or JSONC text into an object map.
+fn parse_json_like_content(content: &str, file_path: &Path) -> AppResult<Map<String, Value>> {
+    if content.trim().is_empty() {
         return Ok(Map::new());
     }
 
-    let parsed = serde_json::from_str::<Value>(&raw)
-        .or_else(|_| json5::from_str::<Value>(&raw))
+    let parsed = serde_json::from_str::<Value>(content)
+        .or_else(|_| json5::from_str::<Value>(content))
         .map_err(|e| {
             AppError::validation(format!(
                 "parse JSON config failed ({}): {e}",
@@ -478,35 +462,29 @@ fn read_json_like_object(file_path: &Path) -> AppResult<Map<String, Value>> {
     Ok(map)
 }
 
+/// Reads JSON or JSONC object from file.
+fn read_json_like_object(file_path: &Path) -> AppResult<Map<String, Value>> {
+    let Some(content) = read_file_content(file_path)? else {
+        return Ok(Map::new());
+    };
+    parse_json_like_content(&content, file_path)
+}
+
 /// Reads TOML document from file.
 fn read_toml_document(file_path: &Path) -> AppResult<DocumentMut> {
-    if is_wsl_path(file_path) {
-        let Some(content) = read_file_via_wsl(file_path)? else {
-            return Ok(DocumentMut::new());
-        };
-        if content.trim().is_empty() {
-            return Ok(DocumentMut::new());
-        }
-        return content.parse::<DocumentMut>().map_err(|e| {
-            AppError::validation(format!(
-                "parse TOML config failed ({}): {}",
-                file_path.display(),
-                e
-            ))
-        });
+    let Some(content) = read_file_content(file_path)? else {
+        return Ok(DocumentMut::new());
+    };
+    parse_toml_content(&content, file_path)
+}
+
+/// Parses TOML text into a mutable document.
+fn parse_toml_content(content: &str, file_path: &Path) -> AppResult<DocumentMut> {
+    if content.trim().is_empty() {
+        return Ok(DocumentMut::new());
     }
 
-    // Normal read for non-WSL paths
-    if !file_path.exists() {
-        return Ok(DocumentMut::new());
-    }
-    let raw = std::fs::read_to_string(file_path).map_err(|e| {
-        AppError::external(format!("read file failed ({}): {e}", file_path.display()))
-    })?;
-    if raw.trim().is_empty() {
-        return Ok(DocumentMut::new());
-    }
-    raw.parse::<DocumentMut>().map_err(|e| {
+    content.parse::<DocumentMut>().map_err(|e| {
         AppError::validation(format!(
             "parse TOML config failed ({}): {e}",
             file_path.display()
@@ -609,31 +587,12 @@ pub fn read_agent_config(state: &SharedState, target_id: &str) -> AppResult<Agen
         None => config_dir,
     };
 
-    let (file_path, root) = match target.kind {
-        IntegrationClientKind::Claude => {
-            let path = config_dir.join("settings.json");
-            let root = read_json_like_object(&path).unwrap_or_else(|_| Map::new());
-            (path, root)
-        }
-        IntegrationClientKind::Codex => {
-            let path = config_dir.join("config.toml");
-            let doc = read_toml_document(&path).unwrap_or_else(|_| DocumentMut::new());
-            // Convert TOML document to JSON-like Map for parsing
-            let root = toml_to_map(&doc);
-            (path, root)
-        }
-        IntegrationClientKind::Opencode => {
-            let path = resolve_opencode_config_path(&config_dir)?;
-            let root = read_json_like_object(&path).unwrap_or_else(|_| Map::new());
-            (path, root)
-        }
-    };
-
-    // Serialize root back to string for content field
-    let content =
-        serde_json::to_string(&Value::Object(root.clone())).unwrap_or_else(|_| "{}".to_string());
-
-    let parsed_config = parse_agent_config(&target.kind, &root).ok();
+    let file_path = resolve_agent_config_file_path(&target.kind, &config_dir)?;
+    let content = read_file_content(&file_path)?.unwrap_or_default();
+    let parsed_root = parse_agent_config_content(&target.kind, &content, &file_path).ok();
+    let parsed_config = parsed_root
+        .as_ref()
+        .and_then(|root| parse_agent_config(&target.kind, root).ok());
 
     Ok(AgentConfigFile {
         target_id: target.id,
@@ -641,8 +600,36 @@ pub fn read_agent_config(state: &SharedState, target_id: &str) -> AppResult<Agen
         config_dir: target.config_dir,
         file_path: file_path.to_string_lossy().to_string(),
         content,
+        updated_at: Some(target.updated_at),
         parsed_config,
     })
+}
+
+fn resolve_agent_config_file_path(
+    kind: &IntegrationClientKind,
+    config_dir: &Path,
+) -> AppResult<PathBuf> {
+    match kind {
+        IntegrationClientKind::Claude => Ok(config_dir.join("settings.json")),
+        IntegrationClientKind::Codex => Ok(config_dir.join("config.toml")),
+        IntegrationClientKind::Opencode => resolve_opencode_config_path(config_dir),
+    }
+}
+
+fn parse_agent_config_content(
+    kind: &IntegrationClientKind,
+    content: &str,
+    file_path: &Path,
+) -> AppResult<Map<String, Value>> {
+    match kind {
+        IntegrationClientKind::Claude | IntegrationClientKind::Opencode => {
+            parse_json_like_content(content, file_path)
+        }
+        IntegrationClientKind::Codex => {
+            let doc = parse_toml_content(content, file_path)?;
+            Ok(toml_to_map(&doc))
+        }
+    }
 }
 
 /// Converts TOML DocumentMut to a JSON-like Map.
@@ -813,8 +800,6 @@ pub fn write_agent_config(
     target_id: &str,
     config: AgentConfig,
 ) -> AppResult<WriteAgentConfigResult> {
-    use std::path::PathBuf;
-
     let targets = state.integration_store.list();
     let target = targets
         .into_iter()
@@ -840,6 +825,42 @@ pub fn write_agent_config(
         state
             .integration_store
             .update_target_config(target_id, target.config_dir, Some(config));
+
+    Ok(WriteAgentConfigResult {
+        ok: true,
+        target_id: target_id.to_string(),
+        file_path: file_path.to_string_lossy().to_string(),
+        message: None,
+    })
+}
+
+/// Writes raw agent configuration source to file and refreshes parsed store config.
+pub fn write_agent_config_source(
+    state: &SharedState,
+    target_id: &str,
+    content: &str,
+) -> AppResult<WriteAgentConfigResult> {
+    let targets = state.integration_store.list();
+    let target = targets
+        .into_iter()
+        .find(|t| t.id == target_id)
+        .ok_or_else(|| AppError::not_found(format!("target not found: {}", target_id)))?;
+
+    let config_dir = PathBuf::from(&target.config_dir);
+    let config_dir = match normalize_wsl_path(&config_dir) {
+        Some(normalized) => normalized,
+        None => config_dir,
+    };
+
+    let file_path = resolve_agent_config_file_path(&target.kind, &config_dir)?;
+    let parsed_root = parse_agent_config_content(&target.kind, content, &file_path)?;
+    write_file_content(&file_path, content)?;
+
+    let parsed_config = parse_agent_config(&target.kind, &parsed_root).ok();
+    let _ =
+        state
+            .integration_store
+            .update_target_config(target_id, target.config_dir, parsed_config);
 
     Ok(WriteAgentConfigResult {
         ok: true,
@@ -938,24 +959,10 @@ fn write_codex_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult
         doc["model"] = value(model);
     }
 
-    // Write to file
-    if let Some(parent) = file_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::external(format!(
-                "create codex config dir failed ({}): {e}",
-                parent.display()
-            ))
-        })?;
-    }
     let mut output = doc.to_string();
     if !output.ends_with('\n') {
         output.push('\n');
     }
-    std::fs::write(&file_path, output).map_err(|e| {
-        AppError::external(format!(
-            "write codex config failed ({}): {e}",
-            file_path.display()
-        ))
-    })?;
+    write_file_content(&file_path, &output)?;
     Ok(file_path)
 }

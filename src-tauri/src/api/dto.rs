@@ -108,6 +108,7 @@ pub struct AgentConfigFile {
     pub config_dir: String,
     pub file_path: String,
     pub content: String,
+    pub updated_at: Option<String>,
     pub parsed_config: Option<AgentConfig>,
 }
 

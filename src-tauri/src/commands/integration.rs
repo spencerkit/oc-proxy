@@ -157,3 +157,14 @@ pub async fn integration_write_agent_config(
 ) -> Result<WriteAgentConfigResult, String> {
     integration_service::write_agent_config(&state, &target_id, config).map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+/// Writes raw agent configuration source to file.
+pub async fn integration_write_agent_config_source(
+    state: State<'_, SharedState>,
+    target_id: String,
+    content: String,
+) -> Result<WriteAgentConfigResult, String> {
+    integration_service::write_agent_config_source(&state, &target_id, &content)
+        .map_err(|e| e.to_string())
+}

@@ -31,9 +31,9 @@ use commands::{
     config_import_groups_json, config_remote_rules_pull, config_remote_rules_upload, config_save,
     integration_add_target, integration_list_targets, integration_pick_directory,
     integration_read_agent_config, integration_remove_target, integration_update_target,
-    integration_write_agent_config, integration_write_group_entry, logs_clear, logs_list,
-    logs_stats_clear, logs_stats_rule_cards, logs_stats_summary, provider_test_model,
-    quota_get_group, quota_get_rule, quota_test_draft,
+    integration_write_agent_config, integration_write_agent_config_source,
+    integration_write_group_entry, logs_clear, logs_list, logs_stats_clear, logs_stats_rule_cards,
+    logs_stats_summary, provider_test_model, quota_get_group, quota_get_rule, quota_test_draft,
 };
 use tauri::Manager;
 
@@ -82,6 +82,7 @@ async fn main() {
             integration_write_group_entry,
             integration_read_agent_config,
             integration_write_agent_config,
+            integration_write_agent_config_source,
             app_read_clipboard_text,
             logs_list,
             logs_clear,

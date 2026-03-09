@@ -255,6 +255,7 @@ export interface AgentConfigFile {
   configDir: string
   filePath: string
   content: string
+  updatedAt?: string
   parsedConfig?: AgentConfig
 }
 
