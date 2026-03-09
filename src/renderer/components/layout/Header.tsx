@@ -7,6 +7,7 @@ import { shallow } from "zustand/shallow"
 import { useProxyStore } from "@/store"
 import type { LocaleCode, ThemeMode } from "@/types"
 import { resolveEffectiveLocale } from "@/utils/locale"
+import brandLogo from "../../../../assets/logo-lockup.svg"
 import { Button } from "../common"
 import styles from "./Header.module.css"
 
@@ -195,9 +196,8 @@ export const Header: React.FC<HeaderProps> = ({
     <header className={styles.header} data-testid={testId}>
       {/* Left section */}
       <div className={styles.left}>
-        <div>
-          <h1 className={styles.title}>{t("app.title")}</h1>
-          <p className={styles.subtitle}>{t("app.protocolForwardingService")}</p>
+        <div className={styles.brand}>
+          <img className={styles.brandLogo} src={brandLogo} alt={t("app.title")} />
         </div>
         {isRunning !== undefined && (
           <div className={styles.serviceStatus}>
