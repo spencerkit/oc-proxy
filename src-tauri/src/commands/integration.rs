@@ -166,6 +166,11 @@ pub async fn integration_write_agent_config_source(
     content: String,
     source_id: Option<String>,
 ) -> Result<WriteAgentConfigResult, String> {
-    integration_service::write_agent_config_source(&state, &target_id, &content, source_id.as_deref())
-        .map_err(|e| e.to_string())
+    integration_service::write_agent_config_source(
+        &state,
+        &target_id,
+        &content,
+        source_id.as_deref(),
+    )
+    .map_err(|e| e.to_string())
 }

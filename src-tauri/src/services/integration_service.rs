@@ -825,9 +825,13 @@ fn resolve_agent_source_file_path(
 ) -> AppResult<PathBuf> {
     if let Some(source) = source_id.map(str::trim).filter(|value| !value.is_empty()) {
         return match (kind, source) {
-            (IntegrationClientKind::Codex, SOURCE_AUTH) => Ok(resolve_codex_auth_file_path(config_dir)),
+            (IntegrationClientKind::Codex, SOURCE_AUTH) => {
+                Ok(resolve_codex_auth_file_path(config_dir))
+            }
             (_, SOURCE_PRIMARY) => resolve_agent_config_file_path(kind, config_dir),
-            (_, _) => Err(AppError::validation(format!("unsupported source id: {source}"))),
+            (_, _) => Err(AppError::validation(format!(
+                "unsupported source id: {source}"
+            ))),
         };
     }
     resolve_agent_config_file_path(kind, config_dir)
@@ -1023,7 +1027,9 @@ fn parse_codex_config_with_auth(
     config_root: &Map<String, Value>,
     auth_root: Option<&Map<String, Value>>,
 ) -> AppResult<AgentConfig> {
-    let model_providers = config_root.get("model_providers").and_then(|v| v.as_object());
+    let model_providers = config_root
+        .get("model_providers")
+        .and_then(|v| v.as_object());
     let provider_name = resolve_codex_provider_name_from_map(config_root);
     let provider = provider_name
         .as_deref()
@@ -1122,7 +1128,8 @@ pub fn write_agent_config_source(
     };
 
     let normalized_source_id = source_id.map(str::trim).filter(|value| !value.is_empty());
-    let file_path = resolve_agent_source_file_path(&target.kind, &config_dir, normalized_source_id)?;
+    let file_path =
+        resolve_agent_source_file_path(&target.kind, &config_dir, normalized_source_id)?;
     let parsed_root = if matches!(target.kind, IntegrationClientKind::Codex)
         && normalized_source_id == Some(SOURCE_AUTH)
     {
