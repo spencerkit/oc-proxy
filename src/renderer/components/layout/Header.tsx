@@ -1,4 +1,4 @@
-import { FileText, Globe, Moon, Server, Settings as SettingsIcon, Sun } from "lucide-react"
+import { FileText, Globe, Moon, Server, Settings as SettingsIcon, Sun, Users } from "lucide-react"
 import type React from "react"
 import { useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
@@ -10,7 +10,7 @@ import { resolveEffectiveLocale } from "@/utils/locale"
 import { Button } from "../common"
 import styles from "./Header.module.css"
 
-export type HeaderView = "service" | "settings" | "logs"
+export type HeaderView = "service" | "settings" | "logs" | "agents"
 
 export interface HeaderProps {
   /**
@@ -118,6 +118,7 @@ export const Header: React.FC<HeaderProps> = ({
     const path = location.pathname
     if (path === "/settings") return "settings"
     if (path.startsWith("/logs")) return "logs"
+    if (path.startsWith("/agents")) return "agents"
     return "service"
   }
 
@@ -181,6 +182,9 @@ export const Header: React.FC<HeaderProps> = ({
           case "logs":
             navigate("/logs")
             break
+          case "agents":
+            navigate("/agents")
+            break
         }
       }
     },
@@ -240,6 +244,15 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <SettingsIcon size={16} strokeWidth={2} className={styles.navIcon} />
           <span className={styles.navLabel}>{t("header.settings")}</span>
+        </button>
+        <button
+          type="button"
+          className={`${styles.navButton} ${currentView === "agents" ? styles.active : ""}`}
+          onClick={() => handleViewChange("agents")}
+          aria-current={currentView === "agents" ? "page" : undefined}
+        >
+          <Users size={16} strokeWidth={2} className={styles.navIcon} />
+          <span className={styles.navLabel}>{t("header.agents")}</span>
         </button>
         <button
           type="button"

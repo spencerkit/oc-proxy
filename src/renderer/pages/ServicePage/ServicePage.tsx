@@ -2,7 +2,7 @@ import { Copy, Pencil, Plus, Trash2, Upload } from "lucide-react"
 import React, { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { shallow } from "zustand/shallow"
-import { AgentManagementPanel, Button, Input, Modal } from "@/components"
+import { Button, Input, Modal } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { useProxyStore } from "@/store"
 import type { Group, IntegrationClientKind, IntegrationTarget, ProxyConfig } from "@/types"
@@ -76,7 +76,6 @@ export const ServicePage: React.FC = () => {
     null
   )
   const [selectedIntegrationIds, setSelectedIntegrationIds] = useState<Record<string, boolean>>({})
-  const [showAgentManagement, setShowAgentManagement] = useState(false)
   const [newGroupName, setNewGroupName] = useState("")
   const [newGroupId, setNewGroupId] = useState("")
   const providerCardStatsHours = 24
@@ -689,15 +688,6 @@ export const ServicePage: React.FC = () => {
               </div>
               <div className={styles.groupActions}>
                 <Button
-                  variant={showAgentManagement ? "primary" : "default"}
-                  size="small"
-                  onClick={() => setShowAgentManagement(!showAgentManagement)}
-                  title={t("agentManagement.title")}
-                  aria-label={t("agentManagement.title")}
-                >
-                  {t("agentManagement.title")}
-                </Button>
-                <Button
                   variant="default"
                   size="small"
                   icon={Upload}
@@ -725,13 +715,6 @@ export const ServicePage: React.FC = () => {
                 />
               </div>
             </div>
-
-            {showAgentManagement && (
-              <AgentManagementPanel
-                activeGroupId={activeGroupId ?? undefined}
-                onClose={() => setShowAgentManagement(false)}
-              />
-            )}
 
             {(quotaError || statsError) && (
               <div className={styles.noticeBar}>

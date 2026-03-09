@@ -5,6 +5,8 @@ import { shallow } from "zustand/shallow"
 import { Layout } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import {
+  AgentEditPage,
+  AgentListPage,
   GroupEditPage,
   LogDetailPage,
   LogsPage,
@@ -162,6 +164,8 @@ const App: React.FC = () => {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/logs/:traceId" element={<LogDetailPage />} />
+        <Route path="/agents" element={<AgentListPage />} />
+        <Route path="/agents/:targetId/edit" element={<AgentEditPage />} />
         <Route path="/groups/:groupId/edit" element={<GroupEditPage />} />
         <Route path="/groups/:groupId/providers/new" element={<RuleCreatePage />} />
         <Route path="/groups/:groupId/providers/:providerId/edit" element={<RuleEditPage />} />

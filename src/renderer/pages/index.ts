@@ -1,3 +1,5 @@
+export { AgentEditPage } from "./AgentEditPage"
+export { AgentListPage } from "./AgentListPage"
 export { GroupEditPage } from "./GroupEditPage"
 export { LogDetailPage } from "./LogDetailPage"
 export { LogsPage } from "./LogsPage"
