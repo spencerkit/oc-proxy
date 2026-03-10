@@ -896,7 +896,10 @@ mod tests {
         let loaded = store.get();
         assert_eq!(loaded.groups.len(), 1);
         assert_eq!(loaded.providers.len(), 1);
-        assert_eq!(loaded.groups[0].provider_ids, vec!["provider-1".to_string()]);
+        assert_eq!(
+            loaded.groups[0].provider_ids,
+            vec!["provider-1".to_string()]
+        );
 
         let conn = Connection::open(&db_path).expect("reopen sqlite");
         let provider_columns = table_columns(&conn, "provider_records").expect("table columns");

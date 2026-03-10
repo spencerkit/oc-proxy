@@ -213,7 +213,8 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
 
                     let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
                     if matches!(role, "developer" | "system") {
-                        let system_text = extract_openai_responses_message_text(item.get("content"));
+                        let system_text =
+                            extract_openai_responses_message_text(item.get("content"));
                         if !system_text.is_empty() {
                             system_chunks.push(system_text);
                         }

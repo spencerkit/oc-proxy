@@ -113,12 +113,13 @@ pub async fn fetch_group_quotas(
         .find(|g| g.id == group_id)
         .ok_or_else(|| format!("group not found: {group_id}"))?;
 
-    let snapshots = stream::iter(group.providers.iter().cloned().map(|rule| async move {
-        fetch_single_rule_quota(group, &rule, false).await.snapshot
-    }))
-    .buffered(GROUP_QUOTA_CONCURRENCY)
-    .collect::<Vec<_>>()
-    .await;
+    let snapshots =
+        stream::iter(group.providers.iter().cloned().map(|rule| async move {
+            fetch_single_rule_quota(group, &rule, false).await.snapshot
+        }))
+        .buffered(GROUP_QUOTA_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
 
     Ok(snapshots)
 }
