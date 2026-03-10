@@ -454,9 +454,11 @@ export const SettingsPage: React.FC = () => {
 
   return (
     <div className={styles.settingsPage}>
-      <div className={styles.header}>
-        <h2>{t("settings.title")}</h2>
-        <p className={styles.subtitle}>{t("settings.subtitle")}</p>
+      <div className="app-top-header">
+        <div className="app-top-header-main">
+          <h2 className="app-top-header-title">{t("settings.title")}</h2>
+          <p className="app-top-header-subtitle">{t("settings.subtitle")}</p>
+        </div>
       </div>
 
       <div className={styles.layout}>

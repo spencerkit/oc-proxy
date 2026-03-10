@@ -6,23 +6,6 @@
   gap: var(--sp-5);
 }
 
-.header {
-  display: grid;
-  gap: var(--sp-2);
-}
-
-.header h2 {
-  font-family: var(--font-display);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-}
-
-.subtitle {
-  font-size: var(--text-sm);
-  color: var(--text-tertiary);
-}
-
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

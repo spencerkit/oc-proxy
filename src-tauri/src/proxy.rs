@@ -446,6 +446,7 @@ mod tests {
             id: "g1".to_string(),
             name: "Group".to_string(),
             models: vec!["sonnet".to_string()],
+            provider_ids: vec!["r1".to_string()],
             active_provider_id: Some("r1".to_string()),
             providers: vec![rule.clone()],
         };
@@ -478,6 +479,7 @@ mod tests {
             id: "g1".to_string(),
             name: "Group".to_string(),
             models: vec!["codex-mini".to_string()],
+            provider_ids: vec!["r1".to_string()],
             active_provider_id: Some("r1".to_string()),
             providers: vec![rule.clone()],
         };
@@ -508,6 +510,7 @@ mod tests {
             id: "g1".to_string(),
             name: "Group".to_string(),
             models: vec!["m1".to_string()],
+            provider_ids: vec!["r1".to_string()],
             active_provider_id: Some("r1".to_string()),
             providers: vec![rule.clone()],
         };

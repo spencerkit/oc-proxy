@@ -1,0 +1,1103 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Global Providers Prototype</title>
+    <style>
+      :root {
+        --bg: #f6f7fb;
+        --panel: #ffffff;
+        --text: #18202a;
+        --muted: #667487;
+        --primary: #005e5d;
+        --primary-soft: #e6f4f4;
+        --danger: #b42318;
+        --danger-soft: #ffe9e8;
+        --line: #e5e7ef;
+        --chip: #eef2f8;
+        --shadow: 0 8px 30px rgba(19, 40, 62, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(1200px 400px at 10% -20%, #dff5f4 0%, transparent 50%),
+          radial-gradient(1200px 480px at 100% -10%, #f4f0ff 0%, transparent 45%),
+          var(--bg);
+      }
+
+      .app {
+        max-width: 1280px;
+        margin: 24px auto;
+        padding: 0 16px 24px;
+      }
+
+      .topbar {
+        display: flex;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .tab {
+        border: 0;
+        background: transparent;
+        border-radius: 10px;
+        padding: 9px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        color: var(--muted);
+      }
+
+      .tab.active {
+        color: var(--primary);
+        background: var(--primary-soft);
+        font-weight: 600;
+      }
+
+      .content {
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .prototype-note {
+        margin-top: 10px;
+        border: 1px solid #ffe3a6;
+        background: #fff7e3;
+        color: #7a5a00;
+        border-radius: 10px;
+        padding: 9px 12px;
+        font-size: 12px;
+      }
+
+      .view {
+        display: none;
+      }
+
+      .view.active {
+        display: block;
+      }
+
+      .placeholder {
+        padding: 48px 28px;
+        color: var(--muted);
+      }
+
+      .service-layout {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        min-height: 660px;
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--line);
+        padding: 18px 16px;
+      }
+
+      .main {
+        padding: 18px;
+      }
+
+      .section-title {
+        margin: 0;
+        font-size: 14px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .group-list {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .group-item {
+        width: 100%;
+        text-align: left;
+        border: 1px solid var(--line);
+        background: #fbfcff;
+        padding: 10px;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+
+      .group-item.active {
+        border-color: #94d1d0;
+        background: var(--primary-soft);
+      }
+
+      .group-name {
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .group-meta {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+
+      .header-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: flex-start;
+        margin-bottom: 12px;
+      }
+
+      .group-title {
+        margin: 0;
+        font-size: 22px;
+      }
+
+      .group-path {
+        margin-top: 4px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .btn {
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--text);
+        border-radius: 10px;
+        font-size: 12px;
+        cursor: pointer;
+        padding: 8px 11px;
+      }
+
+      .btn.primary {
+        background: var(--primary);
+        color: #fff;
+        border-color: var(--primary);
+      }
+
+      .btn.danger {
+        background: var(--danger-soft);
+        color: var(--danger);
+        border-color: #f5c1bd;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+        gap: 12px;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        background: #fff;
+      }
+
+      .card.active-provider {
+        border-color: #64b8b7;
+        box-shadow: 0 0 0 2px rgba(0, 94, 93, 0.08) inset;
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .card-title {
+        font-size: 14px;
+        font-weight: 700;
+        margin: 0;
+      }
+
+      .chip {
+        display: inline-block;
+        border-radius: 999px;
+        padding: 2px 8px;
+        background: var(--chip);
+        color: #445369;
+        font-size: 11px;
+        margin-top: 4px;
+      }
+
+      .card-addr {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .card-stats {
+        margin-top: 10px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .stat {
+        background: #f8fafe;
+        border: 1px solid #ecf1f7;
+        border-radius: 8px;
+        padding: 6px 8px;
+        font-size: 11px;
+        color: #415066;
+      }
+
+      .card-actions {
+        margin-top: 10px;
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .providers-page {
+        padding: 18px;
+        min-height: 660px;
+      }
+
+      .providers-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .providers-title {
+        margin: 0;
+        font-size: 22px;
+      }
+
+      .providers-sub {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .search-row {
+        margin-top: 12px;
+      }
+
+      .search {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-size: 13px;
+        padding: 10px 12px;
+      }
+
+      .empty {
+        margin-top: 14px;
+        border: 1px dashed #bfd1e4;
+        border-radius: 12px;
+        padding: 24px;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      .modal-mask {
+        position: fixed;
+        inset: 0;
+        background: rgba(13, 20, 28, 0.42);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+      }
+
+      .modal-mask.show {
+        display: flex;
+      }
+
+      .modal {
+        width: min(760px, 100%);
+        max-height: 88vh;
+        overflow: auto;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: #fff;
+        box-shadow: var(--shadow);
+      }
+
+      .modal-head {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .modal-title {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .modal-sub {
+        margin-top: 4px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .modal-body {
+        padding: 14px 16px;
+      }
+
+      .modal-foot {
+        padding: 14px 16px;
+        border-top: 1px solid var(--line);
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .select-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .select-item {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .field-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .field.full {
+        grid-column: 1 / -1;
+      }
+
+      .field label {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .field input,
+      .field select {
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        font-size: 13px;
+        padding: 9px 10px;
+      }
+
+      .notice {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        min-width: 260px;
+        max-width: 420px;
+        background: #18202a;
+        color: #fff;
+        padding: 10px 12px;
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+        opacity: 0;
+        transform: translateY(10px);
+        transition: 160ms ease;
+        pointer-events: none;
+      }
+
+      .notice.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      @media (max-width: 900px) {
+        .service-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .field-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="topbar" id="top-tabs"></div>
+      <div class="prototype-note">
+        原型仅演示交互流程。正式实现需保留现有 Provider 卡片样式与创建/编辑页样式不变。
+      </div>
+
+      <div class="content">
+        <section class="view active" id="view-service"></section>
+        <section class="view" id="view-providers"></section>
+        <section class="view" id="view-settings">
+          <div class="placeholder">设置页（本原型未展开）</div>
+        </section>
+        <section class="view" id="view-agents">
+          <div class="placeholder">Agent 页（本原型未展开）</div>
+        </section>
+        <section class="view" id="view-logs">
+          <div class="placeholder">日志页（本原型未展开）</div>
+        </section>
+      </div>
+    </div>
+
+    <div class="modal-mask" id="associate-modal"></div>
+    <div class="modal-mask" id="provider-modal"></div>
+    <div class="modal-mask" id="delete-modal"></div>
+    <div class="notice" id="notice"></div>
+
+    <script>
+      const state = {
+        activeView: "service",
+        activeGroupId: "group-design",
+        providerSearch: "",
+        associateSearch: "",
+        providers: [
+          {
+            id: "p-openai",
+            name: "OpenAI Official",
+            protocol: "openai",
+            apiAddress: "https://api.openai.com/v1",
+            defaultModel: "gpt-4.1",
+            token: "sk-...",
+            quotaText: "剩余额度 85%",
+            requests: "12.4k",
+            tokens: "4.8M",
+            cache: "1.1M",
+            cost: "$42.10",
+          },
+          {
+            id: "p-anthropic",
+            name: "Anthropic Direct",
+            protocol: "anthropic",
+            apiAddress: "https://api.anthropic.com",
+            defaultModel: "claude-sonnet-4-5",
+            token: "sk-ant-...",
+            quotaText: "剩余额度 72%",
+            requests: "6.3k",
+            tokens: "2.5M",
+            cache: "0.6M",
+            cost: "$28.33",
+          },
+          {
+            id: "p-openai-proxy",
+            name: "OpenAI via Internal Gateway",
+            protocol: "openai_completion",
+            apiAddress: "https://gateway.internal/openai",
+            defaultModel: "gpt-4.1-mini",
+            token: "gateway-...",
+            quotaText: "剩余额度 91%",
+            requests: "3.1k",
+            tokens: "0.9M",
+            cache: "0.2M",
+            cost: "$6.80",
+          },
+        ],
+        groups: [
+          {
+            id: "group-design",
+            name: "Design Team",
+            models: ["gpt-4.1", "claude-sonnet"],
+            providerIds: ["p-openai", "p-anthropic"],
+            activeProviderId: "p-openai",
+          },
+          {
+            id: "group-research",
+            name: "Research Team",
+            models: ["gpt-4.1-mini"],
+            providerIds: ["p-openai-proxy"],
+            activeProviderId: "p-openai-proxy",
+          },
+          {
+            id: "group-ops",
+            name: "Ops Team",
+            models: ["gpt-4.1", "gpt-4.1-mini"],
+            providerIds: ["p-openai"],
+            activeProviderId: "p-openai",
+          },
+        ],
+      };
+
+      const topTabs = [
+        { key: "service", label: "服务" },
+        { key: "settings", label: "设置" },
+        { key: "agents", label: "Agent" },
+        { key: "logs", label: "日志" },
+        { key: "providers", label: "Providers" },
+      ];
+
+      function getGroupById(groupId) {
+        return state.groups.find((group) => group.id === groupId) || null;
+      }
+
+      function getProviderById(providerId) {
+        return state.providers.find((provider) => provider.id === providerId) || null;
+      }
+
+      function getProviderBindCount(providerId) {
+        return state.groups.filter((group) => group.providerIds.includes(providerId)).length;
+      }
+
+      function ensureGroupActive(group) {
+        if (!group.providerIds.length) {
+          group.activeProviderId = null;
+          return;
+        }
+        if (!group.activeProviderId || !group.providerIds.includes(group.activeProviderId)) {
+          group.activeProviderId = group.providerIds[0];
+        }
+      }
+
+      function showNotice(text) {
+        const el = document.getElementById("notice");
+        el.textContent = text;
+        el.classList.add("show");
+        clearTimeout(showNotice.timer);
+        showNotice.timer = setTimeout(() => el.classList.remove("show"), 1800);
+      }
+
+      function renderTopTabs() {
+        document.getElementById("top-tabs").innerHTML = topTabs
+          .map(
+            (item) => `
+              <button class="tab ${state.activeView === item.key ? "active" : ""}" data-view="${item.key}">
+                ${item.label}
+              </button>
+            `,
+          )
+          .join("");
+
+        document.querySelectorAll("#top-tabs .tab").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            state.activeView = btn.dataset.view;
+            render();
+          });
+        });
+      }
+
+      function providerCard(provider, opts = {}) {
+        const { isActive = false, inGroup = false, groupId = null } = opts;
+        const activeLabel = isActive
+          ? `<span class="chip" style="background:#dbf4ef;color:#0e8a58">当前生效</span>`
+          : "";
+        const bindCount = getProviderBindCount(provider.id);
+
+        const groupActions = inGroup
+          ? `
+            ${
+              !isActive
+                ? `<button class="btn" data-action="set-active" data-group-id="${groupId}" data-provider-id="${provider.id}">设为生效</button>`
+                : ""
+            }
+            <button class="btn" data-action="unlink" data-group-id="${groupId}" data-provider-id="${provider.id}">移除关联</button>
+            <button class="btn" data-action="edit-provider" data-provider-id="${provider.id}">编辑</button>
+          `
+          : `
+            <button class="btn" data-action="edit-provider" data-provider-id="${provider.id}">编辑</button>
+            <button class="btn danger" data-action="delete-provider" data-provider-id="${provider.id}">删除</button>
+          `;
+
+        return `
+          <article class="card ${isActive ? "active-provider" : ""}">
+            <div class="card-header">
+              <div>
+                <h4 class="card-title">${provider.name}</h4>
+                <span class="chip">${provider.protocol}</span>
+                ${activeLabel}
+              </div>
+              <span class="chip">已关联 ${bindCount} 组</span>
+            </div>
+            <div class="card-addr" title="${provider.apiAddress}">${provider.apiAddress}</div>
+            <div class="card-stats">
+              <span class="stat">${provider.quotaText}</span>
+              <span class="stat">请求 ${provider.requests}</span>
+              <span class="stat">Token ${provider.tokens}</span>
+              <span class="stat">缓存 ${provider.cache}</span>
+              <span class="stat">费用 ${provider.cost}</span>
+            </div>
+            <div class="card-actions">
+              ${groupActions}
+            </div>
+          </article>
+        `;
+      }
+
+      function renderServiceView() {
+        const activeGroup = getGroupById(state.activeGroupId) || state.groups[0] || null;
+        state.activeGroupId = activeGroup ? activeGroup.id : null;
+
+        const groupItems = state.groups
+          .map((group) => {
+            return `
+              <button class="group-item ${group.id === state.activeGroupId ? "active" : ""}" data-group-id="${group.id}">
+                <div class="group-name">${group.name}</div>
+                <div class="group-meta">/${group.id} · ${group.providerIds.length} providers</div>
+              </button>
+            `;
+          })
+          .join("");
+
+        const cards = activeGroup
+          ? activeGroup.providerIds
+              .map((providerId) => getProviderById(providerId))
+              .filter(Boolean)
+              .map((provider) =>
+                providerCard(provider, {
+                  inGroup: true,
+                  isActive: activeGroup.activeProviderId === provider.id,
+                  groupId: activeGroup.id,
+                }),
+              )
+              .join("")
+          : "";
+
+        const empty = !activeGroup || !activeGroup.providerIds.length;
+
+        document.getElementById("view-service").innerHTML = `
+          <div class="service-layout">
+            <aside class="sidebar">
+              <h3 class="section-title">分组</h3>
+              <div class="group-list">${groupItems}</div>
+            </aside>
+
+            <main class="main">
+              ${
+                activeGroup
+                  ? `
+                    <div class="header-row">
+                      <div>
+                        <h2 class="group-title">${activeGroup.name}</h2>
+                        <div class="group-path">路径 /oc/${activeGroup.id}</div>
+                      </div>
+                      <div class="toolbar">
+                        <button class="btn primary" id="open-associate-modal">关联 Provider</button>
+                      </div>
+                    </div>
+
+                    ${
+                      empty
+                        ? `
+                          <div class="empty">
+                            当前分组没有关联 Provider。<br />
+                            点击「关联 Provider」从全局库选择。
+                          </div>
+                        `
+                        : `<div class="cards">${cards}</div>`
+                    }
+                  `
+                  : `<div class="empty">暂无分组</div>`
+              }
+            </main>
+          </div>
+        `;
+
+        document.querySelectorAll(".group-item").forEach((item) => {
+          item.addEventListener("click", () => {
+            state.activeGroupId = item.dataset.groupId;
+            renderServiceView();
+          });
+        });
+
+        const associateBtn = document.getElementById("open-associate-modal");
+        if (associateBtn) {
+          associateBtn.addEventListener("click", () => openAssociateModal());
+        }
+
+        bindCardActions();
+      }
+
+      function renderProvidersView() {
+        const keyword = state.providerSearch.trim().toLowerCase();
+        const list = state.providers.filter((provider) => {
+          if (!keyword) return true;
+          return (
+            provider.name.toLowerCase().includes(keyword) ||
+            provider.id.toLowerCase().includes(keyword) ||
+            provider.apiAddress.toLowerCase().includes(keyword)
+          );
+        });
+
+        document.getElementById("view-providers").innerHTML = `
+          <div class="providers-page">
+            <div class="providers-head">
+              <div>
+                <h2 class="providers-title">Providers</h2>
+                <div class="providers-sub">全局统一维护 Provider，Group 仅做关联（落地复用现有卡片样式）。</div>
+              </div>
+              <button class="btn primary" id="open-add-provider">添加 Provider</button>
+            </div>
+
+            <div class="search-row">
+              <input id="provider-search" class="search" placeholder="搜索 provider 名称 / id / API 地址" value="${state.providerSearch}" />
+            </div>
+
+            ${
+              list.length
+                ? `<div class="cards" style="margin-top:12px">${list.map((provider) => providerCard(provider)).join("")}</div>`
+                : `<div class="empty">没有匹配的 Provider</div>`
+            }
+          </div>
+        `;
+
+        document.getElementById("provider-search").addEventListener("input", (event) => {
+          state.providerSearch = event.target.value;
+          renderProvidersView();
+        });
+
+        document.getElementById("open-add-provider").addEventListener("click", () => {
+          openProviderModal();
+        });
+
+        bindCardActions();
+      }
+
+      function bindCardActions() {
+        document.querySelectorAll("[data-action='set-active']").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const group = getGroupById(btn.dataset.groupId);
+            if (!group) return;
+            group.activeProviderId = btn.dataset.providerId;
+            renderServiceView();
+            showNotice("已切换当前分组生效 Provider");
+          });
+        });
+
+        document.querySelectorAll("[data-action='unlink']").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const group = getGroupById(btn.dataset.groupId);
+            if (!group) return;
+            group.providerIds = group.providerIds.filter((id) => id !== btn.dataset.providerId);
+            ensureGroupActive(group);
+            renderServiceView();
+            showNotice("已从当前分组移除关联");
+          });
+        });
+
+        document.querySelectorAll("[data-action='edit-provider']").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const provider = getProviderById(btn.dataset.providerId);
+            if (!provider) return;
+            showNotice(`全局编辑 ${provider.name}（原型中仅演示跳转入口）`);
+          });
+        });
+
+        document.querySelectorAll("[data-action='delete-provider']").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const provider = getProviderById(btn.dataset.providerId);
+            if (!provider) return;
+            openDeleteModal(provider);
+          });
+        });
+      }
+
+      function openAssociateModal() {
+        const group = getGroupById(state.activeGroupId);
+        if (!group) return;
+
+        const mask = document.getElementById("associate-modal");
+        state.associateSearch = "";
+
+        function renderBody() {
+          const keyword = state.associateSearch.trim().toLowerCase();
+          const candidates = state.providers.filter(
+            (provider) => !group.providerIds.includes(provider.id),
+          );
+          const visible = candidates.filter((provider) => {
+            if (!keyword) return true;
+            return (
+              provider.name.toLowerCase().includes(keyword) ||
+              provider.id.toLowerCase().includes(keyword)
+            );
+          });
+
+          mask.innerHTML = `
+            <div class="modal">
+              <div class="modal-head">
+                <h3 class="modal-title">关联 Provider 到 ${group.name}</h3>
+                <div class="modal-sub">只建立关联，不创建新 Provider。</div>
+              </div>
+              <div class="modal-body">
+                <input id="associate-search" class="search" placeholder="搜索 Provider" value="${state.associateSearch}" />
+
+                ${
+                  !state.providers.length
+                    ? `<div class="empty">全局 Providers 为空，请先到 Providers Tab 新建。</div>`
+                    : !candidates.length
+                      ? `<div class="empty">当前分组已关联所有 Provider。</div>`
+                      : !visible.length
+                        ? `<div class="empty">没有匹配的 Provider。</div>`
+                        : `<div class="select-list">${visible
+                            .map(
+                              (provider) => `
+                                <label class="select-item">
+                                  <input type="checkbox" value="${provider.id}" />
+                                  <div>
+                                    <div style="font-weight:600;font-size:13px">${provider.name}</div>
+                                    <div style="font-size:12px;color:#667487">${provider.protocol} · ${provider.apiAddress}</div>
+                                  </div>
+                                </label>
+                              `,
+                            )
+                            .join("")}</div>`
+                }
+              </div>
+              <div class="modal-foot">
+                <button class="btn" id="associate-cancel">取消</button>
+                <button class="btn primary" id="associate-confirm">确认关联</button>
+              </div>
+            </div>
+          `;
+
+          const search = document.getElementById("associate-search");
+          if (search) {
+            search.addEventListener("input", (event) => {
+              state.associateSearch = event.target.value;
+              renderBody();
+            });
+          }
+
+          document.getElementById("associate-cancel").addEventListener("click", close);
+          document.getElementById("associate-confirm").addEventListener("click", () => {
+            const checked = Array.from(mask.querySelectorAll("input[type='checkbox']:checked")).map(
+              (el) => el.value,
+            );
+            if (!checked.length) {
+              showNotice("请选择至少一个 Provider");
+              return;
+            }
+            group.providerIds = [...group.providerIds, ...checked];
+            ensureGroupActive(group);
+            close();
+            renderServiceView();
+            showNotice(`已关联 ${checked.length} 个 Provider`);
+          });
+        }
+
+        function close() {
+          mask.classList.remove("show");
+          mask.innerHTML = "";
+        }
+
+        mask.addEventListener("click", (event) => {
+          if (event.target === mask) close();
+        });
+
+        renderBody();
+        mask.classList.add("show");
+      }
+
+      function openProviderModal() {
+        const mask = document.getElementById("provider-modal");
+        mask.innerHTML = `
+          <div class="modal">
+            <div class="modal-head">
+              <h3 class="modal-title">添加全局 Provider</h3>
+              <div class="modal-sub">创建后可在任意分组中关联。</div>
+            </div>
+            <div class="modal-body">
+              <div class="field-grid">
+                <div class="field">
+                  <label>Provider 名称</label>
+                  <input id="f-name" placeholder="例如 OpenAI Official" />
+                </div>
+                <div class="field">
+                  <label>协议</label>
+                  <select id="f-protocol">
+                    <option value="openai">openai</option>
+                    <option value="openai_completion">openai_completion</option>
+                    <option value="anthropic">anthropic</option>
+                  </select>
+                </div>
+                <div class="field full">
+                  <label>API 地址</label>
+                  <input id="f-api" placeholder="https://api.example.com" />
+                </div>
+                <div class="field">
+                  <label>默认模型</label>
+                  <input id="f-model" placeholder="gpt-4.1" />
+                </div>
+                <div class="field">
+                  <label>Token</label>
+                  <input id="f-token" placeholder="sk-..." />
+                </div>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn" id="provider-cancel">取消</button>
+              <button class="btn primary" id="provider-save">保存</button>
+            </div>
+          </div>
+        `;
+
+        function close() {
+          mask.classList.remove("show");
+          mask.innerHTML = "";
+        }
+
+        mask.addEventListener("click", (event) => {
+          if (event.target === mask) close();
+        });
+
+        document.getElementById("provider-cancel").addEventListener("click", close);
+        document.getElementById("provider-save").addEventListener("click", () => {
+          const name = document.getElementById("f-name").value.trim();
+          const protocol = document.getElementById("f-protocol").value.trim();
+          const apiAddress = document.getElementById("f-api").value.trim();
+          const defaultModel = document.getElementById("f-model").value.trim();
+          const token = document.getElementById("f-token").value.trim();
+
+          if (!name || !apiAddress || !defaultModel || !token) {
+            showNotice("请完整填写必填字段");
+            return;
+          }
+
+          const id = `${name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "")}-${Date.now().toString().slice(-4)}`;
+
+          state.providers.unshift({
+            id,
+            name,
+            protocol,
+            apiAddress,
+            defaultModel,
+            token,
+            quotaText: "剩余额度 待检测",
+            requests: "0",
+            tokens: "0",
+            cache: "0",
+            cost: "$0.00",
+          });
+
+          close();
+          renderProvidersView();
+          showNotice("Provider 已添加，可立即在分组中关联");
+        });
+
+        mask.classList.add("show");
+      }
+
+      function openDeleteModal(provider) {
+        const mask = document.getElementById("delete-modal");
+        const affectedGroups = state.groups.filter((group) => group.providerIds.includes(provider.id));
+
+        mask.innerHTML = `
+          <div class="modal" style="width:min(620px,100%)">
+            <div class="modal-head">
+              <h3 class="modal-title">删除全局 Provider</h3>
+              <div class="modal-sub">该操作会解除所有分组关联。</div>
+            </div>
+            <div class="modal-body">
+              <div style="font-size:13px;line-height:1.7">
+                确认删除 <b>${provider.name}</b> 吗？<br />
+                影响分组数：<b>${affectedGroups.length}</b>
+              </div>
+              <div class="select-list" style="margin-top:10px">
+                ${
+                  affectedGroups.length
+                    ? affectedGroups
+                        .map(
+                          (group) => `
+                            <div class="select-item">
+                              <div>
+                                <div style="font-weight:600;font-size:13px">${group.name}</div>
+                                <div style="font-size:12px;color:#667487">/${group.id}</div>
+                              </div>
+                            </div>
+                          `,
+                        )
+                        .join("")
+                    : `<div class="empty">该 Provider 当前未关联任何分组。</div>`
+                }
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn" id="delete-cancel">取消</button>
+              <button class="btn danger" id="delete-confirm">确认删除</button>
+            </div>
+          </div>
+        `;
+
+        function close() {
+          mask.classList.remove("show");
+          mask.innerHTML = "";
+        }
+
+        mask.addEventListener("click", (event) => {
+          if (event.target === mask) close();
+        });
+
+        document.getElementById("delete-cancel").addEventListener("click", close);
+        document.getElementById("delete-confirm").addEventListener("click", () => {
+          state.providers = state.providers.filter((item) => item.id !== provider.id);
+
+          state.groups.forEach((group) => {
+            group.providerIds = group.providerIds.filter((id) => id !== provider.id);
+            ensureGroupActive(group);
+          });
+
+          close();
+          render();
+          showNotice(`已删除 Provider，并同步解除 ${affectedGroups.length} 个分组关联`);
+        });
+
+        mask.classList.add("show");
+      }
+
+      function renderViews() {
+        ["service", "settings", "agents", "logs", "providers"].forEach((key) => {
+          const el = document.getElementById(`view-${key}`);
+          if (!el) return;
+          el.classList.toggle("active", key === state.activeView);
+        });
+
+        if (state.activeView === "service") {
+          renderServiceView();
+        }
+        if (state.activeView === "providers") {
+          renderProvidersView();
+        }
+      }
+
+      function render() {
+        renderTopTabs();
+        renderViews();
+      }
+
+      render();
+    </script>
+  </body>
+</html>

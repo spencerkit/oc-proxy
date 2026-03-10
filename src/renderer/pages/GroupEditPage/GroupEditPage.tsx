@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from "lucide-react"
+import { ArrowLeft } from "lucide-react"
 import type React from "react"
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
@@ -25,8 +25,6 @@ export const GroupEditPage: React.FC = () => {
   const group = config?.groups.find(item => item.id === groupId)
 
   const [name, setName] = useState("")
-  const [models, setModels] = useState<string[]>([])
-  const [newModel, setNewModel] = useState("")
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -38,37 +36,8 @@ export const GroupEditPage: React.FC = () => {
       return
     }
     setName(group.name)
-    setModels(group.models ?? [])
     setLoading(false)
   }, [group, config, navigate, showToast, t])
-
-  const normalizeModels = (rawModels: string[]) => {
-    const next: string[] = []
-    const seen = new Set<string>()
-    for (const item of rawModels) {
-      const value = item.trim()
-      if (!value || seen.has(value)) continue
-      seen.add(value)
-      next.push(value)
-    }
-    return next
-  }
-
-  const handleAddModel = () => {
-    const value = newModel.trim()
-    if (!value) return
-    if (models.includes(value)) return
-    setModels(prev => [...prev, value])
-    setNewModel("")
-  }
-
-  const handleUpdateModel = (index: number, value: string) => {
-    setModels(prev => prev.map((item, idx) => (idx === index ? value : item)))
-  }
-
-  const handleRemoveModel = (index: number) => {
-    setModels(prev => prev.filter((_, idx) => idx !== index))
-  }
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -78,9 +47,6 @@ export const GroupEditPage: React.FC = () => {
       return
     }
 
-    const nextModels = normalizeModels(models)
-    const modelSet = new Set(nextModels)
-
     const nextConfig: ProxyConfig = {
       ...config,
       groups: config.groups.map(item => {
@@ -88,18 +54,6 @@ export const GroupEditPage: React.FC = () => {
         return {
           ...item,
           name: name.trim(),
-          models: nextModels,
-          providers: item.providers.map(provider => {
-            const nextMappings: Record<string, string> = {}
-            for (const [key, mapped] of Object.entries(provider.modelMappings || {})) {
-              if (!modelSet.has(key)) continue
-              nextMappings[key] = mapped
-            }
-            return {
-              ...provider,
-              modelMappings: nextMappings,
-            }
-          }),
         }
       }),
     }
@@ -123,15 +77,23 @@ export const GroupEditPage: React.FC = () => {
 
   return (
     <div className={styles.groupEditPage}>
-      <div className={styles.header}>
-        <h1>{t("groupEditPage.title")}</h1>
-        <nav className={styles.breadcrumb} aria-label={t("header.backToService")}>
-          <button type="button" onClick={() => navigate("/")} className={styles.breadcrumbButton}>
-            {t("servicePage.groupPath")}
+      <div className="app-sub-header">
+        <div className="app-sub-header-top">
+          <button type="button" onClick={() => navigate("/")} className="app-sub-header-back">
+            <ArrowLeft size={16} strokeWidth={2} />
+            <span>{t("header.backToService")}</span>
           </button>
-          <span className={styles.breadcrumbSeparator}>/</span>
-          <span className={styles.breadcrumbItem}>{group?.name}</span>
-        </nav>
+        </div>
+        <div className="app-sub-header-main">
+          <h1 className="app-sub-header-title">{t("groupEditPage.title")}</h1>
+          <nav className="app-breadcrumb" aria-label={t("header.backToService")}>
+            <button type="button" onClick={() => navigate("/")} className="app-breadcrumb-button">
+              {t("servicePage.groupPath")}
+            </button>
+            <span className="app-breadcrumb-separator">/</span>
+            <span className="app-breadcrumb-item">{group?.name}</span>
+          </nav>
+        </div>
       </div>
 
       <form className={styles.form} onSubmit={handleSubmit}>
@@ -153,52 +115,6 @@ export const GroupEditPage: React.FC = () => {
               placeholder={t("modal.groupNamePlaceholder")}
             />
             <p className={styles.hint}>{t("groupEditPage.groupNameHint")}</p>
-          </div>
-        </div>
-
-        <div className={styles.section}>
-          <h2 className={styles.sectionTitle}>{t("groupEditPage.sectionModels")}</h2>
-          <p className={styles.hint}>{t("groupEditPage.modelMatchHint")}</p>
-
-          <div className={styles.modelList}>
-            {models.length === 0 ? (
-              <p className={styles.empty}>{t("groupEditPage.noModels")}</p>
-            ) : (
-              models.map((modelName, index) => (
-                <div key={`${index}-${modelName}`} className={styles.modelRow}>
-                  <Input
-                    value={modelName}
-                    onChange={e => handleUpdateModel(index, e.target.value)}
-                    placeholder="e.g. a1"
-                  />
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="small"
-                    icon={Trash2}
-                    onClick={() => handleRemoveModel(index)}
-                    aria-label={`${t("common.delete")} ${modelName}`}
-                  />
-                </div>
-              ))
-            )}
-          </div>
-
-          <div className={styles.addModelRow}>
-            <Input
-              value={newModel}
-              onChange={e => setNewModel(e.target.value)}
-              placeholder={t("groupEditPage.newModelPlaceholder")}
-            />
-            <Button
-              type="button"
-              variant="default"
-              size="small"
-              icon={Plus}
-              onClick={handleAddModel}
-            >
-              {t("common.add")}
-            </Button>
           </div>
         </div>
 

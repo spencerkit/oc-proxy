@@ -98,6 +98,7 @@ export const Layout: React.FC<LayoutProps> = ({
     if (path === "/settings") return "settings"
     if (path.startsWith("/logs")) return "logs"
     if (path.startsWith("/agents")) return "agents"
+    if (path.startsWith("/providers")) return "providers"
     return "service"
   }
 

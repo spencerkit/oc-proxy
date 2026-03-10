@@ -106,6 +106,7 @@ export interface Group {
   id: string
   name: string
   models: string[]
+  providerIds?: string[]
   activeProviderId: string | null
   providers: Provider[]
   activeRuleId?: string | null

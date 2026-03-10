@@ -8,6 +8,7 @@ use crate::models::{
     Group, ProxyConfig, QuotaStatus, Rule, RuleQuotaSnapshot, RuleQuotaTestResult,
 };
 use chrono::Utc;
+use futures_util::stream::{self, StreamExt};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, Method};
 use serde_json::{json, Value};
@@ -15,6 +16,7 @@ use std::time::{Duration, Instant};
 
 const QUOTA_TIMEOUT_SECONDS: u64 = 12;
 const QUOTA_LOG_BODY_MAX_CHARS: usize = 12 * 1024;
+const GROUP_QUOTA_CONCURRENCY: usize = 4;
 
 struct FetchRuleQuotaResult {
     snapshot: RuleQuotaSnapshot,
@@ -111,19 +113,15 @@ pub async fn fetch_group_quotas(
         .find(|g| g.id == group_id)
         .ok_or_else(|| format!("group not found: {group_id}"))?;
 
-    let Some(active_rule_id) = group.active_provider_id.as_deref() else {
-        return Ok(Vec::new());
-    };
+    let snapshots =
+        stream::iter(group.providers.iter().cloned().map(|rule| async move {
+            fetch_single_rule_quota(group, &rule, false).await.snapshot
+        }))
+        .buffered(GROUP_QUOTA_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
 
-    let Some(active_rule) = group.providers.iter().find(|r| r.id == active_rule_id) else {
-        return Ok(Vec::new());
-    };
-
-    Ok(vec![
-        fetch_single_rule_quota(group, active_rule, false)
-            .await
-            .snapshot,
-    ])
+    Ok(snapshots)
 }
 
 /// Runs a unit test for the expected behavior contract.

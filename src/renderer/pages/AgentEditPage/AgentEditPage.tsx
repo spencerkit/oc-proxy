@@ -242,34 +242,44 @@ export const AgentEditPage: React.FC = () => {
 
   return (
     <div className={styles.page}>
-      <section className={styles.hero}>
-        <button type="button" className={styles.backButton} onClick={() => navigate("/agents")}>
-          <ArrowLeft size={16} strokeWidth={2} />
-          <span>{t("agentManagement.back")}</span>
-        </button>
-
-        <div className={styles.heroHeading}>
-          <div className={styles.kindIcon}>
-            <KindIcon size={18} strokeWidth={2} />
+      <section className="app-sub-header">
+        <div className="app-sub-header-top">
+          <button type="button" className="app-sub-header-back" onClick={() => navigate("/agents")}>
+            <ArrowLeft size={16} strokeWidth={2} />
+            <span>{t("agentManagement.back")}</span>
+          </button>
+          <div className="app-sub-header-actions">
+            <span className={styles.kindBadge}>
+              <KindIcon size={14} strokeWidth={2} />
+              <span>{t(`agentManagement.${kind}`)}</span>
+            </span>
+            <span className={styles.formatBadge}>{meta.format}</span>
           </div>
-          <div className={styles.titleBlock}>
-            <p className={styles.eyebrow}>{t(`agentManagement.${kind}`)}</p>
-            <h1>{t("agentManagement.editConfig")}</h1>
-            <p className={styles.subtitle}>{t("agentManagement.editSubtitle")}</p>
+        </div>
 
-            <div className={styles.infoStack}>
-              <div className={styles.infoRow}>
-                <span className={styles.infoLabel}>{t("agentManagement.configDir")}</span>
-                <code className={styles.infoValue}>
-                  {configFile?.configDir}
-                  {configFile?.updatedAt
-                    ? ` · ${t("agentManagement.lastUpdatedLabel", {
-                        value: formatUpdatedAt(configFile.updatedAt),
-                      })}`
-                    : ""}
-                </code>
-              </div>
-            </div>
+        <div className="app-sub-header-main">
+          <h1 className="app-sub-header-title">{t("agentManagement.editConfig")}</h1>
+          <p className={`app-sub-header-subtitle ${styles.subtitle}`}>
+            {t("agentManagement.editSubtitle")}
+          </p>
+        </div>
+
+        <div className={styles.headerMetaGrid}>
+          <div className={styles.headerMetaItem}>
+            <span className={styles.headerMetaLabel}>{t("agentManagement.configDir")}</span>
+            <code className={styles.headerMetaValue}>{configFile?.configDir || "-"}</code>
+          </div>
+          <div className={styles.headerMetaItem}>
+            <span className={styles.headerMetaLabel}>{t("agentManagement.configFile")}</span>
+            <code className={styles.headerMetaValue}>
+              {activeSourceFile?.filePath || configFile?.filePath || "-"}
+            </code>
+          </div>
+          <div className={styles.headerMetaItem}>
+            <span className={styles.headerMetaLabel}>{t("agentManagement.updatedAt")}</span>
+            <code className={styles.headerMetaValue}>
+              {configFile?.updatedAt ? formatUpdatedAt(configFile.updatedAt) : "-"}
+            </code>
           </div>
         </div>
       </section>

@@ -17,5 +17,4 @@ release
 .playwright-mcp
 src-tauri/target
 src-tauri/gen
-ccnexus
 docs/plans

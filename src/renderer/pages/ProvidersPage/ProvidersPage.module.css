@@ -1,0 +1,35 @@
+.providersPage {
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.searchBox {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-3);
+}
+
+.deleteModalContent {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.deleteModalContent p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.affectedGroupList {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  display: grid;
+  gap: 4px;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}

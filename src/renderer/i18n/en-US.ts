@@ -17,6 +17,7 @@ export const enUS = {
     settings: "Settings",
     logs: "Logs",
     agents: "Agents",
+    providers: "Providers",
     backToService: "Back to Service",
     serviceRunning: "Running",
     serviceStopped: "Stopped",
@@ -46,13 +47,15 @@ export const enUS = {
     createFirstGroup: "Create First Group",
     noGroupSelected: "Please select a group.",
     noGroupMatch: "No groups match your search.",
-    noRulesHint: 'This group has no providers yet. Click "Add Provider" to create one.',
+    noRulesHint:
+      'This group has no associated providers yet. Click "Associate Provider" to link one.',
     groupPath: "Group ID",
     groupInfo: "Group Info",
     entryUrl: "Entry URL",
     copyEntryUrl: "Copy Entry URL",
     searchGroups: "Search groups by name or ID",
     addRule: "Add Provider",
+    associateRule: "Associate Provider",
     editGroup: "Edit Group",
     editRule: "Edit Provider",
     deleteGroup: "Delete Group",
@@ -69,12 +72,16 @@ export const enUS = {
     modelsCount: "{{count}} models",
     saveRule: "Save Provider",
     deleteRule: "Delete",
+    unlinkRule: "Unlink",
     testModel: "Test Model",
     testingModel: "Testing",
     miniRequests: "Req",
     miniCostConsumed: "Cost {{value}}",
     miniTokens: "Tok",
-    miniCacheTokens: "Cache",
+    miniInputTokens: "Input",
+    miniOutputTokens: "Output",
+    miniCacheInputTokens: "Cache In",
+    miniCacheOutputTokens: "Cache Out",
     miniTime: "Time",
     noStatsData: "No data",
     ruleMiniTrend: "Provider mini trend chart",
@@ -89,6 +96,24 @@ export const enUS = {
     firstRunStepGroup: "Create a group and define the request path ID.",
     firstRunStepProvider: "Add a provider, configure its upstream token and endpoint.",
     firstRunStepRoute: "Copy the generated entry URL into your client or gateway.",
+  },
+
+  providersPage: {
+    title: "Providers",
+    subtitle: "Manage global providers once, then associate them to groups.",
+    addProvider: "Add Provider",
+    searchPlaceholder: "Search provider by name, id, or API address",
+    empty: "No providers yet. Click Add Provider to create one.",
+    deleteProvider: "Delete Provider",
+    duplicateProvider: "Duplicate Provider",
+    providerTestRequiresAssociation:
+      "Associate this provider to at least one group before testing.",
+    deleteModalTitle: "Delete Provider",
+    deleteModalMessage:
+      "Deleting {{name}} will unlink it from {{count}} group(s). This action cannot be undone.",
+    confirmDelete: "Delete",
+    providerDeletedWithImpact: "Provider deleted and unlinked from {{count}} group(s).",
+    providerDuplicated: "Provider duplicated as {{name}}.",
   },
 
   integration: {
@@ -131,7 +156,6 @@ export const enUS = {
   // Agent Management
   agentManagement: {
     title: "Agent Management",
-    eyebrow: "Client Configuration",
     subtitle:
       "Manage Claude, Codex, and OpenCode config directories and baseline connection settings.",
     selectType: "Select Agent Type",
@@ -184,6 +208,7 @@ export const enUS = {
     noSearchResults: "No matching configuration directories",
     searchEmptyHint: "Try a different keyword, or add a new configuration directory first.",
     lastUpdatedLabel: "Last updated: {{value}}",
+    updatedAt: "Updated At",
     modelLabel: "Model: {{value}}",
     modelUnset: "No default model configured",
     urlLabel: "Entry URL: {{value}}",
@@ -267,7 +292,7 @@ export const enUS = {
     autoStartServerHint: "When the desktop app launches, automatically start the proxy server.",
     quotaAutoRefreshMinutes: "Quota Auto Refresh (minutes)",
     quotaAutoRefreshMinutesHint:
-      "Auto-refreshes active provider quota on Service page. Allowed range: 1 - 1440 minutes.",
+      "Auto-refreshes quotas for all associated providers at this interval. Allowed range: 1 - 1440 minutes.",
     quotaAutoRefreshMinutesError:
       "Quota auto refresh interval must be an integer between 1 and 1440",
     theme: "Theme",

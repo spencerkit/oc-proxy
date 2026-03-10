@@ -60,6 +60,7 @@ pub fn default_config() -> ProxyConfig {
             quota_auto_refresh_minutes: default_quota_auto_refresh_minutes(),
         },
         remote_git: default_remote_git_config(),
+        providers: vec![],
         groups: vec![],
     }
 }
@@ -131,6 +132,7 @@ struct PartialProxyConfig {
     logging: Option<PartialLoggingConfig>,
     ui: Option<PartialUiConfig>,
     remote_git: Option<PartialRemoteGitConfig>,
+    providers: Option<serde_json::Value>,
     groups: Option<serde_json::Value>,
 }
 
@@ -144,6 +146,12 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
         serde_json::from_value(raw_groups).map_err(|e| format!("invalid groups structure: {e}"))?
     } else {
         defaults.groups
+    };
+    let providers = if let Some(raw_providers) = partial.providers {
+        serde_json::from_value(raw_providers)
+            .map_err(|e| format!("invalid providers structure: {e}"))?
+    } else {
+        defaults.providers
     };
 
     let locale = partial
@@ -273,6 +281,7 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
             token: remote_token,
             branch: remote_branch,
         },
+        providers,
         groups,
     })
 }

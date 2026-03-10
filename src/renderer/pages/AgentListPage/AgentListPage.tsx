@@ -157,11 +157,10 @@ export const AgentListPage: React.FC = () => {
   return (
     <>
       <div className={styles.page}>
-        <section className={styles.hero}>
-          <div className={styles.heroCopy}>
-            <p className={styles.eyebrow}>{t("agentManagement.eyebrow")}</p>
-            <h1>{t("agentManagement.title")}</h1>
-            <p className={styles.subtitle}>{t("agentManagement.subtitle")}</p>
+        <section className={`app-top-header ${styles.hero}`}>
+          <div className="app-top-header-main">
+            <h1 className="app-top-header-title">{t("agentManagement.title")}</h1>
+            <p className="app-top-header-subtitle">{t("agentManagement.subtitle")}</p>
           </div>
         </section>
 

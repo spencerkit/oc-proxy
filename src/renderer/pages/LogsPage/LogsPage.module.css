@@ -7,25 +7,6 @@
   gap: var(--sp-4);
 }
 
-.header {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
-}
-
-.header h2 {
-  font-family: var(--font-display);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-}
-
-.subtitle {
-  font-size: var(--text-sm);
-  color: var(--text-tertiary);
-}
-
 .tabRow {
   display: flex;
   align-items: center;

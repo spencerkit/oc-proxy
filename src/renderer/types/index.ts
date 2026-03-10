@@ -52,6 +52,7 @@ export interface ProxyConfig {
   logging: LoggingConfig
   ui: UIConfig
   remoteGit: RemoteGitConfig
+  providers?: Group["providers"]
   groups: Group[]
 }
 
@@ -213,7 +214,8 @@ export interface RuleCardStatsItem {
   requests: number
   inputTokens: number
   outputTokens: number
-  cacheTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
   tokens: number
   totalCost: number
   hourly: RuleCardHourlyPoint[]

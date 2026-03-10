@@ -10,6 +10,7 @@ import {
   GroupEditPage,
   LogDetailPage,
   LogsPage,
+  ProvidersPage,
   RuleCreatePage,
   RuleEditPage,
   ServicePage,
@@ -165,6 +166,9 @@ const App: React.FC = () => {
         <Route path="/logs" element={<LogsPage />} />
         <Route path="/logs/:traceId" element={<LogDetailPage />} />
         <Route path="/agents" element={<AgentListPage />} />
+        <Route path="/providers" element={<ProvidersPage />} />
+        <Route path="/providers/new" element={<RuleCreatePage />} />
+        <Route path="/providers/:providerId/edit" element={<RuleEditPage />} />
         <Route path="/agents/:targetId/edit" element={<AgentEditPage />} />
         <Route path="/groups/:groupId/edit" element={<GroupEditPage />} />
         <Route path="/groups/:groupId/providers/new" element={<RuleCreatePage />} />

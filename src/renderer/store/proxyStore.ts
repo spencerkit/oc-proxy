@@ -121,11 +121,22 @@ const persistActiveGroupId = (groupId: string | null) => {
 }
 
 /** Normalizes group. */
-function normalizeGroup(group: Partial<Group> & Pick<Group, "id" | "name">): Group {
-  const providers = group.providers ?? group.rules ?? []
+function normalizeGroup(
+  group: Partial<Group> & Pick<Group, "id" | "name">,
+  globalProviderMap?: Map<string, Group["providers"][number]>
+): Group {
+  const fallbackProviders = group.providers ?? group.rules ?? []
+  const providerIds = (group.providerIds ?? fallbackProviders.map(provider => provider.id))
+    .map(providerId => providerId?.trim())
+    .filter((providerId): providerId is string => Boolean(providerId))
+  const resolvedProviders = providerIds
+    .map(providerId => globalProviderMap?.get(providerId))
+    .filter((provider): provider is Group["providers"][number] => Boolean(provider))
+  const providers = resolvedProviders.length > 0 ? resolvedProviders : fallbackProviders
   const activeProviderId = group.activeProviderId ?? group.activeRuleId ?? null
   return {
     ...group,
+    providerIds,
     providers,
     activeProviderId,
     rules: providers,
@@ -136,30 +147,67 @@ function normalizeGroup(group: Partial<Group> & Pick<Group, "id" | "name">): Gro
 
 /** Normalizes config. */
 function normalizeConfig(config: ProxyConfig): ProxyConfig {
+  const dedupedProviderMap = new Map<string, Group["providers"][number]>()
+  for (const provider of config.providers ?? []) {
+    if (!provider?.id?.trim()) continue
+    dedupedProviderMap.set(provider.id, { ...provider })
+  }
+  for (const group of config.groups ?? []) {
+    for (const provider of group.providers ?? group.rules ?? []) {
+      if (!provider?.id?.trim() || dedupedProviderMap.has(provider.id)) continue
+      dedupedProviderMap.set(provider.id, { ...provider })
+    }
+  }
+  const normalizedProviders = [...dedupedProviderMap.values()]
+  const globalProviderMap = new Map(
+    normalizedProviders.map(provider => [provider.id, provider] as const)
+  )
   return {
     ...config,
+    providers: normalizedProviders,
     compat: {
       ...config.compat,
       textToolCallFallbackEnabled: config.compat.textToolCallFallbackEnabled ?? true,
     },
     groups: (config.groups ?? []).map(group =>
-      normalizeGroup(group as Partial<Group> & Pick<Group, "id" | "name">)
+      normalizeGroup(group as Partial<Group> & Pick<Group, "id" | "name">, globalProviderMap)
     ),
   }
 }
 
 /** Builds save config payload. */
 function buildSaveConfigPayload(config: ProxyConfig): ProxyConfig {
+  const globalProviderMap = new Map<string, Group["providers"][number]>()
+  for (const provider of config.providers ?? []) {
+    if (!provider?.id?.trim()) continue
+    globalProviderMap.set(provider.id, { ...provider })
+  }
+  for (const group of config.groups ?? []) {
+    for (const provider of group.providers ?? group.rules ?? []) {
+      if (!provider?.id?.trim() || globalProviderMap.has(provider.id)) continue
+      globalProviderMap.set(provider.id, { ...provider })
+    }
+  }
+  const globalProviders = [...globalProviderMap.values()]
+  const providerById = new Map(globalProviders.map(provider => [provider.id, provider] as const))
   return {
     ...config,
+    providers: globalProviders,
     groups: (config.groups ?? []).map(group => {
       const providers = group.providers ?? group.rules ?? []
+      const providerIds = (group.providerIds ?? providers.map(provider => provider.id))
+        .map(providerId => providerId?.trim())
+        .filter((providerId): providerId is string => Boolean(providerId))
       const activeProviderId = group.activeProviderId ?? group.activeRuleId ?? null
+      const resolvedProviders = providerIds
+        .map(providerId => providerById.get(providerId))
+        .filter((provider): provider is Group["providers"][number] => Boolean(provider))
       return {
         id: group.id,
         name: group.name,
         models: group.models ?? [],
-        providers,
+        providerIds,
+        providers: resolvedProviders,
         activeProviderId,
       } as Group
     }),

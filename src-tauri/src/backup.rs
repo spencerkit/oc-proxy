@@ -62,6 +62,7 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             models: vec![],
+            provider_ids: vec!["r1".to_string()],
             active_provider_id: None,
             providers: vec![Rule {
                 id: "r1".to_string(),

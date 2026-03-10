@@ -1,4 +1,13 @@
-import { FileText, Globe, Moon, Server, Settings as SettingsIcon, Sun, Users } from "lucide-react"
+import {
+  FileText,
+  Globe,
+  Layers,
+  Moon,
+  Server,
+  Settings as SettingsIcon,
+  Sun,
+  Users,
+} from "lucide-react"
 import type React from "react"
 import { useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
@@ -11,7 +20,7 @@ import brandLogo from "../../../../assets/logo-lockup.svg"
 import { Button } from "../common"
 import styles from "./Header.module.css"
 
-export type HeaderView = "service" | "settings" | "logs" | "agents"
+export type HeaderView = "service" | "settings" | "logs" | "agents" | "providers"
 
 export interface HeaderProps {
   /**
@@ -120,6 +129,7 @@ export const Header: React.FC<HeaderProps> = ({
     if (path === "/settings") return "settings"
     if (path.startsWith("/logs")) return "logs"
     if (path.startsWith("/agents")) return "agents"
+    if (path.startsWith("/providers")) return "providers"
     return "service"
   }
 
@@ -186,6 +196,9 @@ export const Header: React.FC<HeaderProps> = ({
           case "agents":
             navigate("/agents")
             break
+          case "providers":
+            navigate("/providers")
+            break
         }
       }
     },
@@ -238,12 +251,12 @@ export const Header: React.FC<HeaderProps> = ({
         <div className={styles.divider} />
         <button
           type="button"
-          className={`${styles.navButton} ${currentView === "settings" ? styles.active : ""}`}
-          onClick={() => handleViewChange("settings")}
-          aria-current={currentView === "settings" ? "page" : undefined}
+          className={`${styles.navButton} ${currentView === "providers" ? styles.active : ""}`}
+          onClick={() => handleViewChange("providers")}
+          aria-current={currentView === "providers" ? "page" : undefined}
         >
-          <SettingsIcon size={16} strokeWidth={2} className={styles.navIcon} />
-          <span className={styles.navLabel}>{t("header.settings")}</span>
+          <Layers size={16} strokeWidth={2} className={styles.navIcon} />
+          <span className={styles.navLabel}>{t("header.providers")}</span>
         </button>
         <button
           type="button"
@@ -265,6 +278,15 @@ export const Header: React.FC<HeaderProps> = ({
           {errorCount !== undefined && errorCount > 0 && (
             <span className={styles.badge}>{errorCount}</span>
           )}
+        </button>
+        <button
+          type="button"
+          className={`${styles.navButton} ${currentView === "settings" ? styles.active : ""}`}
+          onClick={() => handleViewChange("settings")}
+          aria-current={currentView === "settings" ? "page" : undefined}
+        >
+          <SettingsIcon size={16} strokeWidth={2} className={styles.navIcon} />
+          <span className={styles.navLabel}>{t("header.settings")}</span>
         </button>
       </div>
 

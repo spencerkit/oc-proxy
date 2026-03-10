@@ -4,6 +4,7 @@
 
 use crate::config::migrator::CURRENT_CONFIG_VERSION;
 use crate::domain::entities::ProxyConfig;
+use std::collections::HashSet;
 
 /// Validates config for this module's workflow.
 pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
@@ -35,6 +36,22 @@ pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
         return Err("remoteGit.branch must be non-empty".into());
     }
 
+    let mut provider_ids = HashSet::new();
+    for provider in &config.providers {
+        if provider.id.trim().is_empty() {
+            return Err("provider.id is required".into());
+        }
+        if provider.default_model.trim().is_empty() {
+            return Err(format!(
+                "provider.defaultModel required for {}",
+                provider.id
+            ));
+        }
+        if !provider_ids.insert(provider.id.clone()) {
+            return Err(format!("duplicate provider.id: {}", provider.id));
+        }
+    }
+
     for group in &config.groups {
         if group.id.trim().is_empty() {
             return Err("group.id is required".into());
@@ -49,19 +66,43 @@ pub fn validate_config(config: &ProxyConfig) -> Result<(), String> {
         if group.name.trim().is_empty() {
             return Err(format!("group.name is required for {}", group.id));
         }
-        for provider in &group.providers {
-            if provider.id.trim().is_empty() {
-                return Err(format!("provider.id is required in group {}", group.id));
-            }
-            if provider.default_model.trim().is_empty() {
+        let effective_provider_ids: Vec<String> = if !group.provider_ids.is_empty() {
+            group.provider_ids.clone()
+        } else {
+            group
+                .providers
+                .iter()
+                .map(|provider| provider.id.clone())
+                .collect()
+        };
+
+        for provider_id in &effective_provider_ids {
+            if provider_id.trim().is_empty() {
                 return Err(format!(
-                    "provider.defaultModel required for {}",
-                    provider.id
+                    "group.providerIds contains empty id in {}",
+                    group.id
+                ));
+            }
+            let exists_in_global = config
+                .providers
+                .iter()
+                .any(|provider| provider.id == *provider_id);
+            let exists_in_group = group
+                .providers
+                .iter()
+                .any(|provider| provider.id == *provider_id);
+            if !exists_in_global && !exists_in_group {
+                return Err(format!(
+                    "group.providerIds not found in providers for {}: {}",
+                    group.id, provider_id
                 ));
             }
         }
         if let Some(active) = &group.active_provider_id {
-            if !group.providers.iter().any(|r| r.id == *active) {
+            if !effective_provider_ids
+                .iter()
+                .any(|provider_id| provider_id == active)
+            {
                 return Err(format!(
                     "group.activeProviderId not found in providers for {}",
                     group.id
@@ -109,6 +150,7 @@ mod tests {
             id: "g1".to_string(),
             name: "demo".to_string(),
             models: vec!["a1".to_string()],
+            provider_ids: vec!["r1".to_string()],
             active_provider_id: Some("not_exists".to_string()),
             providers: vec![Rule {
                 id: "r1".to_string(),

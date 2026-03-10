@@ -164,6 +164,10 @@ fn merge_group_by_provider_name(current: &Group, imported: &Group) -> Group {
         id: current.id.clone(),
         name: imported.name.clone(),
         models: imported.models.clone(),
+        provider_ids: providers
+            .iter()
+            .map(|provider| provider.id.clone())
+            .collect(),
         active_provider_id: next_active_provider_id,
         providers,
     }
@@ -196,6 +200,11 @@ fn normalize_group_provider_ids(mut group: Group) -> Group {
         }
     }
 
+    group.provider_ids = group
+        .providers
+        .iter()
+        .map(|provider| provider.id.clone())
+        .collect();
     group
 }
 
@@ -248,6 +257,10 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             models: vec!["model-a".to_string()],
+            provider_ids: providers
+                .iter()
+                .map(|provider| provider.id.clone())
+                .collect(),
             active_provider_id: active.map(|v| v.to_string()),
             providers,
         }

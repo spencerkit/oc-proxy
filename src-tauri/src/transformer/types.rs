@@ -2,7 +2,7 @@
 //! Reference: ccNexus/internal/transformer/types.go
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 // ============================================================================
 // OpenAI Types
@@ -231,6 +231,13 @@ pub struct StreamContext {
     pub assistant_payload_emitted: bool,
     pub in_thinking_tag: bool,
     pub thinking_buffer: String,
+    pub responses_has_tool_use: bool,
+    pub responses_next_content_index: i32,
+    pub responses_index_by_key: HashMap<String, i32>,
+    pub responses_open_indices: HashSet<i32>,
+    pub responses_fallback_open_index: Option<i32>,
+    pub responses_tool_index_by_item_id: HashMap<String, i32>,
+    pub responses_last_tool_index: Option<i32>,
 }
 
 impl StreamContext {
@@ -262,6 +269,13 @@ impl StreamContext {
             assistant_payload_emitted: false,
             in_thinking_tag: false,
             thinking_buffer: String::new(),
+            responses_has_tool_use: false,
+            responses_next_content_index: 0,
+            responses_index_by_key: HashMap::new(),
+            responses_open_indices: HashSet::new(),
+            responses_fallback_open_index: None,
+            responses_tool_index_by_item_id: HashMap::new(),
+            responses_last_tool_index: None,
         }
     }
 }
