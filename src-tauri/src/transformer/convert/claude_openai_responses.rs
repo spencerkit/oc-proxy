@@ -14,6 +14,72 @@ pub struct ResponsesToClaudeOptions {
     pub allowed_tool_names: HashSet<String>,
 }
 
+pub(crate) fn map_responses_stop_reason(
+    status: Option<&str>,
+    has_tool_use: bool,
+    incomplete_reason: Option<&str>,
+) -> &'static str {
+    match status.unwrap_or("completed") {
+        "completed" => {
+            if has_tool_use {
+                "tool_use"
+            } else {
+                "end_turn"
+            }
+        }
+        "incomplete" => {
+            if matches!(
+                incomplete_reason,
+                Some("max_output_tokens") | Some("max_tokens")
+            ) || incomplete_reason.is_none()
+            {
+                "max_tokens"
+            } else {
+                "end_turn"
+            }
+        }
+        _ => "end_turn",
+    }
+}
+
+pub(crate) fn build_anthropic_usage_from_responses(usage: Option<&Value>) -> Value {
+    let Some(u) = usage.filter(|v| !v.is_null()) else {
+        return json!({
+            "input_tokens": 0,
+            "output_tokens": 0
+        });
+    };
+
+    let input_tokens = u.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+    let output_tokens = u.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+
+    let mut usage_json = json!({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens
+    });
+
+    if let Some(cached) = u
+        .pointer("/input_tokens_details/cached_tokens")
+        .and_then(|v| v.as_i64())
+    {
+        usage_json["cache_read_input_tokens"] = json!(cached);
+    } else if let Some(cached) = u
+        .pointer("/prompt_tokens_details/cached_tokens")
+        .and_then(|v| v.as_i64())
+    {
+        usage_json["cache_read_input_tokens"] = json!(cached);
+    }
+
+    if let Some(v) = u.get("cache_read_input_tokens") {
+        usage_json["cache_read_input_tokens"] = v.clone();
+    }
+    if let Some(v) = u.get("cache_creation_input_tokens") {
+        usage_json["cache_creation_input_tokens"] = v.clone();
+    }
+
+    usage_json
+}
+
 pub fn claude_req_to_openai_responses(claude_req: &[u8], model: &str) -> Result<Vec<u8>, String> {
     let req: ClaudeRequest =
         serde_json::from_slice(claude_req).map_err(|e| format!("parse: {}", e))?;
@@ -24,7 +90,18 @@ pub fn claude_req_to_openai_responses(claude_req: &[u8], model: &str) -> Result<
     });
 
     if let Some(system) = &req.system {
-        openai_req["instructions"] = json!(extract_system_text(system));
+        let instructions = extract_system_text(system);
+        if !instructions.is_empty() {
+            openai_req["instructions"] = json!(instructions);
+        }
+    }
+    if let Some(max_tokens) = req.max_tokens {
+        if max_tokens > 0 {
+            openai_req["max_output_tokens"] = json!(max_tokens);
+        }
+    }
+    if let Some(temperature) = req.temperature {
+        openai_req["temperature"] = json!(temperature);
     }
 
     let mut input = Vec::new();
@@ -50,6 +127,7 @@ pub fn claude_req_to_openai_responses(claude_req: &[u8], model: &str) -> Result<
                     blocks, &msg.role,
                 ));
             }
+            Value::Null => input.push(json!({"role": msg.role})),
             _ => {}
         }
     }
@@ -94,8 +172,11 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
         "stream": req.get("stream").and_then(|v| v.as_bool()).unwrap_or(false)
     });
 
+    let mut system_chunks = Vec::new();
     if let Some(instructions) = req.get("instructions").and_then(|i| i.as_str()) {
-        claude_req["system"] = json!(instructions);
+        if !instructions.is_empty() {
+            system_chunks.push(instructions.to_string());
+        }
     }
     if let Some(max_output_tokens) = req.get("max_output_tokens").and_then(|v| v.as_i64()) {
         if max_output_tokens > 0 {
@@ -116,24 +197,46 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
         }
         Some(Value::Array(input)) => {
             for item in input {
-                match item.get("type").and_then(|t| t.as_str()) {
-                    Some("message") => {
-                        if !pending_tool_uses.is_empty() {
-                            messages
-                                .push(json!({"role": "assistant", "content": pending_tool_uses}));
-                            pending_tool_uses = Vec::new();
+                let item_type = item.get("type").and_then(|t| t.as_str());
+                let is_message_item = matches!(item_type, Some("message"))
+                    || (item_type.is_none() && item.get("role").is_some());
+
+                if is_message_item {
+                    if !pending_tool_uses.is_empty() {
+                        messages.push(json!({"role": "assistant", "content": pending_tool_uses}));
+                        pending_tool_uses = Vec::new();
+                    }
+                    if !pending_tool_results.is_empty() {
+                        messages.push(json!({"role": "user", "content": pending_tool_results}));
+                        pending_tool_results = Vec::new();
+                    }
+
+                    let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+                    if matches!(role, "developer" | "system") {
+                        let system_text = extract_openai_responses_message_text(item.get("content"));
+                        if !system_text.is_empty() {
+                            system_chunks.push(system_text);
                         }
+                        continue;
+                    }
+
+                    let content = convert_openai_responses_content_to_claude(item.get("content"));
+                    let normalized_role = if role == "assistant" {
+                        "assistant"
+                    } else {
+                        "user"
+                    };
+                    messages.push(json!({"role": normalized_role, "content": content}));
+                    continue;
+                }
+
+                match item_type {
+                    Some("function_call") => {
                         if !pending_tool_results.is_empty() {
                             messages.push(json!({"role": "user", "content": pending_tool_results}));
                             pending_tool_results = Vec::new();
                         }
 
-                        let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
-                        let content =
-                            convert_openai_responses_content_to_claude(item.get("content"));
-                        messages.push(json!({"role": role, "content": content}));
-                    }
-                    Some("function_call") => {
                         let call_id = item
                             .get("call_id")
                             .or_else(|| item.get("id"))
@@ -161,7 +264,7 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
                         }
 
                         let call_id = item.get("call_id").and_then(|c| c.as_str()).unwrap_or("");
-                        let output = item.get("output").and_then(|o| o.as_str()).unwrap_or("");
+                        let output = tool_result_to_string(item.get("output"));
 
                         pending_tool_results.push(json!({
                             "type": "tool_result",
@@ -184,6 +287,9 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
     }
 
     claude_req["messages"] = json!(messages);
+    if !system_chunks.is_empty() {
+        claude_req["system"] = json!(system_chunks.join("\n\n"));
+    }
 
     if let Some(tools) = req.get("tools").and_then(|t| t.as_array()) {
         let claude_tools: Vec<Value> = tools
@@ -289,7 +395,7 @@ pub fn openai_responses_resp_to_claude_with_options(
     let resp: Value = serde_json::from_slice(openai_resp).map_err(|e| format!("parse: {}", e))?;
 
     let mut content = Vec::new();
-    let mut stop_reason = "end_turn";
+    let mut has_tool_use = false;
 
     if let Some(output) = resp.get("output").and_then(|o| o.as_array()) {
         for item in output {
@@ -297,30 +403,42 @@ pub fn openai_responses_resp_to_claude_with_options(
                 Some("message") => {
                     if let Some(parts) = item.get("content").and_then(|c| c.as_array()) {
                         for part in parts {
-                            if part.get("type").and_then(|t| t.as_str()) == Some("output_text") {
-                                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
-                                    if options.text_tool_call_fallback_enabled {
-                                        if let Some(parsed) = parse_text_tool_call_fallback(
-                                            text,
-                                            &options.allowed_tool_names,
-                                        ) {
-                                            let call_id = format!(
-                                                "fallback_call_{}",
-                                                uuid::Uuid::new_v4().simple()
-                                            );
-                                            content.push(json!({
-                                                "type": "tool_use",
-                                                "id": call_id,
-                                                "name": parsed.name,
-                                                "input": parsed.arguments,
-                                            }));
-                                            stop_reason = "tool_use";
-                                            continue;
+                            match part.get("type").and_then(|t| t.as_str()) {
+                                Some("output_text") => {
+                                    if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                        if options.text_tool_call_fallback_enabled {
+                                            if let Some(parsed) = parse_text_tool_call_fallback(
+                                                text,
+                                                &options.allowed_tool_names,
+                                            ) {
+                                                let call_id = format!(
+                                                    "fallback_call_{}",
+                                                    uuid::Uuid::new_v4().simple()
+                                                );
+                                                content.push(json!({
+                                                    "type": "tool_use",
+                                                    "id": call_id,
+                                                    "name": parsed.name,
+                                                    "input": parsed.arguments,
+                                                }));
+                                                has_tool_use = true;
+                                                continue;
+                                            }
+                                        }
+
+                                        content.extend(split_think_tagged_text(text));
+                                    }
+                                }
+                                Some("refusal") => {
+                                    if let Some(refusal) =
+                                        part.get("refusal").and_then(|r| r.as_str())
+                                    {
+                                        if !refusal.is_empty() {
+                                            content.push(json!({"type": "text", "text": refusal}));
                                         }
                                     }
-
-                                    content.extend(split_think_tagged_text(text));
                                 }
+                                _ => {}
                             }
                         }
                     }
@@ -339,7 +457,31 @@ pub fn openai_responses_resp_to_claude_with_options(
                             "name": name,
                             "input": input
                         }));
-                        stop_reason = "tool_use";
+                        has_tool_use = true;
+                    }
+                }
+                Some("reasoning") => {
+                    if let Some(summary) = item.get("summary").and_then(|s| s.as_array()) {
+                        let thinking_text = summary
+                            .iter()
+                            .filter_map(|entry| {
+                                if entry.get("type").and_then(|t| t.as_str())
+                                    == Some("summary_text")
+                                {
+                                    entry.get("text").and_then(|t| t.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("");
+
+                        if !thinking_text.is_empty() {
+                            content.push(json!({
+                                "type": "thinking",
+                                "thinking": thinking_text
+                            }));
+                        }
                     }
                 }
                 _ => {}
@@ -347,16 +489,23 @@ pub fn openai_responses_resp_to_claude_with_options(
         }
     }
 
+    let stop_reason = map_responses_stop_reason(
+        resp.get("status").and_then(|s| s.as_str()),
+        has_tool_use,
+        resp.pointer("/incomplete_details/reason")
+            .and_then(|reason| reason.as_str()),
+    );
+
+    let usage_json = build_anthropic_usage_from_responses(resp.get("usage"));
+
     let claude_resp = json!({
         "id": resp.get("id").unwrap_or(&json!("resp-id")),
         "type": "message",
         "role": "assistant",
         "content": content,
         "stop_reason": stop_reason,
-        "usage": {
-            "input_tokens": resp.get("usage").and_then(|u| u.get("input_tokens")).unwrap_or(&json!(0)),
-            "output_tokens": resp.get("usage").and_then(|u| u.get("output_tokens")).unwrap_or(&json!(0))
-        }
+        "stop_sequence": null,
+        "usage": usage_json
     });
 
     serde_json::to_vec(&claude_resp).map_err(|e| format!("serialize: {}", e))
@@ -432,6 +581,19 @@ fn convert_claude_message_to_openai_responses_items(blocks: &[Value], role: &str
                     }));
                 }
             }
+            Some("image") => {
+                if let Some(source) = block.get("source") {
+                    let media_type = source
+                        .get("media_type")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("image/png");
+                    let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                    message_parts.push(json!({
+                        "type": "input_image",
+                        "image_url": format!("data:{media_type};base64,{data}")
+                    }));
+                }
+            }
             Some("thinking") => {}
             Some("tool_use") => {
                 flush_message(&mut items, &mut message_parts);
@@ -474,6 +636,36 @@ fn tool_result_to_string(content: Option<&Value>) -> String {
     }
 }
 
+fn extract_openai_responses_message_text(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(parts)) => {
+            let mut text_chunks = Vec::new();
+            for part in parts {
+                match part.get("type").and_then(|v| v.as_str()) {
+                    Some("input_text" | "output_text") => {
+                        if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                            if !text.is_empty() {
+                                text_chunks.push(text.to_string());
+                            }
+                        }
+                    }
+                    Some("refusal") => {
+                        if let Some(text) = part.get("refusal").and_then(|v| v.as_str()) {
+                            if !text.is_empty() {
+                                text_chunks.push(text.to_string());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            text_chunks.join("\n")
+        }
+        _ => String::new(),
+    }
+}
+
 fn convert_openai_responses_content_to_claude(content: Option<&Value>) -> Value {
     let Some(items) = content.and_then(|v| v.as_array()) else {
         return content.cloned().unwrap_or_else(|| json!(""));
@@ -487,6 +679,14 @@ fn convert_openai_responses_content_to_claude(content: Option<&Value>) -> Value 
                     "type": "text",
                     "text": part.get("text").cloned().unwrap_or(json!(""))
                 }));
+            }
+            Some("refusal") => {
+                if let Some(text) = part.get("refusal").and_then(|v| v.as_str()) {
+                    result.push(json!({
+                        "type": "text",
+                        "text": text
+                    }));
+                }
             }
             _ => {}
         }

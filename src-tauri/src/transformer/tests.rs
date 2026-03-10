@@ -7,7 +7,7 @@ mod tests {
     use crate::transformer::types::StreamContext;
     use crate::transformer::{cx, Transformer};
     use serde_json::json;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_claude_to_openai_request() {
@@ -441,6 +441,71 @@ mod tests {
     }
 
     #[test]
+    fn test_openai_responses_req_to_claude_maps_developer_and_system_roles_to_system_prompt() {
+        let openai_req = json!({
+            "model": "gpt-5.2",
+            "instructions": "Base instruction",
+            "input": [
+                {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "Dev instruction"}]},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Hello"}]},
+                {"type": "message", "role": "system", "content": [{"type": "input_text", "text": "System instruction"}]}
+            ]
+        });
+
+        let result = claude_openai_responses::openai_responses_req_to_claude(
+            serde_json::to_vec(&openai_req).unwrap().as_slice(),
+            "claude-sonnet-4-6",
+        )
+        .expect("convert");
+        let claude_req: serde_json::Value = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(
+            claude_req["system"],
+            "Base instruction\n\nDev instruction\n\nSystem instruction"
+        );
+
+        let messages = claude_req["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "Hello");
+    }
+
+    #[test]
+    fn test_openai_responses_req_to_claude_flushes_tool_results_before_next_tool_use_group() {
+        let openai_req = json!({
+            "model": "gpt-5.2",
+            "input": [
+                {"type": "function_call", "call_id": "call_a", "name": "exec_command", "arguments": "{\"cmd\":\"pwd\"}"},
+                {"type": "function_call_output", "call_id": "call_a", "output": "ok_a"},
+                {"type": "function_call", "call_id": "call_b", "name": "exec_command", "arguments": "{\"cmd\":\"ls\"}"},
+                {"type": "function_call_output", "call_id": "call_b", "output": "ok_b"}
+            ]
+        });
+
+        let result = claude_openai_responses::openai_responses_req_to_claude(
+            serde_json::to_vec(&openai_req).unwrap().as_slice(),
+            "claude-sonnet-4-6",
+        )
+        .expect("convert");
+        let claude_req: serde_json::Value = serde_json::from_slice(&result).unwrap();
+        let messages = claude_req["messages"].as_array().unwrap();
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0]["role"], "assistant");
+        assert_eq!(messages[0]["content"][0]["type"], "tool_use");
+        assert_eq!(messages[0]["content"][0]["id"], "call_a");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"][0]["type"], "tool_result");
+        assert_eq!(messages[1]["content"][0]["tool_use_id"], "call_a");
+        assert_eq!(messages[2]["role"], "assistant");
+        assert_eq!(messages[2]["content"][0]["type"], "tool_use");
+        assert_eq!(messages[2]["content"][0]["id"], "call_b");
+        assert_eq!(messages[3]["role"], "user");
+        assert_eq!(messages[3]["content"][0]["type"], "tool_result");
+        assert_eq!(messages[3]["content"][0]["tool_use_id"], "call_b");
+    }
+
+    #[test]
     fn test_openai_responses_req_to_claude_supports_custom_tools_and_limits() {
         let openai_req = json!({
             "model": "gpt-5.2",
@@ -626,14 +691,19 @@ mod tests {
     }
 
     #[test]
-    fn test_openai_responses_stream_to_claude_splits_think_tags() {
+    fn test_openai_responses_stream_to_claude_reasoning_delta_emits_thinking_block() {
         let mut ctx = StreamContext::new();
         ctx.model_name = "claude-sonnet-4-6".to_string();
 
-        let created = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n";
-        let delta = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"<think>Reason</think>Hello\"}\n\n";
-        let completed = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}\n\n";
-        let done = b"data: [DONE]\n\n";
+        let created = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_r\",\"model\":\"o3\",\"usage\":{\"input_tokens\":5,\"output_tokens\":0}}}\n\n";
+        let reasoning_delta = b"event: response.reasoning.delta\ndata: {\"type\":\"response.reasoning.delta\",\"delta\":\"Reason\"}\n\n";
+        let reasoning_done =
+            b"event: response.reasoning.done\ndata: {\"type\":\"response.reasoning.done\"}\n\n";
+        let text_added = b"event: response.content_part.added\ndata: {\"type\":\"response.content_part.added\",\"part\":{\"type\":\"output_text\",\"text\":\"\"},\"output_index\":0,\"content_index\":0}\n\n";
+        let text_delta =
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello\",\"output_index\":0,\"content_index\":0}\n\n";
+        let text_done = b"event: response.content_part.done\ndata: {\"type\":\"response.content_part.done\",\"output_index\":0,\"content_index\":0}\n\n";
+        let completed = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_r\",\"status\":\"completed\",\"usage\":{\"input_tokens\":5,\"output_tokens\":10}}}\n\n";
 
         let mut out = Vec::new();
         out.extend(
@@ -641,16 +711,34 @@ mod tests {
                 .expect("created"),
         );
         out.extend(
-            claude_openai_responses_stream::openai_responses_stream_to_claude(delta, &mut ctx)
-                .expect("delta"),
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                reasoning_delta,
+                &mut ctx,
+            )
+            .expect("reasoning_delta"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(
+                reasoning_done,
+                &mut ctx,
+            )
+            .expect("reasoning_done"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(text_added, &mut ctx)
+                .expect("text_added"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(text_delta, &mut ctx)
+                .expect("text_delta"),
+        );
+        out.extend(
+            claude_openai_responses_stream::openai_responses_stream_to_claude(text_done, &mut ctx)
+                .expect("text_done"),
         );
         out.extend(
             claude_openai_responses_stream::openai_responses_stream_to_claude(completed, &mut ctx)
                 .expect("completed"),
-        );
-        out.extend(
-            claude_openai_responses_stream::openai_responses_stream_to_claude(done, &mut ctx)
-                .expect("done"),
         );
 
         let s = String::from_utf8(out).expect("utf8");
@@ -738,6 +826,84 @@ mod tests {
         assert!(s.contains("\"stop_reason\":\"tool_use\""));
         assert!(s.contains("event: message_delta"));
         assert!(s.contains("event: message_stop"));
+    }
+
+    #[test]
+    fn test_openai_responses_stream_to_claude_interleaved_tool_deltas_by_item_id() {
+        let mut ctx = StreamContext::new();
+        ctx.model_name = "claude-sonnet-4-6".to_string();
+
+        let created = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_2\",\"model\":\"gpt-4o\"}}\n\n";
+        let added_1 = b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"first_tool\"}}\n\n";
+        let added_2 = b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_2\",\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"second_tool\"}}\n\n";
+        let delta_2 = b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_2\",\"delta\":\"{\\\"b\\\":2}\"}\n\n";
+        let delta_1 = b"event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{\\\"a\\\":1}\"}\n\n";
+        let done_1 = b"event: response.function_call_arguments.done\ndata: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_1\"}\n\n";
+        let done_2 = b"event: response.function_call_arguments.done\ndata: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_2\"}\n\n";
+        let completed = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":8,\"output_tokens\":4}}}\n\n";
+
+        let events: [&[u8]; 8] = [
+            created.as_ref(),
+            added_1.as_ref(),
+            added_2.as_ref(),
+            delta_2.as_ref(),
+            delta_1.as_ref(),
+            done_1.as_ref(),
+            done_2.as_ref(),
+            completed.as_ref(),
+        ];
+
+        let mut out = Vec::new();
+        for event in events {
+            out.extend(
+                claude_openai_responses_stream::openai_responses_stream_to_claude(event, &mut ctx)
+                    .expect("convert"),
+            );
+        }
+
+        let merged = String::from_utf8(out).expect("utf8");
+        let events: Vec<serde_json::Value> = merged
+            .split("\n\n")
+            .filter_map(|block| {
+                let data = block.lines().find_map(|line| line.strip_prefix("data: "))?;
+                serde_json::from_str::<serde_json::Value>(data).ok()
+            })
+            .collect();
+
+        let mut tool_index_by_call: HashMap<String, u64> = HashMap::new();
+        for event in &events {
+            if event.get("type").and_then(|v| v.as_str()) == Some("content_block_start")
+                && event
+                    .pointer("/content_block/type")
+                    .and_then(|v| v.as_str())
+                    == Some("tool_use")
+            {
+                if let (Some(call_id), Some(index)) = (
+                    event.pointer("/content_block/id").and_then(|v| v.as_str()),
+                    event.get("index").and_then(|v| v.as_u64()),
+                ) {
+                    tool_index_by_call.insert(call_id.to_string(), index);
+                }
+            }
+        }
+
+        let delta_indices: Vec<u64> = events
+            .iter()
+            .filter(|event| {
+                event.get("type").and_then(|v| v.as_str()) == Some("content_block_delta")
+                    && event.pointer("/delta/type").and_then(|v| v.as_str())
+                        == Some("input_json_delta")
+            })
+            .filter_map(|event| event.get("index").and_then(|v| v.as_u64()))
+            .collect();
+
+        assert_eq!(delta_indices.len(), 2);
+        assert_eq!(delta_indices[0], *tool_index_by_call.get("call_2").unwrap());
+        assert_eq!(delta_indices[1], *tool_index_by_call.get("call_1").unwrap());
+        assert_ne!(
+            tool_index_by_call.get("call_1"),
+            tool_index_by_call.get("call_2")
+        );
     }
 
     #[test]
@@ -863,6 +1029,59 @@ mod tests {
         assert_eq!(claude_resp["content"][0]["type"], "tool_use");
         assert_eq!(claude_resp["content"][0]["id"], "fc_123");
         assert_eq!(claude_resp["content"][0]["name"], "Write");
+    }
+
+    #[test]
+    fn test_openai_responses_resp_to_claude_maps_incomplete_to_max_tokens() {
+        let openai_resp = json!({
+            "id": "resp_1",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "partial"}]
+            }],
+            "usage": {"input_tokens": 2, "output_tokens": 7}
+        });
+
+        let result = claude_openai_responses::openai_responses_resp_to_claude(
+            serde_json::to_vec(&openai_resp).unwrap().as_slice(),
+        )
+        .expect("convert");
+        let claude_resp: serde_json::Value = serde_json::from_slice(&result).expect("json");
+
+        assert_eq!(claude_resp["stop_reason"], "max_tokens");
+        assert_eq!(claude_resp["usage"]["input_tokens"], 2);
+        assert_eq!(claude_resp["usage"]["output_tokens"], 7);
+    }
+
+    #[test]
+    fn test_openai_responses_resp_to_claude_maps_cache_usage_fields() {
+        let openai_resp = json!({
+            "id": "resp_1",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "ok"}]
+            }],
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "input_tokens_details": {"cached_tokens": 80}
+            }
+        });
+
+        let result = claude_openai_responses::openai_responses_resp_to_claude(
+            serde_json::to_vec(&openai_resp).unwrap().as_slice(),
+        )
+        .expect("convert");
+        let claude_resp: serde_json::Value = serde_json::from_slice(&result).expect("json");
+
+        assert_eq!(claude_resp["usage"]["input_tokens"], 100);
+        assert_eq!(claude_resp["usage"]["output_tokens"], 20);
+        assert_eq!(claude_resp["usage"]["cache_read_input_tokens"], 80);
     }
 
     #[test]
