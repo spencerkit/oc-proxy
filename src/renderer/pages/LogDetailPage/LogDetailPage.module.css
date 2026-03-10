@@ -29,23 +29,9 @@
   --detail-code-null: #71839b;
 }
 
-.header {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
 .headerTop {
   display: flex;
   gap: var(--sp-2);
-}
-
-.header h2 {
-  font-family: var(--font-display);
-  font-size: var(--text-xl);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-  margin: 0;
 }
 
 .subtitle {

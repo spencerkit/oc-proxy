@@ -449,12 +449,29 @@
   overflow: hidden;
 }
 
+.ruleListCatalog {
+  border-color: color-mix(in oklab, var(--accent) 8%, var(--border));
+  background:
+    radial-gradient(
+      120% 120% at 100% 0,
+      color-mix(in oklab, var(--accent) 5%, transparent),
+      transparent 64%
+    ),
+    color-mix(in oklab, var(--bg-raised) 96%, var(--bg-base));
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--accent) 6%, transparent);
+}
+
 .ruleListHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: var(--sp-4);
   border-bottom: 1px solid var(--border);
+}
+
+.ruleListHeaderCatalog {
+  border-bottom-color: color-mix(in oklab, var(--accent) 6%, transparent);
+  background: color-mix(in oklab, var(--surface) 92%, transparent);
 }
 
 .ruleHeaderTitle {
@@ -487,10 +504,18 @@
   padding: var(--sp-2);
 }
 
+.ruleListContentCatalog {
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+}
+
 .ruleItems {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+}
+
+.ruleItemsCatalog {
+  gap: 10px;
 }
 
 .ruleItemContainer {
@@ -507,6 +532,157 @@
   position: relative;
 }
 
+.ruleItemContainerCompact {
+  min-height: 106px;
+  gap: 10px;
+  padding: 10px 12px;
+  border-color: color-mix(in oklab, var(--accent) 24%, var(--border));
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--accent) 8%, var(--surface)),
+      color-mix(in oklab, var(--surface) 92%, var(--bg-raised))
+    );
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--accent) 10%, transparent);
+}
+
+.ruleItemContainerCompact:hover {
+  border-color: color-mix(in oklab, var(--accent) 36%, var(--border));
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--accent) 12%, var(--surface-hover)),
+      color-mix(in oklab, var(--surface-hover) 95%, var(--bg-raised))
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--accent) 16%, transparent),
+    var(--shadow-sm);
+}
+
+.ruleItemContainerCompact.ruleItemContainerActive {
+  border-color: color-mix(in oklab, var(--success) 44%, var(--border));
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--success) 14%, var(--surface)),
+      color-mix(in oklab, var(--success) 5%, var(--bg-raised))
+    );
+  box-shadow:
+    inset 3px 0 0 color-mix(in oklab, var(--success) 72%, transparent),
+    inset 0 1px 0 color-mix(in oklab, var(--success) 20%, transparent),
+    0 0 0 1px color-mix(in oklab, var(--success) 18%, transparent),
+    var(--shadow-sm);
+}
+
+.ruleItemContainerCompact.ruleItemContainerActive:hover {
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in oklab, var(--success) 18%, var(--surface-hover)),
+      color-mix(in oklab, var(--success) 6%, var(--bg-raised))
+    );
+}
+
+.ruleItemContainerCompact .ruleCardTop {
+  min-height: auto;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.ruleItemContainerCompact .ruleItem {
+  padding: 0;
+  min-height: auto;
+  gap: 8px;
+}
+
+.ruleItemContainerCompact .ruleTitleLine {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ruleItemContainerCompact .ruleModel {
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
+}
+
+.ruleItemContainerCompact .ruleDirection {
+  font-size: 10px;
+  border: 1px solid color-mix(in oklab, var(--accent) 22%, transparent);
+  background: color-mix(in oklab, var(--accent) 12%, var(--surface));
+}
+
+.ruleItemContainerCompact .ruleHeaderRight {
+  align-self: flex-start;
+}
+
+.ruleItemContainerCatalog {
+  min-height: 158px;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  border: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--surface) 88%, var(--bg-raised)),
+    color-mix(in oklab, var(--surface) 95%, var(--bg-base))
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 18%, transparent),
+    0 6px 16px color-mix(in oklab, black 8%, transparent);
+}
+
+.ruleItemContainerCatalog::before {
+  content: none;
+}
+
+.ruleItemContainerCatalog .ruleCardTop {
+  min-height: auto;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.ruleItemContainerCatalog .ruleItem {
+  padding: 0;
+  min-height: auto;
+  gap: 10px;
+}
+
+.ruleItemContainerCatalog .ruleTitleLine {
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.ruleItemContainerCatalog .ruleModel {
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+}
+
+.ruleItemContainerCatalog .ruleDirection {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  border: none;
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface));
+}
+
+.ruleItemContainerCatalog .ruleHeaderRight {
+  align-self: flex-start;
+}
+
+.ruleCurrentBadgeInline {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  color: color-mix(in oklab, var(--success) 82%, black);
+  border: 1px solid color-mix(in oklab, var(--success) 42%, transparent);
+  background: color-mix(in oklab, var(--success) 18%, var(--surface));
+}
+
 .ruleItems li {
   display: flex;
   width: 100%;
@@ -516,6 +692,18 @@
   background: var(--surface-hover);
   border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.ruleItemContainer.ruleItemContainerCatalog:hover {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--surface-hover) 90%, var(--bg-raised)),
+    color-mix(in oklab, var(--surface-hover) 96%, var(--bg-base))
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 22%, transparent),
+    0 10px 24px color-mix(in oklab, var(--accent) 10%, transparent);
   transform: translateY(-1px);
 }
 
@@ -590,6 +778,16 @@
   min-height: 32px;
 }
 
+.ruleCardBottomCatalog {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 8px;
+  min-height: auto;
+  padding-top: 6px;
+  border-top: none;
+}
+
 .ruleMetaLeft {
   display: flex;
   align-items: center;
@@ -598,12 +796,63 @@
   flex: 1;
 }
 
+.ruleMetaLeftCatalog {
+  order: 2;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--surface-active) 72%, transparent);
+}
+
+.ruleMetaLeftCatalog .quotaRefreshButton {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--surface) 86%, transparent);
+}
+
+.ruleMetaLeftCatalog .quotaRefreshButton:hover {
+  background: color-mix(in oklab, var(--accent) 12%, var(--surface-hover));
+}
+
+.ruleMetaLeftCatalog .quotaBadge {
+  min-height: 22px;
+  min-width: 92px;
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+}
+
+.ruleMetaLeftCatalog .quotaResetAt {
+  font-size: 10px;
+}
+
 .ruleActionButtons {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
   flex-shrink: 0;
   overflow: visible;
+}
+
+.ruleActionButtonsCompact {
+  gap: 6px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+  background: color-mix(in oklab, var(--bg-raised) 82%, transparent);
+}
+
+.ruleItemContainerCatalog .ruleActionButtons {
+  gap: 6px;
+  padding: 5px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: color-mix(in oklab, var(--bg-raised) 82%, transparent);
+  box-shadow: 0 2px 8px color-mix(in oklab, black 7%, transparent);
 }
 
 .ruleHeaderRight {
@@ -675,6 +924,140 @@
   min-width: 0;
 }
 
+.ruleAssociationMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.ruleAssociationMetaItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in oklab, var(--border) 82%, transparent);
+  background: color-mix(in oklab, var(--surface-active) 76%, transparent);
+  color: var(--text-primary);
+}
+
+.ruleAssociationMetaValue {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.ruleAssociationMetaLabel {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-family: var(--font-body);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ruleCatalogMeta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.ruleCatalogMetaItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--surface-active) 68%, transparent),
+      color-mix(in oklab, var(--surface-active) 84%, transparent)
+    );
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px color-mix(in oklab, black 4%, transparent);
+}
+
+.ruleCatalogMetaLabel {
+  color: color-mix(in oklab, var(--accent) 26%, var(--text-tertiary));
+  font-size: 10px;
+  font-family: var(--font-body);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.ruleCatalogMetaValue {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.2;
+  font-family: var(--font-mono);
+}
+
+.ruleCatalogCapabilities {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.ruleCatalogCapability {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  font-family: var(--font-body);
+  border: 1px solid color-mix(in oklab, var(--border) 84%, transparent);
+  background: color-mix(in oklab, var(--surface-active) 82%, transparent);
+  color: var(--text-secondary);
+  position: relative;
+  padding-left: 18px;
+}
+
+.ruleCatalogCapability::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.ruleCatalogCapabilityEnabled {
+  border-color: color-mix(in oklab, var(--success) 44%, transparent);
+  background: color-mix(in oklab, var(--success) 16%, transparent);
+  color: color-mix(in oklab, var(--success) 86%, black);
+}
+
+.ruleCatalogCapabilityDisabled {
+  border-color: color-mix(in oklab, var(--border) 88%, transparent);
+  background: color-mix(in oklab, var(--surface-active) 82%, transparent);
+  color: var(--text-tertiary);
+}
+
 .ruleDirection {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
@@ -736,6 +1119,72 @@
 
 .ruleItemContainer:hover .activateIconButton {
   opacity: 1;
+}
+
+.ruleItemContainerCompact .activateIconButton,
+.ruleItemContainerCompact .editButton,
+.ruleItemContainerCompact .deleteButton,
+.ruleItemContainerCompact .testIconButton {
+  opacity: 1;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in oklab, var(--border) 78%, transparent);
+}
+
+.ruleItemContainerCompact .activateIconButton,
+.ruleItemContainerCompact .editButton,
+.ruleItemContainerCompact .testIconButton {
+  background: color-mix(in oklab, var(--surface) 86%, transparent);
+}
+
+.ruleItemContainerCompact .deleteButton {
+  background: color-mix(in oklab, var(--danger) 9%, transparent);
+  color: color-mix(in oklab, var(--danger) 80%, var(--text-secondary));
+}
+
+.ruleItemContainerCompact .activateIconButton:hover,
+.ruleItemContainerCompact .editButton:hover,
+.ruleItemContainerCompact .testIconButton:hover {
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface-hover));
+  border-color: color-mix(in oklab, var(--accent) 34%, transparent);
+}
+
+.ruleItemContainerCompact .deleteButton:hover {
+  background: color-mix(in oklab, var(--danger) 16%, transparent);
+  border-color: color-mix(in oklab, var(--danger) 28%, transparent);
+}
+
+.ruleItemContainerCatalog .activateIconButton,
+.ruleItemContainerCatalog .editButton,
+.ruleItemContainerCatalog .deleteButton,
+.ruleItemContainerCatalog .testIconButton {
+  opacity: 1;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in oklab, var(--accent) 20%, var(--border));
+}
+
+.ruleItemContainerCatalog .activateIconButton,
+.ruleItemContainerCatalog .editButton,
+.ruleItemContainerCatalog .testIconButton {
+  background: color-mix(in oklab, var(--surface) 92%, transparent);
+}
+
+.ruleItemContainerCatalog .deleteButton {
+  background: color-mix(in oklab, var(--danger) 10%, transparent);
+  color: color-mix(in oklab, var(--danger) 80%, var(--text-secondary));
+}
+
+.ruleItemContainerCatalog .activateIconButton:hover,
+.ruleItemContainerCatalog .editButton:hover,
+.ruleItemContainerCatalog .testIconButton:hover {
+  background: color-mix(in oklab, var(--accent) 18%, var(--surface-hover));
+  border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+}
+
+.ruleItemContainerCatalog .deleteButton:hover {
+  background: color-mix(in oklab, var(--danger) 18%, transparent);
+  border-color: color-mix(in oklab, var(--danger) 34%, transparent);
 }
 
 .activateIconButton:hover {
@@ -911,6 +1360,12 @@
   flex-shrink: 0;
 }
 
+.ruleTrendWrapCatalog {
+  order: 1;
+  width: 100%;
+  align-items: stretch;
+}
+
 .ruleTrendInlineMeta {
   display: flex;
   align-items: flex-end;
@@ -922,6 +1377,31 @@
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   line-height: 1;
+}
+
+.ruleTrendInlineMetaCatalog {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 8px;
+  padding-bottom: 0;
+}
+
+.ruleTrendInlineMetaCatalog span {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--surface) 76%, var(--bg-base));
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 1px 2px color-mix(in oklab, black 4%, transparent);
 }
 
 .ruleMiniChart {
@@ -1377,8 +1857,71 @@
     min-height: 80px;
   }
 
+  .ruleItemContainerCompact {
+    min-height: auto;
+    padding: var(--sp-3);
+  }
+
+  .ruleItemContainerCompact .ruleCardTop {
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+
+  .ruleItemContainerCompact .ruleHeaderRight {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .ruleItemContainerCatalog {
+    min-height: auto;
+    padding: var(--sp-3);
+  }
+
+  .ruleListContentCatalog {
+    padding: var(--sp-2);
+  }
+
+  .ruleItemContainerCatalog .ruleCardTop {
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+
+  .ruleItemContainerCatalog .ruleHeaderRight {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .ruleCatalogMeta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ruleCardBottomCatalog {
+    gap: var(--sp-2);
+    padding-top: var(--sp-2);
+  }
+
+  .ruleMetaLeftCatalog {
+    padding: 6px var(--sp-2);
+  }
+
+  .ruleTrendInlineMetaCatalog {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ruleCatalogCapabilities {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ruleAssociationMeta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .ruleTrendWrap {
     display: none;
+  }
+
+  .ruleTrendWrapCatalog {
+    display: flex;
   }
 
   .deleteButton {

@@ -274,8 +274,20 @@ export const LogDetailPage: React.FC = () => {
   if (!decodedTraceId) {
     return (
       <div className={styles.logDetailPage}>
-        <div className={styles.header}>
-          <h2>{t("logs.detailTitle")}</h2>
+        <div className="app-sub-header">
+          <div className="app-sub-header-top">
+            <button
+              type="button"
+              className="app-sub-header-back"
+              onClick={() => navigate("/logs")}
+            >
+              <ArrowLeft size={16} strokeWidth={2} />
+              <span>{t("logs.backToList")}</span>
+            </button>
+          </div>
+          <div className="app-sub-header-main">
+            <h2 className="app-sub-header-title">{t("logs.detailTitle")}</h2>
+          </div>
         </div>
         <div className={styles.emptyState}>
           <p>{t("logs.logNotFound")}</p>
@@ -289,28 +301,37 @@ export const LogDetailPage: React.FC = () => {
 
   return (
     <div className={styles.logDetailPage}>
-      <div className={styles.header}>
-        <div className={styles.headerTop}>
-          <Button variant="default" size="small" icon={ArrowLeft} onClick={() => navigate("/logs")}>
-            {t("logs.backToList")}
-          </Button>
-          <Button
-            variant="default"
-            size="small"
-            icon={RefreshCw}
-            onClick={() => {
-              setRefreshingLogs(true)
-              Promise.resolve(refreshLogs()).finally(() => setRefreshingLogs(false))
-            }}
-            loading={refreshingLogs}
-          >
-            {t("logs.refresh")}
-          </Button>
+      <div className="app-sub-header">
+        <div className="app-sub-header-top">
+          <div className={styles.headerTop}>
+            <button
+              type="button"
+              className="app-sub-header-back"
+              onClick={() => navigate("/logs")}
+            >
+              <ArrowLeft size={16} strokeWidth={2} />
+              <span>{t("logs.backToList")}</span>
+            </button>
+            <Button
+              variant="default"
+              size="small"
+              icon={RefreshCw}
+              onClick={() => {
+                setRefreshingLogs(true)
+                Promise.resolve(refreshLogs()).finally(() => setRefreshingLogs(false))
+              }}
+              loading={refreshingLogs}
+            >
+              {t("logs.refresh")}
+            </Button>
+          </div>
         </div>
-        <h2>{t("logs.detailTitle")}</h2>
-        <p className={styles.subtitle}>
-          {t("logs.traceIdLabel")}: {decodedTraceId}
-        </p>
+        <div className="app-sub-header-main">
+          <h2 className="app-sub-header-title">{t("logs.detailTitle")}</h2>
+          <p className={`app-sub-header-subtitle ${styles.subtitle}`}>
+            {t("logs.traceIdLabel")}: {decodedTraceId}
+          </p>
+        </div>
       </div>
 
       {!log ? (

@@ -111,19 +111,11 @@ pub async fn fetch_group_quotas(
         .find(|g| g.id == group_id)
         .ok_or_else(|| format!("group not found: {group_id}"))?;
 
-    let Some(active_rule_id) = group.active_provider_id.as_deref() else {
-        return Ok(Vec::new());
-    };
-
-    let Some(active_rule) = group.providers.iter().find(|r| r.id == active_rule_id) else {
-        return Ok(Vec::new());
-    };
-
-    Ok(vec![
-        fetch_single_rule_quota(group, active_rule, false)
-            .await
-            .snapshot,
-    ])
+    let mut snapshots = Vec::with_capacity(group.providers.len());
+    for rule in &group.providers {
+        snapshots.push(fetch_single_rule_quota(group, rule, false).await.snapshot);
+    }
+    Ok(snapshots)
 }
 
 /// Runs a unit test for the expected behavior contract.

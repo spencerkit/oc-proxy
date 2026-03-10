@@ -3,124 +3,15 @@
   gap: var(--sp-5);
 }
 
-.hero {
-  display: grid;
-  gap: var(--sp-4);
-  padding: var(--sp-6);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background:
-    radial-gradient(
-      circle at top right,
-      color-mix(in oklab, var(--accent) 16%, transparent),
-      transparent 32%
-    ),
-    var(--bg-raised);
-  box-shadow: var(--shadow-md);
-}
-
-.backButton {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  width: fit-content;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  padding: 0;
-}
-
-.backButton:hover {
-  color: var(--text-primary);
-}
-
-.heroHeading {
-  display: flex;
-  gap: var(--sp-3);
-}
-
-.kindIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: var(--radius-lg);
-  background: color-mix(in oklab, var(--accent) 12%, var(--bg-base));
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.titleBlock {
-  display: grid;
-  gap: var(--sp-2);
-}
-
-.infoStack {
-  display: grid;
-  gap: var(--sp-2);
-  margin-top: var(--sp-1);
-}
-
-.infoRow {
-  display: grid;
-  gap: 6px;
-}
-
-.infoLabel {
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-tertiary);
-}
-
-.infoValue {
-  display: block;
-  padding: var(--sp-3);
-  border-radius: var(--radius-md);
-  background: color-mix(in oklab, var(--bg-base) 80%, var(--bg-raised));
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  line-height: var(--leading-relaxed);
-  word-break: break-all;
-}
-
-.infoMeta {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
-
-.eyebrow {
-  margin: 0;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.titleBlock h1 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-medium);
-  color: var(--text-primary);
-}
-
 .subtitle {
   margin: 0;
-  max-width: 620px;
+  max-width: 760px;
   font-size: var(--text-sm);
   line-height: var(--leading-relaxed);
   color: var(--text-secondary);
 }
 
+.kindBadge,
 .formatBadge {
   display: inline-flex;
   align-items: center;
@@ -134,9 +25,41 @@
   font-size: var(--text-xs);
 }
 
-.metaText {
+.kindBadge {
+  gap: 6px;
+  padding: 0 var(--sp-2);
+}
+
+.headerMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.headerMetaItem {
+  display: grid;
+  gap: 4px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--surface) 88%, var(--bg-base));
+  min-width: 0;
+}
+
+.headerMetaLabel {
   font-size: var(--text-xs);
   color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.headerMetaValue {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .editorCard {
@@ -415,10 +338,18 @@
 }
 
 @media (max-width: 720px) {
-  .hero,
   .editorCard,
   .formSection {
     padding: var(--sp-4);
+  }
+
+  .headerMetaGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .headerMetaValue {
+    white-space: normal;
+    word-break: break-all;
   }
 
   .fieldGrid {

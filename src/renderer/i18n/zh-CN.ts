@@ -77,7 +77,10 @@ export const zhCN = {
     miniRequests: "请求",
     miniCostConsumed: "当前已消耗 {{value}}",
     miniTokens: "Token",
-    miniCacheTokens: "缓存",
+    miniInputTokens: "输入",
+    miniOutputTokens: "输出",
+    miniCacheInputTokens: "缓存输入",
+    miniCacheOutputTokens: "缓存输出",
     miniTime: "时间",
     noStatsData: "暂无数据",
     ruleMiniTrend: "Provider 轻量趋势图",
@@ -101,10 +104,13 @@ export const zhCN = {
     searchPlaceholder: "按名称、ID 或 API 地址搜索 Provider",
     empty: "暂无 Provider，点击“添加 Provider”创建。",
     deleteProvider: "删除 Provider",
+    duplicateProvider: "复制 Provider",
+    providerTestRequiresAssociation: "请先将该 Provider 关联到至少一个分组后再测试。",
     deleteModalTitle: "删除 Provider",
     deleteModalMessage: "删除 {{name}} 后会自动解除 {{count}} 个分组关联，且不可恢复。",
     confirmDelete: "确认删除",
     providerDeletedWithImpact: "Provider 已删除，并解除 {{count}} 个分组关联。",
+    providerDuplicated: "Provider 已复制为 {{name}}。",
   },
 
   integration: {
@@ -147,7 +153,6 @@ export const zhCN = {
   // Agent Management
   agentManagement: {
     title: "Agent 管理",
-    eyebrow: "客户端配置",
     subtitle: "统一管理 Claude、Codex 和 OpenCode 的配置目录与基础连接参数。",
     selectType: "选择 Agent 类型",
     selectAgent: "选择 Agent",
@@ -198,6 +203,7 @@ export const zhCN = {
     noSearchResults: "没有匹配的配置目录",
     searchEmptyHint: "换一个关键词，或先添加新的配置目录。",
     lastUpdatedLabel: "最近更新：{{value}}",
+    updatedAt: "最近更新",
     modelLabel: "模型：{{value}}",
     modelUnset: "尚未设置默认模型",
     urlLabel: "入口：{{value}}",
@@ -275,7 +281,7 @@ export const zhCN = {
     autoStartServerHint: "桌面应用启动后，是否自动拉起代理服务。",
     quotaAutoRefreshMinutes: "额度自动刷新间隔（分钟）",
     quotaAutoRefreshMinutesHint:
-      "服务页按此间隔自动刷新当前生效 Provider 额度，允许范围：1 - 1440 分钟。",
+      "按此间隔自动刷新所有已关联 Provider 的额度，允许范围：1 - 1440 分钟。",
     quotaAutoRefreshMinutesError: "额度自动刷新间隔必须是 1 到 1440 的整数",
     theme: "主题",
     themeHint: "控制应用所有页面的显示风格。",

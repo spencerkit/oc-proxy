@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle, Eye, EyeOff, TestTube2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, CheckCircle, Eye, EyeOff, TestTube2 } from "lucide-react"
 import type React from "react"
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
@@ -638,6 +638,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
     defaultModel.trim() &&
     (!quotaEnabled || (quotaEndpoint.trim() && quotaRemainingExpr.trim()))
   const breadcrumbLabel = isEditMode && provider ? provider.name : t("ruleCreatePage.newRule")
+  const backLabel = isGlobalMode ? t("header.providers") : t("header.backToService")
 
   if ((!isGlobalMode && !group) || (isEditMode && !provider)) {
     return null
@@ -653,25 +654,39 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
 
   return (
     <div className={styles.rulePage}>
-      <div className={styles.header}>
-        <h1>{t(isEditMode ? "ruleEditPage.title" : "ruleCreatePage.title")}</h1>
-        <nav className={styles.breadcrumb} aria-label={t("header.backToService")}>
+      <div className="app-sub-header">
+        <div className="app-sub-header-top">
           <button
             type="button"
             onClick={() => navigate(isGlobalMode ? "/providers" : "/")}
-            className={styles.breadcrumbButton}
+            className="app-sub-header-back"
           >
-            {isGlobalMode ? t("header.providers") : t("servicePage.groupPath")}
+            <ArrowLeft size={16} strokeWidth={2} />
+            <span>{backLabel}</span>
           </button>
-          {!isGlobalMode && group ? (
-            <>
-              <span className={styles.breadcrumbSeparator}>/</span>
-              <span className={styles.breadcrumbItem}>{group.name}</span>
-            </>
-          ) : null}
-          <span className={styles.breadcrumbSeparator}>/</span>
-          <span className={styles.breadcrumbItem}>{breadcrumbLabel}</span>
-        </nav>
+        </div>
+        <div className="app-sub-header-main">
+          <h1 className="app-sub-header-title">
+            {t(isEditMode ? "ruleEditPage.title" : "ruleCreatePage.title")}
+          </h1>
+          <nav className="app-breadcrumb" aria-label={t("header.backToService")}>
+            <button
+              type="button"
+              onClick={() => navigate(isGlobalMode ? "/providers" : "/")}
+              className="app-breadcrumb-button"
+            >
+              {isGlobalMode ? t("header.providers") : t("servicePage.groupPath")}
+            </button>
+            {!isGlobalMode && group ? (
+              <>
+                <span className="app-breadcrumb-separator">/</span>
+                <span className="app-breadcrumb-item">{group.name}</span>
+              </>
+            ) : null}
+            <span className="app-breadcrumb-separator">/</span>
+            <span className="app-breadcrumb-item">{breadcrumbLabel}</span>
+          </nav>
+        </div>
       </div>
 
       <div className={styles.formContainer}>
@@ -754,33 +769,6 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
                   error={errors.defaultModel}
                   hint={t("ruleForm.defaultModelHint")}
                 />
-              </div>
-
-              <div className={styles.formGroup}>
-                <label htmlFor="edit-rule-mapping-first">{t("ruleForm.modelMappings")}</label>
-                <div className={styles.mappingList}>
-                  {(group?.models || []).length === 0 ? (
-                    <p className={styles.fieldHint}>{t("ruleForm.noGroupModels")}</p>
-                  ) : (
-                    (group?.models || []).map(modelName => (
-                      <div key={modelName} className={styles.mappingRow}>
-                        <span className={styles.mappingLabel}>{modelName}</span>
-                        <Input
-                          id={
-                            modelName === (group?.models || [])[0]
-                              ? "edit-rule-mapping-first"
-                              : undefined
-                          }
-                          value={modelMappings[modelName] ?? ""}
-                          onChange={e => {
-                            setModelMappings(prev => ({ ...prev, [modelName]: e.target.value }))
-                          }}
-                          placeholder={t("ruleForm.mappingPlaceholder")}
-                        />
-                      </div>
-                    ))
-                  )}
-                </div>
               </div>
             </section>
 

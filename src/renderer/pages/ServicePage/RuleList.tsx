@@ -1,4 +1,4 @@
-import { FlaskConical, Loader2, Pencil, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { Copy, FlaskConical, Loader2, Pencil, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
 import type React from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components"
@@ -33,6 +33,7 @@ export const RuleList: React.FC<{
   onRefreshQuota?: (providerId: string) => void | Promise<void>
   onTestModel?: (providerId: string) => void | Promise<void>
   testingProviderIds?: Record<string, boolean | undefined>
+  onDuplicate?: (providerId: string) => void | Promise<void>
   onDelete: (providerId: string) => void
   groupId?: string
   onEdit?: (providerId: string) => void
@@ -42,6 +43,7 @@ export const RuleList: React.FC<{
   addButtonTitle?: string
   deleteActionLabel?: string
   emptyMessage?: string
+  displayMode?: "full" | "association" | "catalog"
 }> = ({
   providers,
   activeProviderId,
@@ -53,6 +55,7 @@ export const RuleList: React.FC<{
   onRefreshQuota,
   onTestModel,
   testingProviderIds,
+  onDuplicate,
   onDelete,
   groupId,
   onEdit,
@@ -62,9 +65,13 @@ export const RuleList: React.FC<{
   addButtonTitle,
   deleteActionLabel,
   emptyMessage,
+  displayMode = "full",
 }) => {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const isAssociationMode = displayMode === "association"
+  const isCatalogMode = displayMode === "catalog"
+  const isFullMode = displayMode === "full"
 
   const handleProviderEdit = (providerId: string) => {
     if (onEdit) {
@@ -409,8 +416,10 @@ export const RuleList: React.FC<{
   }
 
   return (
-    <div className={styles.ruleList}>
-      <div className={styles.ruleListHeader}>
+    <div className={`${styles.ruleList} ${isCatalogMode ? styles.ruleListCatalog : ""}`}>
+      <div
+        className={`${styles.ruleListHeader} ${isCatalogMode ? styles.ruleListHeaderCatalog : ""}`}
+      >
         <div className={styles.ruleHeaderTitle}>
           <h3>{t("servicePage.ruleName")}</h3>
           <span className={styles.countBadge}>{providers.length}</span>
@@ -423,157 +432,252 @@ export const RuleList: React.FC<{
           title={addButtonTitle || addButtonLabel || t("servicePage.addRule")}
         />
       </div>
-      <div className={styles.ruleListContent}>
+      <div
+        className={`${styles.ruleListContent} ${isCatalogMode ? styles.ruleListContentCatalog : ""}`}
+      >
         {providers.length === 0 ? (
           <p className={styles.emptyHint}>{emptyMessage || t("servicePage.noRulesHint")}</p>
         ) : (
-          <ul className={styles.ruleItems}>
-            {providers.map(provider => (
-              <li
-                key={provider.id}
-                className={`${styles.ruleItemContainer} ${provider.id === activeProviderId ? styles.ruleItemContainerActive : ""}`}
-              >
-                {provider.id === activeProviderId && (
-                  <span className={styles.enabledCornerBadge}>{t("servicePage.current")}</span>
-                )}
-                <div className={styles.ruleCardTop}>
-                  <div className={styles.ruleItem}>
-                    <div className={styles.ruleTitleLine}>
-                      <span className={styles.ruleModel}>{provider.name}</span>
-                      <span className={styles.ruleDirection}>
-                        {t(`ruleProtocol.${provider.protocol}`)}
-                      </span>
-                      <span
-                        className={styles.ruleApiAddress}
-                        title={provider.apiAddress?.trim() || "-"}
-                      >
-                        {provider.apiAddress?.trim() || "-"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className={styles.ruleHeaderRight}>
-                    <div className={styles.ruleActionButtons}>
-                      {showActivate && provider.id !== activeProviderId && (
-                        <button
-                          type="button"
-                          className={styles.activateIconButton}
-                          onClick={() => onActivate(provider.id)}
-                          title={t("servicePage.activateRule")}
-                          aria-label={`${t("servicePage.activateRule")}: ${provider.name}`}
-                          disabled={activatingProviderId === provider.id}
-                        >
-                          <Play size={13} />
-                        </button>
+          <ul className={`${styles.ruleItems} ${isCatalogMode ? styles.ruleItemsCatalog : ""}`}>
+            {providers.map(provider => {
+              return (
+                <li
+                  key={provider.id}
+                  className={`${styles.ruleItemContainer} ${isAssociationMode ? styles.ruleItemContainerCompact : ""} ${isCatalogMode ? styles.ruleItemContainerCatalog : ""} ${provider.id === activeProviderId ? styles.ruleItemContainerActive : ""}`}
+                >
+                  {provider.id === activeProviderId && isFullMode && (
+                    <span className={styles.enabledCornerBadge}>{t("servicePage.current")}</span>
+                  )}
+                  <div className={styles.ruleCardTop}>
+                    <div className={styles.ruleItem}>
+                      <div className={styles.ruleTitleLine}>
+                        <span className={styles.ruleModel}>{provider.name}</span>
+                        <span className={styles.ruleDirection}>
+                          {t(`ruleProtocol.${provider.protocol}`)}
+                        </span>
+                        {isAssociationMode && provider.id === activeProviderId && (
+                          <span className={styles.ruleCurrentBadgeInline}>
+                            {t("servicePage.current")}
+                          </span>
+                        )}
+                        {isFullMode && (
+                          <span
+                            className={styles.ruleApiAddress}
+                            title={provider.apiAddress?.trim() || "-"}
+                          >
+                            {provider.apiAddress?.trim() || "-"}
+                          </span>
+                        )}
+                      </div>
+                      {isAssociationMode && (
+                        <div className={styles.ruleAssociationMeta}>
+                          <span
+                            className={styles.ruleAssociationMetaItem}
+                            title={provider.defaultModel?.trim() || "-"}
+                          >
+                            <span className={styles.ruleAssociationMetaLabel}>
+                              {t("servicePage.defaultModel")}
+                            </span>
+                            <span className={styles.ruleAssociationMetaValue}>
+                              {provider.defaultModel?.trim() || "-"}
+                            </span>
+                          </span>
+                          <span
+                            className={styles.ruleAssociationMetaItem}
+                            title={provider.apiAddress?.trim() || "-"}
+                          >
+                            <span className={styles.ruleAssociationMetaLabel}>
+                              {t("servicePage.apiAddress")}
+                            </span>
+                            <span className={styles.ruleAssociationMetaValue}>
+                              {provider.apiAddress?.trim() || "-"}
+                            </span>
+                          </span>
+                        </div>
                       )}
-                      <button
-                        type="button"
-                        className={styles.editButton}
-                        onClick={() => handleProviderEdit(provider.id)}
-                        data-tooltip={t("servicePage.editRule")}
-                        aria-label={`${t("servicePage.editRule")}: ${provider.name}`}
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.deleteButton}
-                        onClick={() => onDelete(provider.id)}
-                        data-tooltip={deleteActionLabel || t("servicePage.deleteRule")}
-                        aria-label={`${deleteActionLabel || t("servicePage.deleteRule")}: ${provider.name}`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                      {onTestModel && (
-                        <button
-                          type="button"
-                          className={styles.testIconButton}
-                          onClick={() => onTestModel(provider.id)}
-                          data-tooltip={
-                            testingProviderIds?.[provider.id]
-                              ? t("servicePage.testingModel")
-                              : t("servicePage.testModel")
-                          }
-                          aria-label={`${t("servicePage.testModel")}: ${provider.name}`}
-                          disabled={Boolean(testingProviderIds?.[provider.id])}
-                        >
-                          {testingProviderIds?.[provider.id] ? (
-                            <Loader2 size={14} className={styles.spinner} />
-                          ) : (
-                            <FlaskConical size={14} />
-                          )}
-                        </button>
+                      {isCatalogMode && (
+                        <>
+                          <div className={styles.ruleCatalogMeta}>
+                            <span
+                              className={styles.ruleCatalogMetaItem}
+                              title={provider.defaultModel?.trim() || "-"}
+                            >
+                              <span className={styles.ruleCatalogMetaLabel}>
+                                {t("servicePage.defaultModel")}
+                              </span>
+                              <span className={styles.ruleCatalogMetaValue}>
+                                {provider.defaultModel?.trim() || "-"}
+                              </span>
+                            </span>
+                            <span
+                              className={styles.ruleCatalogMetaItem}
+                              title={provider.apiAddress?.trim() || "-"}
+                            >
+                              <span className={styles.ruleCatalogMetaLabel}>
+                                {t("servicePage.apiAddress")}
+                              </span>
+                              <span className={styles.ruleCatalogMetaValue}>
+                                {provider.apiAddress?.trim() || "-"}
+                              </span>
+                            </span>
+                          </div>
+                        </>
                       )}
                     </div>
-                  </div>
-                </div>
-                {(() => {
-                  const badge = resolveQuotaBadge(provider)
-                  const cardStats = cardStatsByRuleId?.[provider.id]
-                  return (
-                    <div className={styles.ruleCardBottom}>
-                      <div className={styles.ruleMetaLeft}>
-                        {provider.quota?.enabled && (
+                    <div className={styles.ruleHeaderRight}>
+                      <div
+                        className={`${styles.ruleActionButtons} ${isAssociationMode ? styles.ruleActionButtonsCompact : ""}`}
+                      >
+                        {showActivate && provider.id !== activeProviderId && (
                           <button
                             type="button"
-                            className={styles.quotaRefreshButton}
-                            onClick={() => onRefreshQuota?.(provider.id)}
-                            title={t("ruleQuota.refresh")}
-                            aria-label={`${t("ruleQuota.refresh")}: ${provider.name}`}
-                            disabled={Boolean(quotaLoadingByRuleId?.[provider.id])}
+                            className={styles.activateIconButton}
+                            onClick={() => onActivate(provider.id)}
+                            title={t("servicePage.activateRule")}
+                            aria-label={`${t("servicePage.activateRule")}: ${provider.name}`}
+                            disabled={activatingProviderId === provider.id}
                           >
-                            {quotaLoadingByRuleId?.[provider.id] ? (
+                            <Play size={13} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className={styles.editButton}
+                          onClick={() => handleProviderEdit(provider.id)}
+                          data-tooltip={t("servicePage.editRule")}
+                          aria-label={`${t("servicePage.editRule")}: ${provider.name}`}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        {onDuplicate && (
+                          <button
+                            type="button"
+                            className={styles.editButton}
+                            onClick={() => onDuplicate(provider.id)}
+                            data-tooltip={t("providersPage.duplicateProvider")}
+                            aria-label={`${t("providersPage.duplicateProvider")}: ${provider.name}`}
+                          >
+                            <Copy size={14} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className={styles.deleteButton}
+                          onClick={() => onDelete(provider.id)}
+                          data-tooltip={deleteActionLabel || t("servicePage.deleteRule")}
+                          aria-label={`${deleteActionLabel || t("servicePage.deleteRule")}: ${provider.name}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                        {onTestModel && !isAssociationMode && (
+                          <button
+                            type="button"
+                            className={styles.testIconButton}
+                            onClick={() => onTestModel(provider.id)}
+                            data-tooltip={
+                              testingProviderIds?.[provider.id]
+                                ? t("servicePage.testingModel")
+                                : t("servicePage.testModel")
+                            }
+                            aria-label={`${t("servicePage.testModel")}: ${provider.name}`}
+                            disabled={Boolean(testingProviderIds?.[provider.id])}
+                          >
+                            {testingProviderIds?.[provider.id] ? (
                               <Loader2 size={14} className={styles.spinner} />
                             ) : (
-                              <RefreshCw size={14} />
+                              <FlaskConical size={14} />
                             )}
                           </button>
                         )}
-                        <div className={styles.ruleQuotaWrap}>
-                          <span
-                            className={`${styles.quotaBadge} ${badge.className}`}
-                            title={badge.text}
-                          >
-                            {badge.text}
-                          </span>
-                          {badge.resetAt && (
-                            <span className={styles.quotaResetAt}>
-                              {t("ruleQuota.resetAt", { value: badge.resetAt })}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className={styles.ruleTrendWrap}>
-                        <div className={styles.ruleTrendInlineMeta}>
-                          {provider.cost?.enabled && (
-                            <span>
-                              {t("servicePage.miniCostConsumed", {
-                                value: formatCostConsumed(
-                                  cardStats?.totalCost ?? 0,
-                                  provider.cost?.currency || "USD"
-                                ),
-                              })}
-                            </span>
-                          )}
-                          <span>
-                            {t("servicePage.miniRequests")}:{" "}
-                            {formatCompactRequest(cardStats?.requests ?? 0)}
-                          </span>
-                          <span>
-                            {t("servicePage.miniTokens")}:{" "}
-                            {formatTokenMillions(cardStats?.tokens ?? 0)}
-                          </span>
-                          <span>
-                            {t("servicePage.miniCacheTokens")}:{" "}
-                            {formatTokenMillions(cardStats?.cacheTokens ?? 0)}
-                          </span>
-                        </div>
-                        {renderRuleMiniChart(cardStats)}
                       </div>
                     </div>
-                  )
-                })()}
-              </li>
-            ))}
+                  </div>
+                  {(isFullMode || isCatalogMode) &&
+                    (() => {
+                      const badge = resolveQuotaBadge(provider)
+                      const cardStats = cardStatsByRuleId?.[provider.id]
+                      return (
+                        <div
+                          className={`${styles.ruleCardBottom} ${isCatalogMode ? styles.ruleCardBottomCatalog : ""}`}
+                        >
+                          <div
+                            className={`${styles.ruleMetaLeft} ${isCatalogMode ? styles.ruleMetaLeftCatalog : ""}`}
+                          >
+                            {provider.quota?.enabled && (
+                              <button
+                                type="button"
+                                className={styles.quotaRefreshButton}
+                                onClick={() => onRefreshQuota?.(provider.id)}
+                                title={t("ruleQuota.refresh")}
+                                aria-label={`${t("ruleQuota.refresh")}: ${provider.name}`}
+                                disabled={Boolean(quotaLoadingByRuleId?.[provider.id])}
+                              >
+                                {quotaLoadingByRuleId?.[provider.id] ? (
+                                  <Loader2 size={14} className={styles.spinner} />
+                                ) : (
+                                  <RefreshCw size={14} />
+                                )}
+                              </button>
+                            )}
+                            <div className={styles.ruleQuotaWrap}>
+                              <span
+                                className={`${styles.quotaBadge} ${badge.className}`}
+                                title={badge.text}
+                              >
+                                {badge.text}
+                              </span>
+                              {badge.resetAt && (
+                                <span className={styles.quotaResetAt}>
+                                  {t("ruleQuota.resetAt", { value: badge.resetAt })}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div
+                            className={`${styles.ruleTrendWrap} ${isCatalogMode ? styles.ruleTrendWrapCatalog : ""}`}
+                          >
+                            <div
+                              className={`${styles.ruleTrendInlineMeta} ${isCatalogMode ? styles.ruleTrendInlineMetaCatalog : ""}`}
+                            >
+                              {(isCatalogMode || provider.cost?.enabled) && (
+                                <span>
+                                  {t("servicePage.miniCostConsumed", {
+                                    value: formatCostConsumed(
+                                      cardStats?.totalCost ?? 0,
+                                      provider.cost?.currency || "USD"
+                                    ),
+                                  })}
+                                </span>
+                              )}
+                              <span>
+                                {t("servicePage.miniRequests")}:{" "}
+                                {formatCompactRequest(cardStats?.requests ?? 0)}
+                              </span>
+                              <span>
+                                {t("servicePage.miniInputTokens")}:{" "}
+                                {formatTokenMillions(cardStats?.inputTokens ?? 0)}
+                              </span>
+                              <span>
+                                {t("servicePage.miniOutputTokens")}:{" "}
+                                {formatTokenMillions(cardStats?.outputTokens ?? 0)}
+                              </span>
+                              <span>
+                                {t("servicePage.miniCacheInputTokens")}:{" "}
+                                {formatTokenMillions(cardStats?.cacheReadTokens ?? 0)}
+                              </span>
+                              <span>
+                                {t("servicePage.miniCacheOutputTokens")}:{" "}
+                                {formatTokenMillions(cardStats?.cacheWriteTokens ?? 0)}
+                              </span>
+                            </div>
+                            {!isCatalogMode && renderRuleMiniChart(cardStats)}
+                          </div>
+                        </div>
+                      )
+                    })()}
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>

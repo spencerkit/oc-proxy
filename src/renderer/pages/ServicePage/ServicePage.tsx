@@ -37,14 +37,6 @@ export const ServicePage: React.FC = () => {
     status,
     activeGroupId,
     setActiveGroupId,
-    providerQuotas,
-    providerCardStatsByProviderKey,
-    quotaLoadingProviderKeys,
-    quotaError,
-    statsError,
-    fetchGroupQuotas,
-    fetchGroupProviderCardStats,
-    fetchProviderQuota,
   } = useProxyStore(
     state => ({
       config: state.config,
@@ -52,14 +44,6 @@ export const ServicePage: React.FC = () => {
       status: state.status,
       activeGroupId: state.activeGroupId,
       setActiveGroupId: state.setActiveGroupId,
-      providerQuotas: state.providerQuotas,
-      providerCardStatsByProviderKey: state.providerCardStatsByProviderKey,
-      quotaLoadingProviderKeys: state.quotaLoadingProviderKeys,
-      quotaError: state.quotaError,
-      statsError: state.statsError,
-      fetchGroupQuotas: state.fetchGroupQuotas,
-      fetchGroupProviderCardStats: state.fetchGroupProviderCardStats,
-      fetchProviderQuota: state.fetchProviderQuota,
     }),
     shallow
   )
@@ -75,7 +59,6 @@ export const ServicePage: React.FC = () => {
     {}
   )
   const [activatingProviderId, setActivatingProviderId] = useState<string | null>(null)
-  const [testingProviderIds, setTestingProviderIds] = useState<Record<string, boolean>>({})
   const [showIntegrationWriteModal, setShowIntegrationWriteModal] = useState(false)
   const [integrationTargets, setIntegrationTargets] = useState<IntegrationTarget[]>([])
   const [integrationLoading, setIntegrationLoading] = useState(false)
@@ -93,8 +76,6 @@ export const ServicePage: React.FC = () => {
   const [selectedIntegrationIds, setSelectedIntegrationIds] = useState<Record<string, boolean>>({})
   const [newGroupName, setNewGroupName] = useState("")
   const [newGroupId, setNewGroupId] = useState("")
-  const providerCardStatsHours = 24
-  const providerCardStatsRefreshIntervalMs = 10_000
 
   const groups = config?.groups ?? []
   const globalProviders = config?.providers ?? []
@@ -161,13 +142,6 @@ export const ServicePage: React.FC = () => {
     }),
     [integrationTargets]
   )
-  const quotaAutoRefreshIntervalMs = React.useMemo(() => {
-    const minutes = config?.ui?.quotaAutoRefreshMinutes
-    if (!Number.isInteger(minutes) || !minutes || minutes < 1 || minutes > 1440) {
-      return 5 * 60 * 1000
-    }
-    return minutes * 60 * 1000
-  }, [config?.ui?.quotaAutoRefreshMinutes])
 
   useEffect(() => {
     if (groups.length === 0) {
@@ -182,30 +156,6 @@ export const ServicePage: React.FC = () => {
       setActiveGroupId(groups[0].id)
     }
   }, [groups, activeGroupId, setActiveGroupId])
-
-  useEffect(() => {
-    if (!activeGroupId) return
-    void fetchGroupQuotas(activeGroupId)
-    void fetchGroupProviderCardStats(activeGroupId, providerCardStatsHours)
-  }, [activeGroupId, fetchGroupProviderCardStats, fetchGroupQuotas])
-
-  useEffect(() => {
-    if (!activeGroupId) return
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return
-      void fetchGroupQuotas(activeGroupId)
-    }, quotaAutoRefreshIntervalMs)
-    return () => window.clearInterval(timer)
-  }, [activeGroupId, fetchGroupQuotas, quotaAutoRefreshIntervalMs])
-
-  useEffect(() => {
-    if (!activeGroupId) return
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return
-      void fetchGroupProviderCardStats(activeGroupId, providerCardStatsHours)
-    }, providerCardStatsRefreshIntervalMs)
-    return () => window.clearInterval(timer)
-  }, [activeGroupId, fetchGroupProviderCardStats])
 
   const handleSelectGroup = (groupId: string) => {
     setActiveGroupId(groupId)
@@ -393,70 +343,6 @@ export const ServicePage: React.FC = () => {
       showToast(t("servicePage.unlinkRule"), "success")
     } catch (error) {
       showToast(t("errors.saveFailed", { message: String(error) }), "error")
-    }
-  }
-
-  const handleRefreshProviderQuota = async (providerId: string) => {
-    if (!activeGroupId) return
-    try {
-      await fetchProviderQuota(activeGroupId, providerId)
-    } catch (error) {
-      showToast(t("errors.operationFailed", { message: String(error) }), "error")
-    }
-  }
-
-  const handleTestProviderModel = async (providerId: string) => {
-    if (!activeGroupId || !activeGroup) return
-    if (testingProviderIds[providerId]) return
-
-    const provider = activeGroup.providers.find(item => item.id === providerId)
-    if (!provider) {
-      showToast(t("toast.ruleNotFound"), "error")
-      return
-    }
-
-    setTestingProviderIds(prev => ({ ...prev, [providerId]: true }))
-    try {
-      const result = await ipc.testProviderModel(activeGroupId, providerId)
-      if (!result.ok) {
-        showToast(
-          t("toast.providerModelTestFailed", {
-            provider: provider.name,
-            message:
-              result.message?.trim() || t("errors.operationFailed", { message: provider.name }),
-          }),
-          "error"
-        )
-        return
-      }
-
-      const modelName =
-        result.resolvedModel?.trim() ||
-        result.rawText?.trim() ||
-        provider.defaultModel.trim() ||
-        provider.name
-
-      showToast(
-        t("toast.providerModelTestSuccess", {
-          provider: provider.name,
-          model: modelName,
-        }),
-        "success"
-      )
-    } catch (error) {
-      showToast(
-        t("toast.providerModelTestFailed", {
-          provider: provider.name,
-          message: String(error),
-        }),
-        "error"
-      )
-    } finally {
-      setTestingProviderIds(prev => {
-        const next = { ...prev }
-        delete next[providerId]
-        return next
-      })
     }
   }
 
@@ -707,33 +593,6 @@ export const ServicePage: React.FC = () => {
       })
       .filter(section => section.matched > 0)
   }, [entryUrlSet, integrationSections, integrationTargetUrlById, integrationTargetsByKind])
-  const activeGroupQuotaByProviderId = React.useMemo(() => {
-    const map: Record<string, (typeof providerQuotas)[string] | undefined> = {}
-    if (!activeGroup) return map
-    for (const provider of activeGroup.providers) {
-      map[provider.id] = providerQuotas[`${activeGroup.id}:${provider.id}`]
-    }
-    return map
-  }, [activeGroup, providerQuotas])
-
-  const activeGroupQuotaLoadingByProviderId = React.useMemo(() => {
-    const map: Record<string, boolean> = {}
-    if (!activeGroup) return map
-    for (const provider of activeGroup.providers) {
-      map[provider.id] = !!quotaLoadingProviderKeys[`${activeGroup.id}:${provider.id}`]
-    }
-    return map
-  }, [activeGroup, quotaLoadingProviderKeys])
-
-  const activeGroupProviderCardStatsByProviderId = React.useMemo(() => {
-    const map: Record<string, (typeof providerCardStatsByProviderKey)[string] | undefined> = {}
-    if (!activeGroup) return map
-    for (const provider of activeGroup.providers) {
-      map[provider.id] = providerCardStatsByProviderKey[`${activeGroup.id}:${provider.id}`]
-    }
-    return map
-  }, [activeGroup, providerCardStatsByProviderKey])
-
   return (
     <div className={styles.servicePage}>
       <div className={styles.sidebar}>
@@ -924,23 +783,11 @@ export const ServicePage: React.FC = () => {
               </div>
             </div>
 
-            {(quotaError || statsError) && (
-              <div className={styles.noticeBar}>
-                <span>{quotaError || statsError}</span>
-              </div>
-            )}
-
             <RuleList
               providers={activeGroup.providers}
               activeProviderId={activeGroup.activeProviderId}
               onActivate={handleActivateProvider}
               activatingProviderId={activatingProviderId}
-              quotaByRuleId={activeGroupQuotaByProviderId}
-              quotaLoadingByRuleId={activeGroupQuotaLoadingByProviderId}
-              cardStatsByRuleId={activeGroupProviderCardStatsByProviderId}
-              onRefreshQuota={handleRefreshProviderQuota}
-              onTestModel={handleTestProviderModel}
-              testingProviderIds={testingProviderIds}
               onDelete={handleRequestDeleteProvider}
               onEdit={providerId => navigate(`/providers/${providerId}/edit`)}
               onAdd={openAssociateProviderModal}
@@ -948,6 +795,7 @@ export const ServicePage: React.FC = () => {
               addButtonTitle={t("servicePage.associateRule")}
               deleteActionLabel={t("servicePage.unlinkRule")}
               emptyMessage={t("servicePage.noRulesHint")}
+              displayMode="association"
             />
           </>
         )}

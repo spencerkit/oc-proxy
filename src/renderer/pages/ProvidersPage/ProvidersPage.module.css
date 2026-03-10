@@ -3,30 +3,6 @@
   gap: var(--sp-4);
 }
 
-.pageHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-4);
-}
-
-.pageHeader h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  color: var(--text-primary);
-}
-
-.pageHeader p {
-  margin: var(--sp-1) 0 0;
-  color: var(--text-tertiary);
-  font-size: var(--text-sm);
-}
-
 .searchBox {
   background: var(--bg-raised);
   border: 1px solid var(--border);

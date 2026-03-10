@@ -299,7 +299,8 @@ impl StatsStore {
                     COUNT(*) AS requests,
                     SUM(input_tokens) AS input_tokens,
                     SUM(output_tokens) AS output_tokens,
-                    SUM(cache_read_tokens + cache_write_tokens) AS cache_tokens,
+                    SUM(cache_read_tokens) AS cache_read_tokens,
+                    SUM(cache_write_tokens) AS cache_write_tokens,
                     SUM(COALESCE(total_cost, 0)) AS total_cost
              FROM request_events
              WHERE ts_epoch_ms >= ?1 AND ts_epoch_ms < ?2
@@ -320,16 +321,17 @@ impl StatsStore {
                     row.get::<_, i64>(2)? as u64,
                     row.get::<_, i64>(3)? as u64,
                     row.get::<_, i64>(4)? as u64,
-                    row.get::<_, f64>(5)?,
+                    row.get::<_, i64>(5)? as u64,
+                    row.get::<_, f64>(6)?,
                 ))
             }) {
                 Ok(rows) => rows,
                 Err(_) => return vec![],
             };
 
-        let mut totals_map: BTreeMap<String, (u64, u64, u64, u64, f64)> = BTreeMap::new();
+        let mut totals_map: BTreeMap<String, (u64, u64, u64, u64, u64, f64)> = BTreeMap::new();
         for row in totals_rows.flatten() {
-            totals_map.insert(row.0, (row.1, row.2, row.3, row.4, row.5));
+            totals_map.insert(row.0, (row.1, row.2, row.3, row.4, row.5, row.6));
         }
 
         let mut hourly_stmt = match guard.prepare(
@@ -374,14 +376,25 @@ impl StatsStore {
         totals_map
             .into_iter()
             .map(
-                |(rule_id, (requests, input_tokens, output_tokens, cache_tokens, total_cost))| {
+                |(
+                    rule_id,
+                    (
+                        requests,
+                        input_tokens,
+                        output_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                        total_cost,
+                    ),
+                )| {
                     RuleCardStatsItem {
                         group_id: normalized_group_id.to_string(),
                         rule_id: rule_id.clone(),
                         requests,
                         input_tokens,
                         output_tokens,
-                        cache_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
                         tokens: input_tokens + output_tokens,
                         total_cost,
                         hourly: points.remove(&rule_id).unwrap_or_default(),
@@ -1037,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn summarize_rule_cards_counts_only_successful_requests_and_exposes_cache_tokens() {
+    fn summarize_rule_cards_counts_only_successful_requests_and_exposes_cache_breakdown() {
         let store = new_test_store();
         let success_ts = Utc::now() - Duration::minutes(30);
         let success_hour = normalize_hour(&success_ts.to_rfc3339()).expect("hour should normalize");
@@ -1081,7 +1094,8 @@ mod tests {
         assert_eq!(item.input_tokens, 120);
         assert_eq!(item.output_tokens, 80);
         assert_eq!(item.tokens, 200);
-        assert_eq!(item.cache_tokens, 30);
+        assert_eq!(item.cache_read_tokens, 25);
+        assert_eq!(item.cache_write_tokens, 5);
         assert!((item.total_cost - 1.75).abs() < f64::EPSILON);
         assert_eq!(item.hourly.len(), 1);
         assert_eq!(item.hourly[0].requests, 1);

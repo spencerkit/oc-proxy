@@ -858,7 +858,7 @@ export const LogsPage: React.FC = () => {
     const option: EChartsOption = {
       animationDuration: 260,
       backgroundColor: "transparent",
-      grid: { left: 56, right: 20, top: 24, bottom: 48 },
+      grid: { left: 56, right: 64, top: 24, bottom: 48 },
       legend: {
         top: 0,
         textStyle: { color: MACARON.legend, fontSize: 12 },
@@ -1030,15 +1030,17 @@ export const LogsPage: React.FC = () => {
 
   return (
     <div className={styles.logsPage}>
-      <div className={styles.header}>
-        <h2>{t("logs.title")}</h2>
-        <p className={styles.subtitle}>
-          {activeTab === "stats"
-            ? `${t("logs.statsTabSubtitle", { range: getHoursLabel(hoursFilter) })} · ${t("logs.statsRulesSelected", { count: selectedProviderKeys.length })}`
-            : statusFilter === "all"
-              ? t("logs.recentLogs", { count: logs.length })
-              : t("logs.filteredLogs", { shown: filteredLogs.length, total: logs.length })}
-        </p>
+      <div className="app-top-header">
+        <div className="app-top-header-main">
+          <h2 className="app-top-header-title">{t("logs.title")}</h2>
+          <p className="app-top-header-subtitle">
+            {activeTab === "stats"
+              ? `${t("logs.statsTabSubtitle", { range: getHoursLabel(hoursFilter) })} · ${t("logs.statsRulesSelected", { count: selectedProviderKeys.length })}`
+              : statusFilter === "all"
+                ? t("logs.recentLogs", { count: logs.length })
+                : t("logs.filteredLogs", { shown: filteredLogs.length, total: logs.length })}
+          </p>
+        </div>
       </div>
 
       <div className={styles.tabRow}>

@@ -214,7 +214,8 @@ export interface RuleCardStatsItem {
   requests: number
   inputTokens: number
   outputTokens: number
-  cacheTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
   tokens: number
   totalCost: number
   hourly: RuleCardHourlyPoint[]
