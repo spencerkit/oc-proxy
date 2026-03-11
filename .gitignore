@@ -23,3 +23,4 @@ secrets/*.p8
 src-tauri/target
 src-tauri/gen
 docs/plans
+.tmp/
