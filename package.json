@@ -29,7 +29,8 @@
     "version:check": "node ./scripts/check-version-sync.js",
     "release:plan": "bash ./scripts/release-runner.sh --dry-run --bump auto",
     "release:prepare": "bash ./scripts/release-runner.sh --bump auto",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "e2e:tauri": "wdio run e2e-tests/wdio.conf.cjs"
   },
   "engines": {
     "node": ">=20.0.0",
@@ -52,6 +53,10 @@
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
     "@vitejs/plugin-react": "^4.2.1",
+    "@wdio/cli": "^9.12.0",
+    "@wdio/local-runner": "^9.12.0",
+    "@wdio/mocha-framework": "^9.12.0",
+    "@wdio/spec-reporter": "^9.12.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.3.0",
     "playwright": "^1.58.2",
