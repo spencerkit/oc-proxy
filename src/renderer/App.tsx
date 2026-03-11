@@ -26,6 +26,7 @@ import {
   stopServerAction,
 } from "@/store"
 import { useActions, useRelaxValue } from "@/utils/relax"
+import { isHeadlessHttpRuntime } from "@/utils/runtime"
 import {
   formatServerAddressForDisplay,
   resolveReachableServerBaseUrls,
@@ -73,6 +74,7 @@ const App: React.FC = () => {
   }, [])
 
   const isRunning = status?.running ?? false
+  const isHeadlessRuntime = isHeadlessHttpRuntime()
   const serverAddresses = status
     ? resolveReachableServerBaseUrls({
         statusAddress: status.address,
@@ -154,6 +156,7 @@ const App: React.FC = () => {
       isRunning={isRunning}
       serverAddress={serverAddress}
       serverAction={serverAction}
+      showServerControlButton={!isHeadlessRuntime}
       onStartServer={handleStartServer}
       onStopServer={handleStopServer}
     >

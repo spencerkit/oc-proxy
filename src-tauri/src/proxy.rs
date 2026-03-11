@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tauri::AppHandle;
 
 mod net;
 mod observability;
@@ -40,6 +41,8 @@ struct ProxyRuntimeInner {
     metrics: Arc<observability::MetricsState>,
     server: Mutex<Option<RunningServer>>,
     client: Client,
+    shared_state: Mutex<Option<crate::app_state::SharedState>>,
+    app_handle: Mutex<Option<AppHandle>>,
 }
 
 struct RunningServer {
@@ -50,7 +53,7 @@ struct RunningServer {
 }
 
 #[derive(Clone)]
-struct ServiceState {
+pub(crate) struct ServiceState {
     config: Arc<RwLock<ProxyConfig>>,
     config_revision: Arc<AtomicU64>,
     route_index: Arc<RwLock<routing::RouteIndex>>,
@@ -59,6 +62,8 @@ struct ServiceState {
     stats_store: StatsStore,
     metrics: Arc<observability::MetricsState>,
     client: Client,
+    pub(crate) shared_state: Option<crate::app_state::SharedState>,
+    pub(crate) app_handle: Option<AppHandle>,
 }
 
 impl ProxyRuntime {
@@ -93,8 +98,24 @@ impl ProxyRuntime {
                 metrics: Arc::new(observability::MetricsState::new()),
                 server: Mutex::new(None),
                 client,
+                shared_state: Mutex::new(None),
+                app_handle: Mutex::new(None),
             }),
         })
+    }
+
+    /// Attach shared state for HTTP API handlers.
+    pub fn attach_shared_state(&self, state: crate::app_state::SharedState) {
+        if let Ok(mut guard) = self.inner.shared_state.lock() {
+            *guard = Some(state);
+        }
+    }
+
+    /// Attach app handle for HTTP API handlers.
+    pub fn attach_app_handle(&self, app: AppHandle) {
+        if let Ok(mut guard) = self.inner.app_handle.lock() {
+            *guard = Some(app);
+        }
     }
 
     /// Start Axum proxy server if not already running.
@@ -114,6 +135,18 @@ impl ProxyRuntime {
             net::bind_proxy_listener(&config.server.host, config.server.port).await?;
 
         let (tx, rx) = oneshot::channel();
+        let shared_state = self
+            .inner
+            .shared_state
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone());
+        let app_handle = self
+            .inner
+            .app_handle
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone());
         let service_state = ServiceState {
             config: self.inner.config.clone(),
             config_revision: self.inner.config_revision.clone(),
@@ -123,6 +156,8 @@ impl ProxyRuntime {
             stats_store: self.inner.stats_store.clone(),
             metrics: self.inner.metrics.clone(),
             client: self.inner.client.clone(),
+            shared_state,
+            app_handle,
         };
 
         let app = Router::new()
@@ -130,6 +165,7 @@ impl ProxyRuntime {
             .route("/metrics-lite", get(pipeline::metrics_lite))
             .route("/oc/:group_id", post(pipeline::handle_proxy_root))
             .route("/oc/:group_id/*suffix", post(pipeline::handle_proxy_suffix))
+            .merge(crate::http_api::router())
             .with_state(service_state);
 
         self.inner.metrics.mark_started();

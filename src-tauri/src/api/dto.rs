@@ -27,6 +27,15 @@ pub struct GroupBackupExportResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GroupsExportJsonResult {
+    pub text: String,
+    pub file_name: String,
+    pub group_count: usize,
+    pub char_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GroupBackupImportResult {
     pub ok: bool,
     pub canceled: bool,

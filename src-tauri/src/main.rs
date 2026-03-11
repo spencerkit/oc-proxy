@@ -4,37 +4,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod api;
-mod app_state;
-mod backup;
-mod bootstrap;
-mod commands;
-mod config;
-mod config_store;
-mod domain;
-mod integration_store;
-mod log_store;
-mod mappers;
-mod models;
-mod proxy;
-mod quota;
-mod remote_sync;
-mod services;
-mod stats_store;
-mod transformer;
-mod wsl;
-
-use commands::{
-    app_get_info, app_get_status, app_read_clipboard_text, app_renderer_ready,
-    app_report_renderer_error, app_start_server, app_stop_server, config_export_groups,
-    config_export_groups_clipboard, config_export_groups_folder, config_get, config_import_groups,
-    config_import_groups_json, config_remote_rules_pull, config_remote_rules_upload, config_save,
-    integration_add_target, integration_list_targets, integration_pick_directory,
-    integration_read_agent_config, integration_remove_target, integration_update_target,
-    integration_write_agent_config, integration_write_agent_config_source,
-    integration_write_group_entry, logs_clear, logs_list, logs_stats_clear, logs_stats_rule_cards,
-    logs_stats_summary, provider_test_model, quota_get_group, quota_get_rule, quota_test_draft,
-};
+use ai_open_router_tauri::bootstrap;
+use ai_open_router_tauri::commands::build_invoke_handler;
 use tauri::Manager;
 
 #[tokio::main]
@@ -59,42 +30,7 @@ async fn main() {
             None,
         ))
         .setup(move |app| Ok(bootstrap::setup_app(app, &app_name, &app_version)?))
-        .invoke_handler(tauri::generate_handler![
-            app_get_info,
-            app_get_status,
-            app_start_server,
-            app_stop_server,
-            app_renderer_ready,
-            app_report_renderer_error,
-            config_get,
-            config_save,
-            config_export_groups,
-            config_export_groups_folder,
-            config_export_groups_clipboard,
-            config_import_groups,
-            config_import_groups_json,
-            config_remote_rules_upload,
-            config_remote_rules_pull,
-            integration_list_targets,
-            integration_pick_directory,
-            integration_add_target,
-            integration_update_target,
-            integration_remove_target,
-            integration_write_group_entry,
-            integration_read_agent_config,
-            integration_write_agent_config,
-            integration_write_agent_config_source,
-            app_read_clipboard_text,
-            logs_list,
-            logs_clear,
-            logs_stats_summary,
-            logs_stats_rule_cards,
-            logs_stats_clear,
-            provider_test_model,
-            quota_get_rule,
-            quota_get_group,
-            quota_test_draft,
-        ])
+        .invoke_handler(build_invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

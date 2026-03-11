@@ -1,5 +1,6 @@
 import type React from "react"
 import { createContext, useCallback, useContext, useState } from "react"
+import { createStableId } from "@/utils/id"
 
 type ToastType = "success" | "error" | "info" | "warning"
 
@@ -21,7 +22,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [toasts, setToasts] = useState<Toast[]>([])
 
   const showToast = useCallback((message: string, type: ToastType = "info") => {
-    const id = crypto.randomUUID()
+    const id = createStableId()
     const toast: Toast = { id, message, type }
 
     setToasts(prev => [...prev, toast])

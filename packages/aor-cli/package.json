@@ -1,0 +1,22 @@
+{
+  "name": "@spencer-kit/aor",
+  "version": "0.2.9",
+  "description": "AI Open Router headless CLI",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "aor": "bin/aor.js"
+  },
+  "files": [
+    "bin",
+    "vendor",
+    "scripts",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "dependencies": {
+    "tar": "^6.2.1"
+  }
+}

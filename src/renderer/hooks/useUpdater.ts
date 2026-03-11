@@ -15,6 +15,7 @@ export function useUpdater() {
   const lastInstalledVersionRef = useRef<string | null>(null)
 
   useEffect(() => {
+    if (!window.__TAURI__ && !window.__TAURI_INTERNALS__) return
     if (!config?.ui?.autoUpdateEnabled) return
 
     let timerId: number | null = null

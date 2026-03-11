@@ -13,7 +13,7 @@ import type {
   RuleQuotaTestResult,
   StatsDimension,
 } from "@/types"
-import { ipc } from "@/utils/ipc"
+import { bridge } from "@/utils/bridge"
 import {
   activeGroupIdState,
   bootstrapErrorState,
@@ -44,6 +44,42 @@ let statusRefreshInFlight = false
 
 const quotaKey = (groupId: string, providerId: string) => `${groupId}:${providerId}`
 
+function createDefaultConfig(): ProxyConfig {
+  return {
+    server: {
+      host: "0.0.0.0",
+      port: 8899,
+      authEnabled: false,
+      localBearerToken: "",
+    },
+    compat: {
+      strictMode: false,
+      textToolCallFallbackEnabled: true,
+    },
+    logging: {
+      captureBody: false,
+    },
+    ui: {
+      theme: "light",
+      locale: "en-US",
+      localeMode: "auto",
+      launchOnStartup: false,
+      autoStartServer: true,
+      closeToTray: true,
+      quotaAutoRefreshMinutes: 5,
+      autoUpdateEnabled: true,
+    },
+    remoteGit: {
+      enabled: false,
+      repoUrl: "",
+      token: "",
+      branch: "main",
+    },
+    providers: [],
+    groups: [],
+  }
+}
+
 function normalizeGroup(
   group: Partial<Group> & Pick<Group, "id" | "name">,
   globalProviderMap?: Map<string, Group["providers"][number]>
@@ -68,13 +104,26 @@ function normalizeGroup(
   }
 }
 
-function normalizeConfig(config: ProxyConfig): ProxyConfig {
+function normalizeConfig(config: ProxyConfig | null | undefined): ProxyConfig {
+  const defaults = createDefaultConfig()
+  const input = config ?? defaults
+  const safeConfig: ProxyConfig = {
+    ...defaults,
+    ...input,
+    server: { ...defaults.server, ...(input.server ?? {}) },
+    compat: { ...defaults.compat, ...(input.compat ?? {}) },
+    logging: { ...defaults.logging, ...(input.logging ?? {}) },
+    ui: { ...defaults.ui, ...(input.ui ?? {}) },
+    remoteGit: { ...defaults.remoteGit, ...(input.remoteGit ?? {}) },
+    providers: Array.isArray(input.providers) ? input.providers : [],
+    groups: Array.isArray(input.groups) ? input.groups : [],
+  }
   const dedupedProviderMap = new Map<string, Group["providers"][number]>()
-  for (const provider of config.providers ?? []) {
+  for (const provider of safeConfig.providers ?? []) {
     if (!provider?.id?.trim()) continue
     dedupedProviderMap.set(provider.id, { ...provider })
   }
-  for (const group of config.groups ?? []) {
+  for (const group of safeConfig.groups ?? []) {
     for (const provider of group.providers ?? group.rules ?? []) {
       if (!provider?.id?.trim() || dedupedProviderMap.has(provider.id)) continue
       dedupedProviderMap.set(provider.id, { ...provider })
@@ -85,17 +134,17 @@ function normalizeConfig(config: ProxyConfig): ProxyConfig {
     normalizedProviders.map(provider => [provider.id, provider] as const)
   )
   return {
-    ...config,
+    ...safeConfig,
     ui: {
-      ...config.ui,
-      autoUpdateEnabled: config.ui.autoUpdateEnabled ?? true,
+      ...safeConfig.ui,
+      autoUpdateEnabled: safeConfig.ui.autoUpdateEnabled ?? true,
     },
     providers: normalizedProviders,
     compat: {
-      ...config.compat,
-      textToolCallFallbackEnabled: config.compat.textToolCallFallbackEnabled ?? true,
+      ...safeConfig.compat,
+      textToolCallFallbackEnabled: safeConfig.compat.textToolCallFallbackEnabled ?? true,
     },
-    groups: (config.groups ?? []).map(group =>
+    groups: (safeConfig.groups ?? []).map(group =>
       normalizeGroup(group as Partial<Group> & Pick<Group, "id" | "name">, globalProviderMap)
     ),
   }
@@ -170,9 +219,9 @@ export const initAction = action<void, Promise<void>>(async store => {
     store.set(bootstrapErrorState, null)
     store.set(lastOperationErrorState, null)
 
-    const [rawConfig, status] = await Promise.all([ipc.getConfig(), ipc.getStatus()])
+    const [rawConfig, status] = await Promise.all([bridge.getConfig(), bridge.getStatus()])
     const config = normalizeConfig(rawConfig)
-    const logsStats = await ipc
+    const logsStats = await bridge
       .getLogsStatsSummary(undefined, undefined, undefined, "rule", false)
       .catch(error => {
         const errorMessage = getErrorMessage(error, "Failed to load logs stats")
@@ -206,7 +255,7 @@ export const refreshStatusAction = action<void, Promise<void>>(async store => {
 
   statusRefreshInFlight = true
   try {
-    const status = await ipc.getStatus()
+    const status = await bridge.getStatus()
     store.set(statusState, status)
     store.set(statusErrorState, null)
   } catch (error) {
@@ -220,7 +269,7 @@ export const refreshStatusAction = action<void, Promise<void>>(async store => {
 
 export const refreshLogsAction = action<void, Promise<void>>(async store => {
   try {
-    const logs = await ipc.listLogs(MAX_LOGS)
+    const logs = await bridge.listLogs(MAX_LOGS)
     store.set(logsState, logs)
     store.set(logsErrorState, null)
   } catch (error) {
@@ -242,7 +291,7 @@ export const refreshLogsStatsAction = action<
 >(async (store, payload) => {
   try {
     const request = requirePayload(payload, "refreshLogsStatsAction")
-    const logsStats = await ipc.getLogsStatsSummary(
+    const logsStats = await bridge.getLogsStatsSummary(
       request.hours,
       request.ruleKeys,
       request.ruleKey,
@@ -264,7 +313,7 @@ export const saveConfigAction = action<ProxyConfig, Promise<void>>(async (store,
     store.set(savingConfigState, true)
     store.set(lastOperationErrorState, null)
 
-    const result = await ipc.saveConfig(buildSaveConfigPayload(normalizeConfig(nextConfig)))
+    const result = await bridge.saveConfig(buildSaveConfigPayload(normalizeConfig(nextConfig)))
 
     store.set(configState, normalizeConfig(result.config))
     store.set(statusState, result.status)
@@ -282,7 +331,7 @@ export const exportGroupsBackupAction = action<void, Promise<GroupBackupExportRe
   async store => {
     try {
       store.set(lastOperationErrorState, null)
-      return await ipc.exportGroupsBackup()
+      return await bridge.exportGroupsBackup()
     } catch (error) {
       const errorMessage = getErrorMessage(error, "Failed to export group backup")
       store.set(lastOperationErrorState, errorMessage)
@@ -295,7 +344,7 @@ export const exportGroupsToFolderAction = action<void, Promise<GroupBackupExport
   async store => {
     try {
       store.set(lastOperationErrorState, null)
-      return await ipc.exportGroupsToFolder()
+      return await bridge.exportGroupsToFolder()
     } catch (error) {
       const errorMessage = getErrorMessage(error, "Failed to export group backup")
       store.set(lastOperationErrorState, errorMessage)
@@ -308,7 +357,7 @@ export const exportGroupsToClipboardAction = action<void, Promise<GroupBackupExp
   async store => {
     try {
       store.set(lastOperationErrorState, null)
-      return await ipc.exportGroupsToClipboard()
+      return await bridge.exportGroupsToClipboard()
     } catch (error) {
       const errorMessage = getErrorMessage(error, "Failed to export group backup")
       store.set(lastOperationErrorState, errorMessage)
@@ -322,7 +371,7 @@ export const importGroupsBackupAction = action<void, Promise<GroupBackupImportRe
     try {
       store.set(savingConfigState, true)
       store.set(lastOperationErrorState, null)
-      const result = await ipc.importGroupsBackup()
+      const result = await bridge.importGroupsBackup()
 
       if (!result.canceled && result.config && result.status) {
         store.set(configState, normalizeConfig(result.config))
@@ -350,7 +399,7 @@ export const importGroupsFromJsonAction = action<
     const request = requirePayload(payload, "importGroupsFromJsonAction")
     store.set(savingConfigState, true)
     store.set(lastOperationErrorState, null)
-    const result = await ipc.importGroupsFromJson(request.jsonText)
+    const result = await bridge.importGroupsFromJson(request.jsonText)
 
     if (!result.canceled && result.config && result.status) {
       store.set(configState, normalizeConfig(result.config))
@@ -376,7 +425,7 @@ export const remoteRulesUploadAction = action<
   try {
     const request = payload ?? {}
     store.set(lastOperationErrorState, null)
-    return await ipc.remoteRulesUpload(request.force)
+    return await bridge.remoteRulesUpload(request.force)
   } catch (error) {
     const errorMessage = getErrorMessage(error, "Failed to upload remote rules")
     store.set(lastOperationErrorState, errorMessage)
@@ -389,7 +438,7 @@ export const remoteRulesPullAction = action<{ force?: boolean }, Promise<RemoteR
     try {
       const request = payload ?? {}
       store.set(lastOperationErrorState, null)
-      const result = await ipc.remoteRulesPull(request.force)
+      const result = await bridge.remoteRulesPull(request.force)
       if (result.config && result.status) {
         store.set(configState, normalizeConfig(result.config))
         store.set(statusState, result.status)
@@ -406,7 +455,7 @@ export const remoteRulesPullAction = action<{ force?: boolean }, Promise<RemoteR
 export const readClipboardTextAction = action<void, Promise<ClipboardTextResult>>(async store => {
   try {
     store.set(lastOperationErrorState, null)
-    return await ipc.readClipboardText()
+    return await bridge.readClipboardText()
   } catch (error) {
     const errorMessage = getErrorMessage(error, "Failed to read clipboard")
     store.set(lastOperationErrorState, errorMessage)
@@ -422,7 +471,7 @@ export const setActiveGroupIdAction = action<{ groupId: string | null }, void>((
 
 export const clearLogsAction = action<void, Promise<void>>(async store => {
   try {
-    await ipc.clearLogs()
+    await bridge.clearLogs()
     store.set(logsState, [])
     store.set(logsErrorState, null)
   } catch (error) {
@@ -436,7 +485,7 @@ export const clearLogsStatsAction = action<{ beforeEpochMs?: number }, Promise<v
   async (store, payload) => {
     try {
       const request = payload ?? {}
-      await ipc.clearLogsStats(request.beforeEpochMs)
+      await bridge.clearLogsStats(request.beforeEpochMs)
       store.set(logsStatsState, null)
       store.set(statsErrorState, null)
     } catch (error) {
@@ -454,7 +503,7 @@ export const fetchGroupQuotasAction = action<{ groupId: string }, Promise<void>>
       const request = requirePayload(payload, "fetchGroupQuotasAction")
       if (!request.groupId.trim()) return
       store.set(quotaErrorState, null)
-      const snapshots = await ipc.getGroupQuotas(request.groupId)
+      const snapshots = await bridge.getGroupQuotas(request.groupId)
       const current = store.get(providerQuotasState)
       const next = { ...current }
       for (const snapshot of snapshots) {
@@ -478,7 +527,7 @@ export const fetchGroupProviderCardStatsAction = action<
     const request = requirePayload(payload, "fetchGroupProviderCardStatsAction")
     if (!request.groupId.trim()) return
     store.set(statsErrorState, null)
-    const items = await ipc.getRuleCardStats(request.groupId, request.hours)
+    const items = await bridge.getRuleCardStats(request.groupId, request.hours)
     const current = store.get(providerCardStatsByProviderKeyState)
     const next = { ...current }
     const groupPrefix = `${request.groupId}:`
@@ -511,7 +560,7 @@ export const fetchProviderQuotaAction = action<
       ...store.get(quotaLoadingProviderKeysState),
       [key]: true,
     })
-    const snapshot = await ipc.getProviderQuota(request.groupId, request.providerId)
+    const snapshot = await bridge.getProviderQuota(request.groupId, request.providerId)
     store.set(providerQuotasState, {
       ...store.get(providerQuotasState),
       [key]: snapshot,
@@ -560,7 +609,7 @@ export const startServerAction = action<void, Promise<void>>(async store => {
   try {
     store.set(serverActionState, "starting")
     store.set(lastOperationErrorState, null)
-    const status = await ipc.startServer()
+    const status = await bridge.startServer()
     store.set(statusState, status)
     store.set(serverActionState, null)
     store.set(statusErrorState, null)
@@ -577,7 +626,7 @@ export const stopServerAction = action<void, Promise<void>>(async store => {
   try {
     store.set(serverActionState, "stopping")
     store.set(lastOperationErrorState, null)
-    const status = await ipc.stopServer()
+    const status = await bridge.stopServer()
     store.set(statusState, status)
     store.set(serverActionState, null)
     store.set(statusErrorState, null)
@@ -595,7 +644,7 @@ export const testProviderModelAction = action<
   Promise<ProviderModelTestResult>
 >(async (_store, payload) => {
   const request = requirePayload(payload, "testProviderModelAction")
-  return await ipc.testProviderModel(request.groupId, request.providerId)
+  return await bridge.testProviderModel(request.groupId, request.providerId)
 })
 
 export const testRuleQuotaDraftAction = action<
@@ -610,7 +659,7 @@ export const testRuleQuotaDraftAction = action<
   Promise<RuleQuotaTestResult>
 >(async (_store, payload) => {
   const request = requirePayload(payload, "testRuleQuotaDraftAction")
-  return await ipc.testRuleQuotaDraft(
+  return await bridge.testRuleQuotaDraft(
     request.groupId,
     request.name,
     request.token,
@@ -621,5 +670,5 @@ export const testRuleQuotaDraftAction = action<
 })
 
 export const getAppInfoAction = action<void, Promise<AppInfo>>(async () => {
-  return await ipc.getAppInfo()
+  return await bridge.getAppInfo()
 })

@@ -18,6 +18,7 @@ import {
 import type { AppInfo, LocaleCode, ProxyConfig, ThemeMode } from "@/types"
 import { resolveEffectiveLocale } from "@/utils/locale"
 import { useActions, useRelaxValue } from "@/utils/relax"
+import { isHeadlessHttpRuntime } from "@/utils/runtime"
 import { checkForUpdate, installUpdate, readUpdateCache } from "@/utils/updater"
 import styles from "./SettingsPage.module.css"
 
@@ -54,6 +55,7 @@ const SETTINGS_ACTIONS = [
  */
 export const SettingsPage: React.FC = () => {
   const { t } = useTranslation()
+  const isHeadlessRuntime = isHeadlessHttpRuntime()
   const config = useRelaxValue(configState)
   const savingConfig = useRelaxValue(savingConfigState)
   const [
@@ -96,6 +98,7 @@ export const SettingsPage: React.FC = () => {
   const [importJsonText, setImportJsonText] = useState("")
   const [readingClipboard, setReadingClipboard] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [remoteSyncAction, setRemoteSyncAction] = useState<RemoteSyncAction>(null)
   const [pendingRemoteConflict, setPendingRemoteConflict] = useState<PendingRemoteConflict>(null)
   const [aboutLoading, setAboutLoading] = useState(false)
@@ -409,6 +412,7 @@ export const SettingsPage: React.FC = () => {
       setExporting(true)
       if (exportTarget === "folder") {
         const result = await exportGroupsToFolder()
+        setShowExportModal(false)
         if (!result.canceled) {
           showToast(
             t("settings.backupExportFolderSuccess", { count: result.groupCount }),
@@ -417,6 +421,7 @@ export const SettingsPage: React.FC = () => {
         }
       } else {
         const result = await exportGroupsToClipboard()
+        setShowExportModal(false)
         if (!result.canceled) {
           showToast(
             t("settings.backupExportClipboardSuccess", { count: result.groupCount }),
@@ -424,8 +429,6 @@ export const SettingsPage: React.FC = () => {
           )
         }
       }
-
-      setShowExportModal(false)
     } catch (error) {
       showToast(t("errors.operationFailed", { message: String(error) }), "error")
     } finally {
@@ -438,8 +441,13 @@ export const SettingsPage: React.FC = () => {
     setShowImportModal(true)
   }
 
-  const closeImportModal = () => {
+  const forceCloseImportModal = () => {
     setShowImportModal(false)
+  }
+
+  const closeImportModal = () => {
+    if (importing) return
+    forceCloseImportModal()
   }
 
   const handleReadClipboard = async () => {
@@ -456,20 +464,23 @@ export const SettingsPage: React.FC = () => {
 
   const handleConfirmImport = async () => {
     try {
+      setImporting(true)
       const result =
         importSource === "file"
           ? await importGroupsBackup()
           : await importGroupsFromJson({ jsonText: importJsonText })
 
+      forceCloseImportModal()
       if (!result.canceled) {
         showToast(
           t("settings.backupImportSuccess", { count: result.importedGroupCount || 0 }),
           "success"
         )
       }
-      closeImportModal()
     } catch (error) {
       showToast(t("errors.operationFailed", { message: String(error) }), "error")
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -582,37 +593,39 @@ export const SettingsPage: React.FC = () => {
 
       <div className={styles.layout}>
         <div className={styles.form}>
-          <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>{t("settings.networkSection")}</h3>
+          {!isHeadlessRuntime && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>{t("settings.networkSection")}</h3>
 
-            <div className={styles.formGroup}>
-              <label htmlFor="port">{t("settings.servicePort")}</label>
-              <Input
-                id="port"
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={portText}
-                onChange={e => handlePortChange(e.target.value)}
-                placeholder="8080"
-                hint={!portError ? t("settings.portHint") : undefined}
-                error={portError || undefined}
-                disabled={savingConfig}
-              />
-            </div>
+              <div className={styles.formGroup}>
+                <label htmlFor="port">{t("settings.servicePort")}</label>
+                <Input
+                  id="port"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={portText}
+                  onChange={e => handlePortChange(e.target.value)}
+                  placeholder="8080"
+                  hint={!portError ? t("settings.portHint") : undefined}
+                  error={portError || undefined}
+                  disabled={savingConfig}
+                />
+              </div>
 
-            <div className={styles.actions}>
-              <Button
-                variant="primary"
-                onClick={handleSaveServer}
-                disabled={!canSaveServer}
-                loading={savingConfig && isServerDirty}
-                type="button"
-              >
-                {t("settings.savePort")}
-              </Button>
+              <div className={styles.actions}>
+                <Button
+                  variant="primary"
+                  onClick={handleSaveServer}
+                  disabled={!canSaveServer}
+                  loading={savingConfig && isServerDirty}
+                  type="button"
+                >
+                  {t("settings.savePort")}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>{t("settings.behaviorSection")}</h3>
@@ -1177,7 +1190,7 @@ export const SettingsPage: React.FC = () => {
                   variant="default"
                   onClick={handleReadClipboard}
                   loading={readingClipboard}
-                  disabled={savingConfig}
+                  disabled={importing}
                 >
                   {t("settings.readClipboard")}
                 </Button>
@@ -1192,8 +1205,8 @@ export const SettingsPage: React.FC = () => {
             <Button
               variant="danger"
               onClick={handleConfirmImport}
-              disabled={!canConfirmImport}
-              loading={savingConfig}
+              disabled={!canConfirmImport || importing}
+              loading={importing}
             >
               {t("settings.importConfirm")}
             </Button>

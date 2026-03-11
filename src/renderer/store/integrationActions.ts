@@ -7,7 +7,7 @@ import type {
   IntegrationWriteResult,
   WriteAgentConfigResult,
 } from "@/types"
-import { ipc } from "@/utils/ipc"
+import { bridge } from "@/utils/bridge"
 import {
   integrationTargetsErrorState,
   integrationTargetsLoadingState,
@@ -42,7 +42,7 @@ export const loadIntegrationTargetsAction = action<void, Promise<IntegrationTarg
     store.set(integrationTargetsLoadingState, true)
     store.set(integrationTargetsErrorState, null)
     try {
-      const targets = await ipc.integrationListTargets()
+      const targets = await bridge.integrationListTargets()
       store.set(integrationTargetsState, targets)
       return targets
     } catch (error) {
@@ -65,7 +65,7 @@ export const pickIntegrationDirectoryAction = action<
   Promise<string | null>
 >(async (_store, payload) => {
   const { initialDir, kind } = payload ?? {}
-  return await ipc.integrationPickDirectory(initialDir, kind)
+  return await bridge.integrationPickDirectory(initialDir, kind)
 })
 
 export const addIntegrationTargetAction = action<
@@ -75,7 +75,7 @@ export const addIntegrationTargetAction = action<
   const request = requirePayload(payload, "addIntegrationTargetAction")
   try {
     store.set(integrationTargetsErrorState, null)
-    const created = await ipc.integrationAddTarget(request.kind, request.configDir)
+    const created = await bridge.integrationAddTarget(request.kind, request.configDir)
     const current = store.get(integrationTargetsState)
     store.set(integrationTargetsState, [...current, created])
     return created
@@ -93,7 +93,7 @@ export const updateIntegrationTargetAction = action<
   const request = requirePayload(payload, "updateIntegrationTargetAction")
   try {
     store.set(integrationTargetsErrorState, null)
-    const updated = await ipc.integrationUpdateTarget(request.targetId, request.configDir)
+    const updated = await bridge.integrationUpdateTarget(request.targetId, request.configDir)
     const current = store.get(integrationTargetsState)
     store.set(
       integrationTargetsState,
@@ -114,7 +114,7 @@ export const removeIntegrationTargetAction = action<
   const request = requirePayload(payload, "removeIntegrationTargetAction")
   try {
     store.set(integrationTargetsErrorState, null)
-    const result = await ipc.integrationRemoveTarget(request.targetId)
+    const result = await bridge.integrationRemoveTarget(request.targetId)
     if (result.removed) {
       const current = store.get(integrationTargetsState)
       store.set(
@@ -133,7 +133,7 @@ export const removeIntegrationTargetAction = action<
 export const readAgentConfigAction = action<{ targetId: string }, Promise<AgentConfigFile>>(
   async (_store, payload) => {
     const request = requirePayload(payload, "readAgentConfigAction")
-    return await ipc.integrationReadAgentConfig(request.targetId)
+    return await bridge.integrationReadAgentConfig(request.targetId)
   }
 )
 
@@ -142,7 +142,7 @@ export const writeAgentConfigAction = action<
   Promise<WriteAgentConfigResult>
 >(async (_store, payload) => {
   const request = requirePayload(payload, "writeAgentConfigAction")
-  return await ipc.integrationWriteAgentConfig(request.targetId, request.config)
+  return await bridge.integrationWriteAgentConfig(request.targetId, request.config)
 })
 
 export const writeAgentConfigSourceAction = action<
@@ -150,7 +150,7 @@ export const writeAgentConfigSourceAction = action<
   Promise<WriteAgentConfigResult>
 >(async (_store, payload) => {
   const request = requirePayload(payload, "writeAgentConfigSourceAction")
-  return await ipc.integrationWriteAgentConfigSource(
+  return await bridge.integrationWriteAgentConfigSource(
     request.targetId,
     request.content,
     request.sourceId
@@ -162,5 +162,5 @@ export const writeGroupEntryAction = action<
   Promise<IntegrationWriteResult>
 >(async (_store, payload) => {
   const request = requirePayload(payload, "writeGroupEntryAction")
-  return await ipc.integrationWriteGroupEntry(request.groupId, request.targetIds)
+  return await bridge.integrationWriteGroupEntry(request.groupId, request.targetIds)
 })

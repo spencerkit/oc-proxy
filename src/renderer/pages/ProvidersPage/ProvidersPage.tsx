@@ -15,6 +15,7 @@ import {
   testProviderModelAction,
 } from "@/store"
 import type { ProxyConfig, RuleCardStatsItem, RuleQuotaSnapshot } from "@/types"
+import { createStableId } from "@/utils/id"
 import { useActions, useRelaxValue } from "@/utils/relax"
 import { ProviderList } from "./ProviderList"
 import styles from "./ProvidersPage.module.css"
@@ -50,7 +51,7 @@ function generateCopiedProviderName(originalName: string, existingNameKeys: Set<
 }
 
 function generateCopiedProviderId(originalId: string, existingIds: Set<string>): string {
-  const baseId = (originalId.trim() || crypto.randomUUID()).replace(/\s+/g, "-")
+  const baseId = (originalId.trim() || createStableId()).replace(/\s+/g, "-")
   let candidate = `${baseId}-${COPY_SUFFIX}`
   let index = 2
   while (existingIds.has(candidate)) {

@@ -63,6 +63,12 @@ for target_dir in "${TARGET_DIRS[@]}"; do
   for file in "${target_dir}"/release/ai-open-router-tauri; do
     copy_artifact "${file}"
   done
+  for file in "${target_dir}"/release/ai-open-router; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/ai-open-router.exe; do
+    copy_artifact "${file}"
+  done
   for file in "${target_dir}"/release/**/latest.json; do
     copy_artifact "${file}"
   done

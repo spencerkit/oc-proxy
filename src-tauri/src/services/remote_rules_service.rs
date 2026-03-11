@@ -14,6 +14,7 @@ use crate::services::{AppError, AppResult};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
+use std::path::Path;
 
 /// Performs get local config updated at.
 fn get_local_config_updated_at(state: &SharedState) -> Option<String> {
@@ -44,16 +45,25 @@ pub async fn upload(
     app: &AppHandle,
     force: Option<bool>,
 ) -> AppResult<RemoteRulesUploadResult> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::external(format!("resolve app_data_dir failed: {e}")))?;
+    upload_with_dir(state, app_data_dir.as_path(), force).await
+}
+
+/// Uploads rules using an explicit app data directory (headless-friendly).
+pub async fn upload_with_dir(
+    state: &SharedState,
+    app_data_dir: &Path,
+    force: Option<bool>,
+) -> AppResult<RemoteRulesUploadResult> {
     if !has_remote_git_binary() {
         return Err(AppError::external(
             "git is not available in current environment",
         ));
     }
 
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::external(format!("resolve app_data_dir failed: {e}")))?;
     let current = state.config_store.get();
     let backup_payload = create_groups_backup_payload(&current.groups);
     let json_text = serde_json::to_string_pretty(&backup_payload)
@@ -61,7 +71,7 @@ pub async fn upload(
     let local_updated_at = get_local_config_updated_at(state);
 
     upload_groups_json_to_remote(
-        app_data_dir.as_path(),
+        app_data_dir,
         &current.remote_git,
         &json_text,
         current.groups.len(),
@@ -77,19 +87,28 @@ pub async fn pull(
     app: &AppHandle,
     force: Option<bool>,
 ) -> AppResult<RemoteRulesPullResult> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::external(format!("resolve app_data_dir failed: {e}")))?;
+    pull_with_dir(state, app_data_dir.as_path(), force).await
+}
+
+/// Pulls rules using an explicit app data directory (headless-friendly).
+pub async fn pull_with_dir(
+    state: &SharedState,
+    app_data_dir: &Path,
+    force: Option<bool>,
+) -> AppResult<RemoteRulesPullResult> {
     if !has_remote_git_binary() {
         return Err(AppError::external(
             "git is not available in current environment",
         ));
     }
 
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::external(format!("resolve app_data_dir failed: {e}")))?;
     let current = state.config_store.get();
     let local_updated_at = get_local_config_updated_at(state);
-    let json_text = pull_groups_json_from_remote(app_data_dir.as_path(), &current.remote_git)
+    let json_text = pull_groups_json_from_remote(app_data_dir, &current.remote_git)
         .map_err(AppError::external)?;
     let parsed = serde_json::from_str::<Value>(&json_text)
         .map_err(|_| AppError::validation("Invalid JSON in remote rules file"))?;

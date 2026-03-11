@@ -6,6 +6,7 @@ import { Button, Input, JsonTreeView, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { configState, saveConfigAction, testRuleQuotaDraftAction } from "@/store"
 import type { Provider, ProxyConfig, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
+import { createStableId } from "@/utils/id"
 import { useActions, useRelaxValue } from "@/utils/relax"
 import styles from "./RuleFormPage.module.css"
 
@@ -554,7 +555,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
     })
 
     const providerDraft: Provider = {
-      id: isEditMode ? providerId || crypto.randomUUID() : crypto.randomUUID(),
+      id: isEditMode ? providerId || createStableId() : createStableId(),
       name: name.trim(),
       protocol,
       token,

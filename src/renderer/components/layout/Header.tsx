@@ -61,6 +61,11 @@ export interface HeaderProps {
   onStopServer?: () => void
 
   /**
+   * Whether to show start/stop server control button.
+   */
+  showServerControlButton?: boolean
+
+  /**
    * Current server transition state
    */
   serverAction?: "starting" | "stopping" | null
@@ -92,6 +97,7 @@ export const Header: React.FC<HeaderProps> = ({
   serverAddress,
   onStartServer,
   onStopServer,
+  showServerControlButton = true,
   serverAction,
   errorCount,
   actions,
@@ -218,18 +224,20 @@ export const Header: React.FC<HeaderProps> = ({
               {isRunning ? t("header.serviceRunning") : t("header.serviceStopped")}
             </span>
             {serverAddress && <span className={styles.serverAddress}>{serverAddress}</span>}
-            <Button
-              variant={isRunning ? "danger" : "primary"}
-              size="small"
-              onClick={isRunning ? onStopServer : onStartServer}
-              loading={
-                (isRunning && serverAction === "stopping") ||
-                (!isRunning && serverAction === "starting")
-              }
-              disabled={serverAction !== null}
-            >
-              {isRunning ? t("header.stop") : t("header.start")}
-            </Button>
+            {showServerControlButton && (
+              <Button
+                variant={isRunning ? "danger" : "primary"}
+                size="small"
+                onClick={isRunning ? onStopServer : onStartServer}
+                loading={
+                  (isRunning && serverAction === "stopping") ||
+                  (!isRunning && serverAction === "starting")
+                }
+                disabled={serverAction !== null}
+              >
+                {isRunning ? t("header.stop") : t("header.start")}
+              </Button>
+            )}
           </div>
         )}
       </div>
