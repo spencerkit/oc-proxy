@@ -57,7 +57,7 @@ if [[ "${platform}" == "windows" ]]; then
     bin_win="$(cygpath -w "${DIST_DIR}/${raw_name}")"
     zip_win="$(cygpath -w "${DIST_DIR}/${zip_name}")"
     powershell.exe -NoProfile -Command "Compress-Archive -Path \"${bin_win}\" -DestinationPath \"${zip_win}\" -Force"
-  elif [[ -n "${PYTHON_BIN}" && command -v cygpath >/dev/null 2>&1 ]]; then
+  elif [[ -n "${PYTHON_BIN}" ]] && command -v cygpath >/dev/null 2>&1; then
     dist_win="$(cygpath -w "${DIST_DIR}")"
     bin_win="$(cygpath -w "${DIST_DIR}/${raw_name}")"
     "${PYTHON_BIN}" - <<PY
