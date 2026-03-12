@@ -210,6 +210,60 @@
   padding-top: var(--sp-1);
 }
 
+.updateCard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.updateMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.updateMeta div {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.updateLabel {
+  font-weight: var(--weight-medium);
+  color: var(--text-tertiary);
+}
+
+.updateStatus {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.updateNotes {
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-2);
+}
+
+.updateNotes summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.updateNotesBody {
+  margin-top: var(--sp-2);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
 @media (max-width: 640px) {
   .form {
     padding: var(--sp-4);

@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.10 - 2026-03-12
+### Features
+- feat(headless): default integration targets (abdddfd)
+- feat(headless): http ui, cli, and release publish (2154c6f)
+- feat: add auto updates and refresh docs (39d89d2)
+### Fixes
+- fix(logs): split provider/group filters (c47f86e)
+### Maintenance
+- chore(ci): format wdio config (17a6f46)
+- chore: ignore tmp e2e data (546c52f)
+- test(e2e): add tauri main flow (1efb5a4)
+- docs: update quick start flow (6c30fc1)
+- refactor: migrate relax state 0.0.9 (36a9f14)
+
 ## v0.2.9 - 2026-03-10
 ### Breaking Changes
 - feat: add AgentConfig DTO for agent management (4fe7ba4)

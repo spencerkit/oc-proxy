@@ -39,6 +39,7 @@ export interface UIConfig {
   autoStartServer: boolean
   closeToTray: boolean
   quotaAutoRefreshMinutes: number
+  autoUpdateEnabled: boolean
 }
 
 export interface RemoteGitConfig {

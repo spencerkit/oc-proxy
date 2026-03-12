@@ -3,9 +3,20 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { Button, Input, Switch } from "@/components"
 import { useTranslation } from "@/hooks"
+import {
+  readAgentConfigAction,
+  writeAgentConfigAction,
+  writeAgentConfigSourceAction,
+} from "@/store"
 import type { AgentConfig, AgentConfigFile, AgentSourceFile, IntegrationClientKind } from "@/types"
-import { ipc } from "@/utils/ipc"
+import { useActions } from "@/utils/relax"
 import styles from "./AgentEditPage.module.css"
+
+const AGENT_EDIT_ACTIONS = [
+  readAgentConfigAction,
+  writeAgentConfigAction,
+  writeAgentConfigSourceAction,
+] as const
 
 const DEFAULT_TIMEOUT_MS = "300000"
 
@@ -101,6 +112,7 @@ export const AgentEditPage: React.FC = () => {
   const { targetId } = useParams<{ targetId: string }>()
   const navigate = useNavigate()
   const { t } = useTranslation()
+  const [readAgentConfig, writeAgentConfig, writeAgentConfigSource] = useActions(AGENT_EDIT_ACTIONS)
 
   const [loading, setLoading] = useState(true)
   const [configFile, setConfigFile] = useState<AgentConfigFile | null>(null)
@@ -120,7 +132,7 @@ export const AgentEditPage: React.FC = () => {
     setLoading(true)
     setError(null)
     try {
-      const result = await ipc.integrationReadAgentConfig(targetId)
+      const result = await readAgentConfig({ targetId })
       setConfigFile(result)
 
       const nextFormState = buildFormState(result.parsedConfig)
@@ -142,7 +154,7 @@ export const AgentEditPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [targetId])
+  }, [targetId, readAgentConfig])
 
   useEffect(() => {
     void loadConfig()
@@ -201,7 +213,7 @@ export const AgentEditPage: React.FC = () => {
     setError(null)
     setSuccess(null)
     try {
-      await ipc.integrationWriteAgentConfig(targetId, currentFormConfig)
+      await writeAgentConfig({ targetId, config: currentFormConfig })
       await loadConfig()
       setSuccess(t("agentManagement.saveSuccess"))
     } catch (err) {
@@ -218,11 +230,11 @@ export const AgentEditPage: React.FC = () => {
     setError(null)
     setSuccess(null)
     try {
-      await ipc.integrationWriteAgentConfigSource(
+      await writeAgentConfigSource({
         targetId,
-        sourceContent,
-        activeSourceFile.sourceId
-      )
+        content: sourceContent,
+        sourceId: activeSourceFile.sourceId,
+      })
       await loadConfig()
       setSuccess(t("agentManagement.saveSuccess"))
     } catch (err) {

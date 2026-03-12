@@ -183,6 +183,7 @@ pub struct ClaudeUsage {
     pub output_tokens: i32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClaudeStreamEvent {
     #[serde(rename = "type")]
@@ -203,6 +204,7 @@ pub struct ClaudeStreamEvent {
 // StreamContext
 // ============================================================================
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct StreamContext {
     pub message_start_sent: bool,
@@ -290,6 +292,7 @@ impl Default for StreamContext {
 // Gemini Types
 // ============================================================================
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiPart {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -302,29 +305,34 @@ pub struct GeminiPart {
     pub function_response: Option<GeminiFunctionResponse>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiFunctionCall {
     pub name: String,
     pub args: serde_json::Value,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiFunctionResponse {
     pub name: String,
     pub response: serde_json::Value,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiContent {
     pub role: String,
     pub parts: Vec<GeminiPart>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiTool {
     pub function_declarations: Vec<GeminiFunctionDeclaration>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiFunctionDeclaration {
     pub name: String,
@@ -333,6 +341,7 @@ pub struct GeminiFunctionDeclaration {
     pub parameters: serde_json::Value,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiRequest {
     pub contents: Vec<GeminiContent>,
@@ -344,6 +353,7 @@ pub struct GeminiRequest {
     pub generation_config: Option<GeminiGenerationConfig>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeminiGenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]

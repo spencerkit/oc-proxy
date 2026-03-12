@@ -3,14 +3,34 @@ import type React from "react"
 import { useCallback, useEffect, useState } from "react"
 import { Button, Input, Switch } from "@/components"
 import { useTranslation } from "@/hooks"
+import {
+  addIntegrationTargetAction,
+  integrationTargetsState,
+  loadIntegrationTargetsAction,
+  pickIntegrationDirectoryAction,
+  readAgentConfigAction,
+  removeIntegrationTargetAction,
+  writeAgentConfigAction,
+  writeGroupEntryAction,
+} from "@/store"
 import type {
   AgentConfig,
   AgentConfigFile,
   IntegrationClientKind,
   IntegrationTarget,
 } from "@/types"
-import { ipc } from "@/utils/ipc"
+import { useActions, useRelaxValue } from "@/utils/relax"
 import styles from "./AgentManagementPanel.module.css"
+
+const AGENT_PANEL_ACTIONS = [
+  loadIntegrationTargetsAction,
+  pickIntegrationDirectoryAction,
+  addIntegrationTargetAction,
+  removeIntegrationTargetAction,
+  readAgentConfigAction,
+  writeAgentConfigAction,
+  writeGroupEntryAction,
+] as const
 
 type Step = "selectType" | "manageDirs" | "addDir" | "editConfig"
 
@@ -24,7 +44,7 @@ interface Props {
 export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
   const { t } = useTranslation()
   const [step, setStep] = useState<Step>("selectType")
-  const [targets, setTargets] = useState<IntegrationTarget[]>([])
+  const targets = useRelaxValue(integrationTargetsState)
   const [selectedKind, setSelectedKind] = useState<IntegrationClientKind | null>(null)
   const [selectedTarget, setSelectedTarget] = useState<IntegrationTarget | null>(null)
   const [configFile, setConfigFile] = useState<AgentConfigFile | null>(null)
@@ -34,6 +54,15 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [showApiToken, setShowApiToken] = useState(false)
+  const [
+    loadTargetsAction,
+    pickIntegrationDirectory,
+    addIntegrationTarget,
+    removeIntegrationTarget,
+    readAgentConfig,
+    writeAgentConfig,
+    writeGroupEntry,
+  ] = useActions(AGENT_PANEL_ACTIONS)
 
   // Form state
   const [formData, setFormData] = useState<AgentConfig>({
@@ -48,12 +77,11 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
 
   const loadTargets = useCallback(async () => {
     try {
-      const result = await ipc.integrationListTargets()
-      setTargets(result || [])
+      await loadTargetsAction()
     } catch (err) {
       console.error("Failed to load targets:", err)
     }
-  }, [])
+  }, [loadTargetsAction])
 
   useEffect(() => {
     loadTargets()
@@ -74,7 +102,7 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
 
   const handlePickDirectory = async () => {
     try {
-      const result = await ipc.integrationPickDirectory(undefined, selectedKind ?? undefined)
+      const result = await pickIntegrationDirectory({ kind: selectedKind ?? undefined })
       if (result) {
         setNewDir(result)
       }
@@ -88,7 +116,7 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
     setLoading(true)
     setError(null)
     try {
-      await ipc.integrationAddTarget(selectedKind, newDir.trim())
+      await addIntegrationTarget({ kind: selectedKind, configDir: newDir.trim() })
       await loadTargets()
       setNewDir("")
       setStep("manageDirs")
@@ -103,7 +131,7 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
     setLoading(true)
     setError(null)
     try {
-      const result = await ipc.integrationReadAgentConfig(target.id)
+      const result = await readAgentConfig({ targetId: target.id })
       setConfigFile(result)
       setSelectedTarget(target)
 
@@ -145,7 +173,7 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
     setError(null)
     setSuccess(null)
     try {
-      await ipc.integrationWriteAgentConfig(selectedTarget.id, formData)
+      await writeAgentConfig({ targetId: selectedTarget.id, config: formData })
       setSuccess(t("agentManagement.saveSuccess"))
       await loadTargets()
       setTimeout(() => {
@@ -166,7 +194,7 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
     try {
       // For source editing, we parse the content and then write
       // This is a simplified version - could be enhanced
-      await ipc.integrationWriteAgentConfig(selectedTarget.id, formData)
+      await writeAgentConfig({ targetId: selectedTarget.id, config: formData })
       setSuccess(t("agentManagement.saveSuccess"))
       await loadTargets()
       setTimeout(() => {
@@ -189,7 +217,7 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
     setError(null)
     setSuccess(null)
     try {
-      await ipc.integrationWriteGroupEntry(activeGroupId, [targetId])
+      await writeGroupEntry({ groupId: activeGroupId, targetIds: [targetId] })
       setSuccess(t("agentManagement.writeSuccess"))
     } catch (err) {
       setError(String(err))
@@ -203,7 +231,7 @@ export const AgentManagementPanel: React.FC<Props> = ({ activeGroupId }) => {
     setLoading(true)
     setError(null)
     try {
-      await ipc.integrationRemoveTarget(targetId)
+      await removeIntegrationTarget({ targetId })
       await loadTargets()
     } catch (err) {
       setError(String(err))

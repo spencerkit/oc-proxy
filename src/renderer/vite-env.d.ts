@@ -25,6 +25,7 @@ declare global {
   interface Window {
     __TAURI__?: TauriNamespace
     __TAURI_INTERNALS__?: TauriInternalsNamespace
+    __AOR_HTTP_BASE__?: string
   }
 }
 

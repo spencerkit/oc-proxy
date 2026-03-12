@@ -23,6 +23,11 @@ pub fn default_auto_start_server() -> bool {
     true
 }
 
+/// Performs default auto update enabled flag.
+pub fn default_auto_update_enabled() -> bool {
+    true
+}
+
 /// Performs default remote git config.
 pub fn default_remote_git_config() -> RemoteGitConfig {
     RemoteGitConfig {
@@ -58,6 +63,7 @@ pub fn default_config() -> ProxyConfig {
             auto_start_server: default_auto_start_server(),
             close_to_tray: true,
             quota_auto_refresh_minutes: default_quota_auto_refresh_minutes(),
+            auto_update_enabled: default_auto_update_enabled(),
         },
         remote_git: default_remote_git_config(),
         providers: vec![],
@@ -112,6 +118,7 @@ struct PartialUiConfig {
     auto_start_server: Option<bool>,
     close_to_tray: Option<bool>,
     quota_auto_refresh_minutes: Option<u32>,
+    auto_update_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -274,6 +281,11 @@ pub fn normalize_config(input: serde_json::Value) -> Result<ProxyConfig, String>
                 .as_ref()
                 .and_then(|u| u.quota_auto_refresh_minutes)
                 .unwrap_or(defaults.ui.quota_auto_refresh_minutes),
+            auto_update_enabled: partial
+                .ui
+                .as_ref()
+                .and_then(|u| u.auto_update_enabled)
+                .unwrap_or(defaults.ui.auto_update_enabled),
         },
         remote_git: RemoteGitConfig {
             enabled: remote_enabled,

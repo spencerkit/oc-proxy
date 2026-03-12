@@ -2,6 +2,7 @@
 
 use serde_json::{json, Value};
 
+#[allow(dead_code)]
 pub fn claude_req_to_gemini(claude_req: &[u8], model: &str) -> Result<Vec<u8>, String> {
     let req: Value = serde_json::from_slice(claude_req).map_err(|e| format!("parse: {}", e))?;
 
@@ -13,8 +14,9 @@ pub fn claude_req_to_gemini(claude_req: &[u8], model: &str) -> Result<Vec<u8>, S
     serde_json::to_vec(&gemini_req).map_err(|e| format!("serialize: {}", e))
 }
 
+#[allow(dead_code)]
 pub fn gemini_resp_to_claude(gemini_resp: &[u8]) -> Result<Vec<u8>, String> {
-    let resp: Value = serde_json::from_slice(gemini_resp).map_err(|e| format!("parse: {}", e))?;
+    let _resp: Value = serde_json::from_slice(gemini_resp).map_err(|e| format!("parse: {}", e))?;
 
     let claude_resp = json!({
         "id": "gemini-resp",

@@ -2,13 +2,15 @@ import { ArrowLeft, Copy, RefreshCw } from "lucide-react"
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { shallow } from "zustand/shallow"
 import { Button } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
-import { useProxyStore } from "@/store"
+import { logsState, refreshLogsAction } from "@/store"
 import type { LogEntry } from "@/types"
+import { useActions, useRelaxValue } from "@/utils/relax"
 import { formatTokenMillions } from "@/utils/tokenFormat"
 import styles from "./LogDetailPage.module.css"
+
+const LOG_DETAIL_ACTIONS = [refreshLogsAction] as const
 
 /** Returns true when value is an object/array container that can be expanded. */
 function isContainer(value: unknown): value is Record<string, unknown> | unknown[] {
@@ -216,13 +218,8 @@ export const LogDetailPage: React.FC = () => {
   const { traceId } = useParams<{ traceId: string }>()
   const { t } = useTranslation()
   const { showToast } = useLogs()
-  const { logs, refreshLogs } = useProxyStore(
-    state => ({
-      logs: state.logs,
-      refreshLogs: state.refreshLogs,
-    }),
-    shallow
-  )
+  const logs = useRelaxValue(logsState)
+  const [refreshLogs] = useActions(LOG_DETAIL_ACTIONS)
   const [refreshingLogs, setRefreshingLogs] = useState(false)
 
   const decodedTraceId = useMemo(() => (traceId ? decodeURIComponent(traceId) : ""), [traceId])

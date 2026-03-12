@@ -2,13 +2,15 @@ import { AlertCircle, ArrowLeft, CheckCircle, Eye, EyeOff, TestTube2 } from "luc
 import type React from "react"
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { shallow } from "zustand/shallow"
 import { Button, Input, JsonTreeView, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
-import { useProxyStore } from "@/store"
+import { configState, saveConfigAction, testRuleQuotaDraftAction } from "@/store"
 import type { Provider, ProxyConfig, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
-import { ipc } from "@/utils/ipc"
+import { createStableId } from "@/utils/id"
+import { useActions, useRelaxValue } from "@/utils/relax"
 import styles from "./RuleFormPage.module.css"
+
+const RULE_FORM_ACTIONS = [saveConfigAction, testRuleQuotaDraftAction] as const
 
 const parseQuotaHeaders = (raw: string): Record<string, string> => {
   const trimmed = raw.trim()
@@ -196,13 +198,8 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
   const { groupId, providerId } = useParams<{ groupId?: string; providerId?: string }>()
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { config, saveConfig } = useProxyStore(
-    state => ({
-      config: state.config,
-      saveConfig: state.saveConfig,
-    }),
-    shallow
-  )
+  const config = useRelaxValue(configState)
+  const [saveConfig, testRuleQuotaDraft] = useActions(RULE_FORM_ACTIONS)
   const { showToast } = useLogs()
   const isEditMode = mode === "edit"
   const anthropicProtocolHelp = t("ruleForm.protocolDescriptionAnthropic")
@@ -511,14 +508,14 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
 
     setQuotaTestLoading(true)
     try {
-      const result = await ipc.testRuleQuotaDraft(
-        quotaTestGroupId,
-        name.trim() || "Draft Provider",
+      const result = await testRuleQuotaDraft({
+        groupId: quotaTestGroupId,
+        name: name.trim() || "Draft Provider",
         token,
         apiAddress,
         defaultModel,
-        quotaConfig
-      )
+        quotaConfig,
+      })
       setQuotaTestResult(result)
       setQuotaTestFingerprint(quotaDraftFingerprint)
     } catch (error) {
@@ -558,7 +555,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
     })
 
     const providerDraft: Provider = {
-      id: isEditMode ? providerId || crypto.randomUUID() : crypto.randomUUID(),
+      id: isEditMode ? providerId || createStableId() : createStableId(),
       name: name.trim(),
       protocol,
       token,

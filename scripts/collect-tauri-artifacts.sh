@@ -11,7 +11,7 @@ TARGET_DIRS=(
 )
 
 mkdir -p "${DIST_DIR}"
-shopt -s nullglob
+shopt -s nullglob globstar
 
 copy_artifact() {
   local source_file="$1"
@@ -24,19 +24,55 @@ for target_dir in "${TARGET_DIRS[@]}"; do
   for file in "${target_dir}"/release/bundle/dmg/*.dmg; do
     copy_artifact "${file}"
   done
+  for file in "${target_dir}"/release/bundle/macos/*.app.tar.gz; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/bundle/macos/*.app.tar.gz.sig; do
+    copy_artifact "${file}"
+  done
   for file in "${target_dir}"/release/bundle/deb/*.deb; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/bundle/appimage/*.AppImage; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/bundle/appimage/*.AppImage.sig; do
     copy_artifact "${file}"
   done
   for file in "${target_dir}"/release/bundle/nsis/*-setup.exe; do
     copy_artifact "${file}"
   done
+  for file in "${target_dir}"/release/bundle/nsis/*-setup.exe.sig; do
+    copy_artifact "${file}"
+  done
   for file in "${target_dir}"/*/*/release/bundle/nsis/*-setup.exe; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/*/*/release/bundle/nsis/*-setup.exe.sig; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/bundle/msi/*.msi; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/bundle/msi/*.msi.sig; do
     copy_artifact "${file}"
   done
   for file in "${target_dir}"/release/ai-open-router-tauri.exe; do
     copy_artifact "${file}"
   done
   for file in "${target_dir}"/release/ai-open-router-tauri; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/ai-open-router; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/ai-open-router.exe; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/**/latest.json; do
+    copy_artifact "${file}"
+  done
+  for file in "${target_dir}"/release/**/latest.json.sig; do
     copy_artifact "${file}"
   done
 done

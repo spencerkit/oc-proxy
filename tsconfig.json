@@ -40,7 +40,8 @@
       "@/pages": ["src/renderer/pages/index"],
       "@/pages/*": ["src/renderer/pages/*"],
       "@/contexts": ["src/renderer/contexts/index"],
-      "@/contexts/*": ["src/renderer/contexts/*"]
+      "@/contexts/*": ["src/renderer/contexts/*"],
+      "@relax-state/store": ["src/types/relax-state-store.d.ts"]
     }
   },
   "include": ["src"],

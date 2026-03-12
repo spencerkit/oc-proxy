@@ -4,13 +4,28 @@ import { Check, ChevronLeft, ChevronRight, RotateCcw, Trash2, X } from "lucide-r
 import type React from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { shallow } from "zustand/shallow"
 import { Button, Modal } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
-import { useProxyStore } from "@/store"
+import {
+  clearLogsAction,
+  clearLogsStatsAction,
+  configState,
+  logsState,
+  logsStatsState,
+  refreshLogsAction,
+  refreshLogsStatsAction,
+} from "@/store"
 import type { LogEntry } from "@/types"
+import { useActions, useRelaxValue } from "@/utils/relax"
 import { formatTokenMillions } from "@/utils/tokenFormat"
 import styles from "./LogsPage.module.css"
+
+const LOGS_ACTIONS = [
+  refreshLogsAction,
+  refreshLogsStatsAction,
+  clearLogsAction,
+  clearLogsStatsAction,
+] as const
 
 const HOURS_FILTERS = [1, 6, 24, 168, 720, 2160] as const
 const MACARON = {
@@ -135,25 +150,17 @@ function formatDelta(delta: number): string {
 export const LogsPage: React.FC = () => {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { logs, logsStats, refreshLogs, refreshLogsStats, clearLogs, clearLogsStats, config } =
-    useProxyStore(
-      state => ({
-        logs: state.logs,
-        logsStats: state.logsStats,
-        refreshLogs: state.refreshLogs,
-        refreshLogsStats: state.refreshLogsStats,
-        clearLogs: state.clearLogs,
-        clearLogsStats: state.clearLogsStats,
-        config: state.config,
-      }),
-      shallow
-    )
+  const logs = useRelaxValue(logsState)
+  const logsStats = useRelaxValue(logsStatsState)
+  const config = useRelaxValue(configState)
+  const [refreshLogs, refreshLogsStats, clearLogs, clearLogsStats] = useActions(LOGS_ACTIONS)
   const { showToast } = useLogs()
   const [activeTab, setActiveTab] = useState<LogsTab>("stats")
   const [statusFilter, setStatusFilter] = useState<"all" | LogEntry["status"]>("all")
-  const [selectedProviderKeys, setSelectedProviderKeys] = useState<string[]>([])
-  const [providerSearchValue, setProviderSearchValue] = useState("")
-  const [providerDropdownOpen, setProviderDropdownOpen] = useState(false)
+  const [selectedProviderId, setSelectedProviderId] = useState("all")
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
+  const [groupSearchValue, setGroupSearchValue] = useState("")
+  const [groupDropdownOpen, setGroupDropdownOpen] = useState(false)
   const [hoursFilter, setHoursFilter] = useState<number>(24)
   const [enableComparison, setEnableComparison] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -161,8 +168,8 @@ export const LogsPage: React.FC = () => {
   const [resettingStats, setResettingStats] = useState(false)
   const [resetBeforeDate, setResetBeforeDate] = useState(() => toDateInputValue(new Date()))
   const [resetCalendarMonth, setResetCalendarMonth] = useState(() => getMonthStart(new Date()))
-  const hasInitializedProviderSelectionRef = useRef(false)
-  const providerComboboxRef = useRef<HTMLDivElement | null>(null)
+  const hasInitializedGroupSelectionRef = useRef(false)
+  const groupComboboxRef = useRef<HTMLDivElement | null>(null)
   const usageChartDomRef = useRef<HTMLDivElement | null>(null)
   const usageChartRef = useRef<echarts.ECharts | null>(null)
   const rateChartDomRef = useRef<HTMLDivElement | null>(null)
@@ -192,6 +199,43 @@ export const LogsPage: React.FC = () => {
     return options
   }, [config])
 
+  const providerOptions = useMemo(() => {
+    const map = new Map<string, { id: string; label: string }>()
+    for (const group of config?.groups || []) {
+      for (const provider of group.providers || []) {
+        if (!provider.id) continue
+        if (!map.has(provider.id)) {
+          const name = provider.name?.trim()
+          const label = name || provider.id
+          map.set(provider.id, { id: provider.id, label })
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label))
+  }, [config])
+
+  const providerOptionsById = useMemo(() => {
+    const map = new Map<string, { id: string; label: string }>()
+    for (const option of providerOptions) {
+      map.set(option.id, option)
+    }
+    return map
+  }, [providerOptions])
+
+  const groupOptions = useMemo(() => {
+    const options: Array<{ id: string; label: string }> = []
+    for (const group of config?.groups || []) {
+      if (selectedProviderId !== "all") {
+        const hasProvider = (group.providers || []).some(
+          provider => provider.id === selectedProviderId
+        )
+        if (!hasProvider) continue
+      }
+      options.push({ id: group.id, label: group.name || group.id })
+    }
+    return options
+  }, [config, selectedProviderId])
+
   const providerCostMetaByKey = useMemo(() => {
     const map = new Map<string, { enabled: boolean; currency: string }>()
     for (const group of config?.groups || []) {
@@ -213,45 +257,78 @@ export const LogsPage: React.FC = () => {
     return map
   }, [ruleOptions])
 
-  const selectedProviderKeySet = useMemo(
-    () => new Set(selectedProviderKeys),
-    [selectedProviderKeys]
-  )
+  const selectedGroupIdSet = useMemo(() => new Set(selectedGroupIds), [selectedGroupIds])
 
-  const selectedRuleOptions = useMemo(() => {
-    return selectedProviderKeys
-      .map(key => ruleOptionsByKey.get(key))
-      .filter((option): option is { key: string; label: string } => Boolean(option))
-  }, [ruleOptionsByKey, selectedProviderKeys])
+  const selectedGroupOptions = useMemo(() => {
+    const map = new Map(groupOptions.map(option => [option.id, option]))
+    return selectedGroupIds
+      .map(id => map.get(id))
+      .filter((option): option is { id: string; label: string } => Boolean(option))
+  }, [groupOptions, selectedGroupIds])
+
+  const selectedRuleKeys = useMemo(() => {
+    const keys: string[] = []
+    if (!config) return keys
+    if (selectedGroupIds.length === 0) return keys
+    const groupSet = new Set(selectedGroupIds)
+    for (const group of config.groups || []) {
+      if (!groupSet.has(group.id)) continue
+      for (const provider of group.providers || []) {
+        if (selectedProviderId !== "all" && provider.id !== selectedProviderId) continue
+        keys.push(`${group.id}::${provider.id}`)
+      }
+    }
+    return keys
+  }, [config, selectedGroupIds, selectedProviderId])
 
   const hasAnyCostEnabledInSelection = useMemo(() => {
-    return selectedProviderKeys.some(key => providerCostMetaByKey.get(key)?.enabled)
-  }, [providerCostMetaByKey, selectedProviderKeys])
+    return selectedRuleKeys.some(key => providerCostMetaByKey.get(key)?.enabled)
+  }, [providerCostMetaByKey, selectedRuleKeys])
 
-  const visibleRuleOptions = useMemo(() => {
-    const keyword = providerSearchValue.trim().toLowerCase()
-    if (!keyword) return ruleOptions
-    return ruleOptions.filter(option => option.label.toLowerCase().includes(keyword))
-  }, [ruleOptions, providerSearchValue])
+  const visibleGroupOptions = useMemo(() => {
+    const keyword = groupSearchValue.trim().toLowerCase()
+    if (!keyword) return groupOptions
+    return groupOptions.filter(option => option.label.toLowerCase().includes(keyword))
+  }, [groupOptions, groupSearchValue])
 
-  const allRuleKeys = useMemo(() => ruleOptions.map(option => option.key), [ruleOptions])
-  const isAllSelected = allRuleKeys.length > 0 && selectedProviderKeys.length === allRuleKeys.length
+  const allGroupIds = useMemo(() => groupOptions.map(option => option.id), [groupOptions])
+  const isAllGroupsSelected =
+    allGroupIds.length > 0 && selectedGroupIds.length === allGroupIds.length
 
   useEffect(() => {
-    const validKeys = new Set(allRuleKeys)
-    setSelectedProviderKeys(prev => {
-      if (!hasInitializedProviderSelectionRef.current) {
-        hasInitializedProviderSelectionRef.current = true
-        return [...allRuleKeys]
+    if (selectedProviderId !== "all" && !providerOptionsById.has(selectedProviderId)) {
+      setSelectedProviderId("all")
+    }
+  }, [providerOptionsById, selectedProviderId])
+
+  useEffect(() => {
+    const validIds = new Set(allGroupIds)
+    setSelectedGroupIds(prev => {
+      if (!hasInitializedGroupSelectionRef.current) {
+        hasInitializedGroupSelectionRef.current = true
+        return [...allGroupIds]
       }
-      return prev.filter(key => validKeys.has(key))
+      return prev.filter(id => validIds.has(id))
     })
-  }, [allRuleKeys])
+  }, [allGroupIds])
 
   useEffect(() => {
-    if (!hasInitializedProviderSelectionRef.current) return
-    void refreshLogsStats(hoursFilter, selectedProviderKeys, undefined, "rule", enableComparison)
-  }, [hoursFilter, refreshLogsStats, selectedProviderKeys, enableComparison])
+    if (allGroupIds.length === 0) {
+      setSelectedGroupIds([])
+      return
+    }
+    setSelectedGroupIds([...allGroupIds])
+  }, [allGroupIds])
+
+  useEffect(() => {
+    if (!hasInitializedGroupSelectionRef.current) return
+    void refreshLogsStats({
+      hours: hoursFilter,
+      ruleKeys: selectedRuleKeys,
+      dimension: "rule",
+      enableComparison,
+    })
+  }, [hoursFilter, refreshLogsStats, selectedRuleKeys, enableComparison])
 
   useEffect(() => {
     void refreshLogs()
@@ -280,20 +357,25 @@ export const LogsPage: React.FC = () => {
   }, [activeTab, refreshLogs])
 
   useEffect(() => {
-    if (!hasInitializedProviderSelectionRef.current) return
+    if (!hasInitializedGroupSelectionRef.current) return
     const timer = window.setInterval(() => {
       if (document.visibilityState !== "visible") return
-      void refreshLogsStats(hoursFilter, selectedProviderKeys, undefined, "rule", enableComparison)
+      void refreshLogsStats({
+        hours: hoursFilter,
+        ruleKeys: selectedRuleKeys,
+        dimension: "rule",
+        enableComparison,
+      })
     }, 3000)
     return () => window.clearInterval(timer)
-  }, [hoursFilter, refreshLogsStats, selectedProviderKeys, enableComparison])
+  }, [hoursFilter, refreshLogsStats, selectedRuleKeys, enableComparison])
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
-      if (!providerComboboxRef.current) return
+      if (!groupComboboxRef.current) return
       const target = event.target as Node
-      if (!providerComboboxRef.current.contains(target)) {
-        setProviderDropdownOpen(false)
+      if (!groupComboboxRef.current.contains(target)) {
+        setGroupDropdownOpen(false)
       }
     }
 
@@ -367,8 +449,13 @@ export const LogsPage: React.FC = () => {
     }
     try {
       setResettingStats(true)
-      await clearLogsStats(beforeEpochMs)
-      await refreshLogsStats(hoursFilter, selectedProviderKeys, undefined, "rule", enableComparison)
+      await clearLogsStats({ beforeEpochMs })
+      await refreshLogsStats({
+        hours: hoursFilter,
+        ruleKeys: selectedRuleKeys,
+        dimension: "rule",
+        enableComparison,
+      })
       showToast(t("logs.resetStatsSuccess"), "success")
       setShowResetStatsConfirm(false)
     } catch (error) {
@@ -379,12 +466,12 @@ export const LogsPage: React.FC = () => {
     }
   }
 
-  const handleToggleRule = (ruleKey: string) => {
-    setSelectedProviderKeys(prev => {
-      if (prev.includes(ruleKey)) {
-        return prev.filter(key => key !== ruleKey)
+  const handleToggleGroup = (groupId: string) => {
+    setSelectedGroupIds(prev => {
+      if (prev.includes(groupId)) {
+        return prev.filter(id => id !== groupId)
       }
-      return [...prev, ruleKey]
+      return [...prev, groupId]
     })
   }
 
@@ -1035,7 +1122,11 @@ export const LogsPage: React.FC = () => {
           <h2 className="app-top-header-title">{t("logs.title")}</h2>
           <p className="app-top-header-subtitle">
             {activeTab === "stats"
-              ? `${t("logs.statsTabSubtitle", { range: getHoursLabel(hoursFilter) })} · ${t("logs.statsRulesSelected", { count: selectedProviderKeys.length })}`
+              ? `${t("logs.statsTabSubtitle", { range: getHoursLabel(hoursFilter) })} · ${
+                  isAllGroupsSelected
+                    ? t("logs.statsGroupAll")
+                    : t("logs.statsGroupsSelected", { count: selectedGroupIds.length })
+                }`
               : statusFilter === "all"
                 ? t("logs.recentLogs", { count: logs.length })
                 : t("logs.filteredLogs", { shown: filteredLogs.length, total: logs.length })}
@@ -1066,43 +1157,57 @@ export const LogsPage: React.FC = () => {
         <>
           <div className={styles.statsToolbar}>
             <div className={styles.advancedFilterGroup}>
-              <div className={styles.ruleCombobox} ref={providerComboboxRef}>
+              <div className={styles.selectWrap}>
+                <select
+                  className={styles.inlineSelect}
+                  value={selectedProviderId}
+                  onChange={e => setSelectedProviderId(e.target.value)}
+                >
+                  <option value="all">{t("logs.statsProviderAll")}</option>
+                  {providerOptions.map(option => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className={styles.ruleCombobox} ref={groupComboboxRef}>
                 <input
                   className={styles.inlineInput}
                   type="text"
-                  value={providerSearchValue}
-                  onFocus={() => setProviderDropdownOpen(true)}
+                  value={groupSearchValue}
+                  onFocus={() => setGroupDropdownOpen(true)}
                   onChange={e => {
-                    setProviderSearchValue(e.target.value)
-                    setProviderDropdownOpen(true)
+                    setGroupSearchValue(e.target.value)
+                    setGroupDropdownOpen(true)
                   }}
                   onKeyDown={e => {
                     if (e.key === "Escape") {
-                      setProviderDropdownOpen(false)
+                      setGroupDropdownOpen(false)
                     }
                     if (
                       e.key === "Backspace" &&
-                      !providerSearchValue.trim() &&
-                      selectedProviderKeys.length > 0
+                      !groupSearchValue.trim() &&
+                      selectedGroupIds.length > 0
                     ) {
                       e.preventDefault()
-                      setSelectedProviderKeys(prev => prev.slice(0, Math.max(0, prev.length - 1)))
+                      setSelectedGroupIds(prev => prev.slice(0, Math.max(0, prev.length - 1)))
                     }
-                    if (e.key === "Enter" && visibleRuleOptions.length > 0) {
+                    if (e.key === "Enter" && visibleGroupOptions.length > 0) {
                       e.preventDefault()
-                      handleToggleRule(visibleRuleOptions[0].key)
+                      handleToggleGroup(visibleGroupOptions[0].id)
                     }
                   }}
-                  placeholder={t("logs.statsRuleSearchPlaceholder")}
+                  placeholder={t("logs.statsGroupSearchPlaceholder")}
                 />
-                {providerDropdownOpen && (
+                {groupDropdownOpen && (
                   <div className={styles.ruleDropdown}>
                     <div className={styles.ruleDropdownActions}>
                       <button
                         type="button"
                         className={styles.ruleDropdownAction}
                         onMouseDown={event => event.preventDefault()}
-                        onClick={() => setSelectedProviderKeys([...allRuleKeys])}
+                        onClick={() => setSelectedGroupIds([...allGroupIds])}
                       >
                         {t("logs.statsSelectAll")}
                       </button>
@@ -1110,23 +1215,23 @@ export const LogsPage: React.FC = () => {
                         type="button"
                         className={styles.ruleDropdownAction}
                         onMouseDown={event => event.preventDefault()}
-                        onClick={() => setSelectedProviderKeys([])}
+                        onClick={() => setSelectedGroupIds([])}
                       >
                         {t("logs.statsClearSelection")}
                       </button>
                     </div>
-                    {visibleRuleOptions.length === 0 ? (
+                    {visibleGroupOptions.length === 0 ? (
                       <div className={styles.ruleDropdownEmpty}>{t("logs.noStatsData")}</div>
                     ) : (
-                      visibleRuleOptions.map(option => {
-                        const checked = selectedProviderKeySet.has(option.key)
+                      visibleGroupOptions.map(option => {
+                        const checked = selectedGroupIdSet.has(option.id)
                         return (
                           <button
-                            key={option.key}
+                            key={option.id}
                             type="button"
                             className={`${styles.ruleOption} ${checked ? styles.ruleOptionActive : ""}`}
                             onMouseDown={event => event.preventDefault()}
-                            onClick={() => handleToggleRule(option.key)}
+                            onClick={() => handleToggleGroup(option.id)}
                           >
                             <span className={styles.ruleOptionCheck}>
                               {checked && <Check size={12} />}
@@ -1174,28 +1279,35 @@ export const LogsPage: React.FC = () => {
 
           <div className={styles.ruleChipsRow}>
             <span className={styles.ruleSelectionText}>
-              {isAllSelected
-                ? t("logs.statsRuleAll")
-                : t("logs.statsRulesSelected", { count: selectedProviderKeys.length })}
+              {t("logs.statsProviderSelected", {
+                provider:
+                  selectedProviderId === "all"
+                    ? t("logs.statsProviderAll")
+                    : providerOptionsById.get(selectedProviderId)?.label || selectedProviderId,
+              })}
+              {" · "}
+              {isAllGroupsSelected
+                ? t("logs.statsGroupAll")
+                : t("logs.statsGroupsSelected", { count: selectedGroupIds.length })}
             </span>
             <button
               type="button"
               className={styles.ruleClearButton}
-              onClick={() => setSelectedProviderKeys([])}
-              disabled={selectedProviderKeys.length === 0}
+              onClick={() => setSelectedGroupIds([])}
+              disabled={selectedGroupIds.length === 0}
             >
               {t("logs.statsClearSelection")}
             </button>
             <div className={styles.ruleChipList}>
-              {!isAllSelected &&
-                selectedRuleOptions.map(option => (
-                  <span key={option.key} className={styles.ruleChip}>
+              {!isAllGroupsSelected &&
+                selectedGroupOptions.map(option => (
+                  <span key={option.id} className={styles.ruleChip}>
                     {option.label}
                     <button
                       type="button"
                       className={styles.ruleChipRemove}
                       onClick={() => {
-                        setSelectedProviderKeys(prev => prev.filter(key => key !== option.key))
+                        setSelectedGroupIds(prev => prev.filter(id => id !== option.id))
                       }}
                       aria-label={`${t("logs.statsClearSelection")}: ${option.label}`}
                     >

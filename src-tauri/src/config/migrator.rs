@@ -4,7 +4,7 @@
 
 use serde_json::{Map, Value};
 
-pub const CURRENT_CONFIG_VERSION: u32 = 3;
+pub const CURRENT_CONFIG_VERSION: u32 = 4;
 
 /// Migrates arbitrary config payload into the latest supported schema version.
 pub fn migrate_config(input: Value) -> Result<Value, String> {
@@ -21,6 +21,7 @@ pub fn migrate_config(input: Value) -> Result<Value, String> {
         root = match version {
             1 => migrate_v1_to_v2(root),
             2 => migrate_v2_to_v3(root),
+            3 => migrate_v3_to_v4(root),
             _ => {
                 return Err(format!(
                     "missing migrator for configVersion {version} -> {}",
@@ -133,6 +134,25 @@ fn migrate_v2_to_v3(mut root: Value) -> Value {
     root
 }
 
+/// Applies v3 -> v4 migration defaults for auto update behavior.
+fn migrate_v3_to_v4(mut root: Value) -> Value {
+    let Some(obj) = root.as_object_mut() else {
+        return Value::Object(Map::new());
+    };
+
+    let ui = obj
+        .entry("ui".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if let Some(ui_obj) = ui.as_object_mut() {
+        if !ui_obj.contains_key("autoUpdateEnabled") {
+            ui_obj.insert("autoUpdateEnabled".to_string(), Value::Bool(true));
+        }
+    }
+
+    obj.insert("configVersion".to_string(), Value::Number(4u64.into()));
+    root
+}
+
 #[cfg(test)]
 mod tests {
     use super::{migrate_config, CURRENT_CONFIG_VERSION};
@@ -159,9 +179,10 @@ mod tests {
         }))
         .expect("migration should succeed");
 
-        assert_eq!(migrated["configVersion"], 3);
+        assert_eq!(migrated["configVersion"], 4);
         assert_eq!(migrated["ui"]["localeMode"], "manual");
         assert_eq!(migrated["ui"]["autoStartServer"], true);
+        assert_eq!(migrated["ui"]["autoUpdateEnabled"], true);
         assert_eq!(migrated["remoteGit"]["enabled"], true);
         assert_eq!(migrated["remoteGit"]["branch"], "main");
     }
@@ -181,7 +202,12 @@ mod tests {
     fn migrate_is_idempotent_on_current_version() {
         let input = json!({
             "configVersion": CURRENT_CONFIG_VERSION,
-            "ui": { "locale": "en-US", "localeMode": "auto", "autoStartServer": true },
+            "ui": {
+                "locale": "en-US",
+                "localeMode": "auto",
+                "autoStartServer": true,
+                "autoUpdateEnabled": true
+            },
             "remoteGit": { "enabled": false, "repoUrl": "", "token": "", "branch": "main" }
         });
         let migrated = migrate_config(input.clone()).expect("migration should succeed");
@@ -199,7 +225,8 @@ mod tests {
         }))
         .expect("migration should succeed");
 
-        assert_eq!(migrated["configVersion"], 3);
+        assert_eq!(migrated["configVersion"], 4);
         assert_eq!(migrated["ui"]["autoStartServer"], true);
+        assert_eq!(migrated["ui"]["autoUpdateEnabled"], true);
     }
 }

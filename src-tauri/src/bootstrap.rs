@@ -368,6 +368,8 @@ pub fn setup_app(app: &mut App, app_name: &str, app_version: &str) -> Result<(),
         runtime,
         renderer_ready: AtomicBool::new(false),
     });
+    state.runtime.attach_shared_state(state.clone());
+    state.runtime.attach_app_handle(app.handle().clone());
 
     apply_launch_on_startup_setting(app.handle(), state.config_store.get().ui.launch_on_startup);
 

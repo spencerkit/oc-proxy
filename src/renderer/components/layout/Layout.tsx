@@ -70,6 +70,11 @@ export interface LayoutProps {
    * Current server transition state
    */
   serverAction?: "starting" | "stopping" | null
+
+  /**
+   * Whether to show start/stop server control button.
+   */
+  showServerControlButton?: boolean
 }
 
 /**
@@ -89,6 +94,7 @@ export const Layout: React.FC<LayoutProps> = ({
   onStartServer,
   onStopServer,
   serverAction,
+  showServerControlButton = true,
 }) => {
   const location = useLocation()
 
@@ -120,6 +126,7 @@ export const Layout: React.FC<LayoutProps> = ({
         isRunning={isRunning}
         serverAddress={serverAddress}
         serverAction={serverAction}
+        showServerControlButton={showServerControlButton}
         onStartServer={onStartServer}
         onStopServer={onStopServer}
       />

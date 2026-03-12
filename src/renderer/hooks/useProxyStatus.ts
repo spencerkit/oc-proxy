@@ -6,7 +6,10 @@
  */
 
 import { useEffect } from "react"
-import { proxySelectors, useProxyStore } from "@/store"
+import { isRunningState, refreshStatusAction, statusErrorState, statusState } from "@/store"
+import { useActions, useRelaxValue } from "@/utils/relax"
+
+const STATUS_ACTIONS = [refreshStatusAction] as const
 
 /**
  * Auto-refresh interval for status (in milliseconds)
@@ -26,10 +29,10 @@ const STATUS_REFRESH_INTERVAL = 3000
  * }
  */
 export function useProxyStatus() {
-  const status = useProxyStore(state => state.status)
-  const running = useProxyStore(proxySelectors.isRunning)
-  const refreshStatus = useProxyStore(state => state.refreshStatus)
-  const error = useProxyStore(state => state.statusError)
+  const status = useRelaxValue(statusState)
+  const running = useRelaxValue(isRunningState)
+  const error = useRelaxValue(statusErrorState)
+  const [refreshStatus] = useActions(STATUS_ACTIONS)
 
   return {
     status,
@@ -51,9 +54,9 @@ export function useProxyStatus() {
  * // Status automatically refreshes every 3 seconds
  */
 export function useProxyStatusAutoRefresh() {
-  const status = useProxyStore(state => state.status)
-  const running = useProxyStore(proxySelectors.isRunning)
-  const refreshStatus = useProxyStore(state => state.refreshStatus)
+  const status = useRelaxValue(statusState)
+  const running = useRelaxValue(isRunningState)
+  const [refreshStatus] = useActions(STATUS_ACTIONS)
 
   // Auto-refresh effect
   useEffect(() => {
@@ -92,7 +95,7 @@ export function useProxyStatusAutoRefresh() {
  * }
  */
 export function useRunningState(): boolean {
-  return useProxyStore(proxySelectors.isRunning)
+  return useRelaxValue(isRunningState)
 }
 
 /**
@@ -106,5 +109,5 @@ export function useRunningState(): boolean {
  * const requests = status?.metrics.requests;
  */
 export function useStatusValue() {
-  return useProxyStore(state => state.status)
+  return useRelaxValue(statusState)
 }

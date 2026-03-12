@@ -4,9 +4,25 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button, Input, Modal } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
+import {
+  addIntegrationTargetAction,
+  integrationTargetsLoadingState,
+  integrationTargetsState,
+  loadIntegrationTargetsAction,
+  pickIntegrationDirectoryAction,
+  removeIntegrationTargetAction,
+} from "@/store"
 import type { IntegrationClientKind, IntegrationTarget } from "@/types"
-import { ipc } from "@/utils/ipc"
+import { useActions, useRelaxValue } from "@/utils/relax"
+import { isHeadlessHttpRuntime } from "@/utils/runtime"
 import styles from "./AgentListPage.module.css"
+
+const AGENT_LIST_ACTIONS = [
+  loadIntegrationTargetsAction,
+  pickIntegrationDirectoryAction,
+  addIntegrationTargetAction,
+  removeIntegrationTargetAction,
+] as const
 
 const AGENT_TYPES: IntegrationClientKind[] = ["claude", "codex", "opencode"]
 
@@ -64,25 +80,29 @@ export const AgentListPage: React.FC = () => {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { showToast } = useLogs()
+  const isHeadlessRuntime = isHeadlessHttpRuntime()
 
-  const [targets, setTargets] = useState<IntegrationTarget[]>([])
-  const [loading, setLoading] = useState(true)
+  const targets = useRelaxValue(integrationTargetsState)
+  const loading = useRelaxValue(integrationTargetsLoadingState)
   const [newDir, setNewDir] = useState("")
   const [addingKind, setAddingKind] = useState<IntegrationClientKind | null>(null)
   const [addLoading, setAddLoading] = useState(false)
   const [pendingDeleteTarget, setPendingDeleteTarget] = useState<IntegrationTarget | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const [
+    loadTargetsAction,
+    pickIntegrationDirectory,
+    addIntegrationTarget,
+    removeIntegrationTarget,
+  ] = useActions(AGENT_LIST_ACTIONS)
 
   const loadTargets = useCallback(async () => {
     try {
-      const result = await ipc.integrationListTargets()
-      setTargets(result || [])
+      await loadTargetsAction()
     } catch (err) {
       showToast(String(err), "error")
-    } finally {
-      setLoading(false)
     }
-  }, [showToast])
+  }, [loadTargetsAction, showToast])
 
   useEffect(() => {
     void loadTargets()
@@ -98,8 +118,12 @@ export const AgentListPage: React.FC = () => {
   )
 
   const handlePickDirectory = async (kind: IntegrationClientKind) => {
+    if (isHeadlessRuntime) {
+      showToast(t("agentManagement.headlessDisabled"), "error")
+      return
+    }
     try {
-      const result = await ipc.integrationPickDirectory(undefined, kind)
+      const result = await pickIntegrationDirectory({ kind })
       if (result) {
         setNewDir(result)
         setAddingKind(kind)
@@ -111,11 +135,14 @@ export const AgentListPage: React.FC = () => {
 
   const handleAddDirectory = async () => {
     if (!newDir.trim() || !addingKind) return
+    if (isHeadlessRuntime) {
+      showToast(t("agentManagement.headlessDisabled"), "error")
+      return
+    }
 
     setAddLoading(true)
     try {
-      await ipc.integrationAddTarget(addingKind, newDir.trim())
-      await loadTargets()
+      await addIntegrationTarget({ kind: addingKind, configDir: newDir.trim() })
       setNewDir("")
       setAddingKind(null)
       showToast(t("agentManagement.addSuccess"), "success")
@@ -128,11 +155,14 @@ export const AgentListPage: React.FC = () => {
 
   const handleDelete = async () => {
     if (!pendingDeleteTarget) return
+    if (isHeadlessRuntime) {
+      showToast(t("agentManagement.headlessDisabled"), "error")
+      return
+    }
 
     setDeleteLoading(true)
     try {
-      await ipc.integrationRemoveTarget(pendingDeleteTarget.id)
-      await loadTargets()
+      await removeIntegrationTarget({ targetId: pendingDeleteTarget.id })
       showToast(t("agentManagement.deleteSuccess"), "success")
       setPendingDeleteTarget(null)
     } catch (err) {
@@ -189,6 +219,7 @@ export const AgentListPage: React.FC = () => {
                       size="small"
                       icon={FolderPlus}
                       onClick={() => handlePickDirectory(kind)}
+                      disabled={isHeadlessRuntime}
                     >
                       {t("agentManagement.addConfigDir")}
                     </Button>
@@ -218,7 +249,7 @@ export const AgentListPage: React.FC = () => {
                         size="small"
                         variant="primary"
                         loading={addLoading}
-                        disabled={!newDir.trim()}
+                        disabled={isHeadlessRuntime || !newDir.trim()}
                         onClick={handleAddDirectory}
                       >
                         {t("agentManagement.add")}
@@ -290,6 +321,7 @@ export const AgentListPage: React.FC = () => {
                               variant="danger"
                               icon={Trash2}
                               onClick={() => setPendingDeleteTarget(target)}
+                              disabled={isHeadlessRuntime}
                             >
                               {t("agentManagement.delete")}
                             </Button>
@@ -322,7 +354,12 @@ export const AgentListPage: React.FC = () => {
             >
               {t("agentManagement.cancel")}
             </Button>
-            <Button variant="danger" loading={deleteLoading} onClick={handleDelete}>
+            <Button
+              variant="danger"
+              loading={deleteLoading}
+              onClick={handleDelete}
+              disabled={isHeadlessRuntime}
+            >
               {t("agentManagement.delete")}
             </Button>
           </>

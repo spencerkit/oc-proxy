@@ -45,6 +45,8 @@ pub struct UiConfig {
     pub close_to_tray: bool,
     #[serde(default = "crate::config::schema::default_quota_auto_refresh_minutes")]
     pub quota_auto_refresh_minutes: u32,
+    #[serde(default = "crate::config::schema::default_auto_update_enabled")]
+    pub auto_update_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

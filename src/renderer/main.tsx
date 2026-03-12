@@ -1,3 +1,4 @@
+import { RelaxProvider } from "@relax-state/react"
 import React from "react"
 import ReactDOM from "react-dom/client"
 import { I18nextProvider } from "react-i18next"
@@ -6,7 +7,7 @@ import App from "./App"
 import { ToastContainer } from "./components/common/ToastContainer"
 import { ToastProvider } from "./contexts/ToastContext"
 import i18n, { initI18n, type Locale } from "./i18n"
-import { ipc } from "./utils/ipc"
+import { bridge } from "./utils/bridge"
 import { resolveEffectiveLocale } from "./utils/locale"
 import "./styles.css"
 
@@ -18,7 +19,7 @@ function reportRendererError(payload: {
   source?: string
 }) {
   try {
-    ipc.reportRendererError(payload).catch(error => {
+    bridge.reportRendererError(payload).catch(error => {
       console.warn("[Main] reportRendererError rejected:", error)
     })
   } catch (error) {
@@ -29,7 +30,7 @@ function reportRendererError(payload: {
 /** Reports renderer ready state safely. */
 function reportRendererReady() {
   try {
-    ipc.reportRendererReady().catch(error => {
+    bridge.reportRendererReady().catch(error => {
       console.warn("[Main] reportRendererReady rejected:", error)
     })
   } catch (error) {
@@ -72,9 +73,15 @@ function resolveTheme(theme?: unknown): "light" | "dark" {
 /** Resolves router. */
 function resolveRouter() {
   if (window.__TAURI__) {
-    return HashRouter
+    return { Router: HashRouter, props: {} as const }
   }
-  return window.location.protocol === "file:" ? HashRouter : BrowserRouter
+  if (window.location.protocol === "file:") {
+    return { Router: HashRouter, props: {} as const }
+  }
+  if (window.location.pathname.startsWith("/management")) {
+    return { Router: BrowserRouter, props: { basename: "/management" } as const }
+  }
+  return { Router: BrowserRouter, props: {} as const }
 }
 
 // Initialize i18n before rendering
@@ -83,7 +90,7 @@ async function init() {
   let initialTheme: "light" | "dark" = resolveTheme()
 
   try {
-    const config = await ipc.getConfig()
+    const config = await bridge.getConfig()
     initialLocale = resolveEffectiveLocale({
       locale: config?.ui?.locale,
       localeMode: config?.ui?.localeMode,
@@ -107,17 +114,19 @@ async function init() {
   }
 
   console.log("[Main] Root element found, rendering...")
-  const Router = resolveRouter()
+  const { Router, props: routerProps } = resolveRouter()
 
   ReactDOM.createRoot(rootElement).render(
     <React.StrictMode>
       <I18nextProvider i18n={i18n}>
-        <ToastProvider>
-          <Router>
-            <App />
-            <ToastContainer />
-          </Router>
-        </ToastProvider>
+        <RelaxProvider>
+          <ToastProvider>
+            <Router {...routerProps}>
+              <App />
+              <ToastContainer />
+            </Router>
+          </ToastProvider>
+        </RelaxProvider>
       </I18nextProvider>
     </React.StrictMode>
   )

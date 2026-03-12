@@ -607,6 +607,9 @@ function createMockInitScript(_dataset) {
           snapshot: null,
         }
       },
+      async integration_list_targets() {
+        return []
+      },
     }
 
     const invoke = async (cmd, args) => {

@@ -104,6 +104,26 @@ git commit -m "chore(release): vX.Y.Z"
 - 上传产物 artifact
 - 从 `CHANGELOG.md` 提取当前版本说明
 - 自动创建 GitHub Release 并附带产物
+ - 生成并上传更新清单 `latest.json` 与签名文件（用于自动更新）
+
+## 8. Headless CLI 产物
+
+为了支持 `npm i -g @spencer-kit/aor`，需要额外打包 headless 二进制：
+
+- 二进制名称：`ai-open-router`
+- 产物命名：`ai-open-router-<platform>-<arch>.tar.gz`
+  - 示例：`ai-open-router-darwin-arm64.tar.gz`
+- 同时输出原始二进制与 zip 包：
+  - `ai-open-router-<platform>-<arch>`（或 `.exe`）
+  - `ai-open-router-<platform>-<arch>.zip`
+
+打包脚本：
+
+```bash
+bash ./scripts/package-headless-artifacts.sh
+```
+
+上传到 GitHub Release 后，CLI 安装脚本会自动下载对应版本的产物。
 
 发布前检查清单：
 
@@ -112,6 +132,10 @@ git commit -m "chore(release): vX.Y.Z"
 - `npm run version:check` 通过
 - `CHANGELOG.md` 含目标版本段落（`## vX.Y.Z - YYYY-MM-DD`）
 - `release:plan` 与预期 bump 一致
+- GitHub Actions secrets 已配置：
+  - `TAURI_SIGNING_PRIVATE_KEY`
+  - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（如私钥加密）
+  - `NPM_TOKEN`（发布 `@spencer-kit/aor`）
 
 ## 6. 回滚与修复发布
 

@@ -1,0 +1,674 @@
+import { action } from "@relax-state/core"
+import type {
+  AppInfo,
+  ClipboardTextResult,
+  Group,
+  GroupBackupExportResult,
+  GroupBackupImportResult,
+  ProviderModelTestResult,
+  ProxyConfig,
+  RemoteRulesPullResult,
+  RemoteRulesUploadResult,
+  RuleQuotaConfig,
+  RuleQuotaTestResult,
+  StatsDimension,
+} from "@/types"
+import { bridge } from "@/utils/bridge"
+import {
+  activeGroupIdState,
+  bootstrapErrorState,
+  bootstrappingState,
+  configState,
+  errorState,
+  lastOperationErrorState,
+  loadingState,
+  logsErrorState,
+  logsState,
+  logsStatsState,
+  providerCardStatsByProviderKeyState,
+  providerQuotasState,
+  quotaErrorState,
+  quotaLoadingProviderKeysState,
+  savingConfigState,
+  serverActionState,
+  statsErrorState,
+  statusErrorState,
+  statusIntervalIdState,
+  statusState,
+} from "./proxyState"
+import { persistActiveGroupId } from "./proxyStorage"
+
+const STATUS_POLL_INTERVAL = 3000
+const MAX_LOGS = 100
+let statusRefreshInFlight = false
+
+const quotaKey = (groupId: string, providerId: string) => `${groupId}:${providerId}`
+
+function createDefaultConfig(): ProxyConfig {
+  return {
+    server: {
+      host: "0.0.0.0",
+      port: 8899,
+      authEnabled: false,
+      localBearerToken: "",
+    },
+    compat: {
+      strictMode: false,
+      textToolCallFallbackEnabled: true,
+    },
+    logging: {
+      captureBody: false,
+    },
+    ui: {
+      theme: "light",
+      locale: "en-US",
+      localeMode: "auto",
+      launchOnStartup: false,
+      autoStartServer: true,
+      closeToTray: true,
+      quotaAutoRefreshMinutes: 5,
+      autoUpdateEnabled: true,
+    },
+    remoteGit: {
+      enabled: false,
+      repoUrl: "",
+      token: "",
+      branch: "main",
+    },
+    providers: [],
+    groups: [],
+  }
+}
+
+function normalizeGroup(
+  group: Partial<Group> & Pick<Group, "id" | "name">,
+  globalProviderMap?: Map<string, Group["providers"][number]>
+): Group {
+  const fallbackProviders = group.providers ?? group.rules ?? []
+  const providerIds = (group.providerIds ?? fallbackProviders.map(provider => provider.id))
+    .map(providerId => providerId?.trim())
+    .filter((providerId): providerId is string => Boolean(providerId))
+  const resolvedProviders = providerIds
+    .map(providerId => globalProviderMap?.get(providerId))
+    .filter((provider): provider is Group["providers"][number] => Boolean(provider))
+  const providers = resolvedProviders.length > 0 ? resolvedProviders : fallbackProviders
+  const activeProviderId = group.activeProviderId ?? group.activeRuleId ?? null
+  return {
+    ...group,
+    providerIds,
+    providers,
+    activeProviderId,
+    rules: providers,
+    activeRuleId: activeProviderId,
+    models: group.models ?? [],
+  }
+}
+
+function normalizeConfig(config: ProxyConfig | null | undefined): ProxyConfig {
+  const defaults = createDefaultConfig()
+  const input = config ?? defaults
+  const safeConfig: ProxyConfig = {
+    ...defaults,
+    ...input,
+    server: { ...defaults.server, ...(input.server ?? {}) },
+    compat: { ...defaults.compat, ...(input.compat ?? {}) },
+    logging: { ...defaults.logging, ...(input.logging ?? {}) },
+    ui: { ...defaults.ui, ...(input.ui ?? {}) },
+    remoteGit: { ...defaults.remoteGit, ...(input.remoteGit ?? {}) },
+    providers: Array.isArray(input.providers) ? input.providers : [],
+    groups: Array.isArray(input.groups) ? input.groups : [],
+  }
+  const dedupedProviderMap = new Map<string, Group["providers"][number]>()
+  for (const provider of safeConfig.providers ?? []) {
+    if (!provider?.id?.trim()) continue
+    dedupedProviderMap.set(provider.id, { ...provider })
+  }
+  for (const group of safeConfig.groups ?? []) {
+    for (const provider of group.providers ?? group.rules ?? []) {
+      if (!provider?.id?.trim() || dedupedProviderMap.has(provider.id)) continue
+      dedupedProviderMap.set(provider.id, { ...provider })
+    }
+  }
+  const normalizedProviders = [...dedupedProviderMap.values()]
+  const globalProviderMap = new Map(
+    normalizedProviders.map(provider => [provider.id, provider] as const)
+  )
+  return {
+    ...safeConfig,
+    ui: {
+      ...safeConfig.ui,
+      autoUpdateEnabled: safeConfig.ui.autoUpdateEnabled ?? true,
+    },
+    providers: normalizedProviders,
+    compat: {
+      ...safeConfig.compat,
+      textToolCallFallbackEnabled: safeConfig.compat.textToolCallFallbackEnabled ?? true,
+    },
+    groups: (safeConfig.groups ?? []).map(group =>
+      normalizeGroup(group as Partial<Group> & Pick<Group, "id" | "name">, globalProviderMap)
+    ),
+  }
+}
+
+function buildSaveConfigPayload(config: ProxyConfig): ProxyConfig {
+  const globalProviderMap = new Map<string, Group["providers"][number]>()
+  for (const provider of config.providers ?? []) {
+    if (!provider?.id?.trim()) continue
+    globalProviderMap.set(provider.id, { ...provider })
+  }
+  for (const group of config.groups ?? []) {
+    for (const provider of group.providers ?? group.rules ?? []) {
+      if (!provider?.id?.trim() || globalProviderMap.has(provider.id)) continue
+      globalProviderMap.set(provider.id, { ...provider })
+    }
+  }
+  const globalProviders = [...globalProviderMap.values()]
+  const providerById = new Map(globalProviders.map(provider => [provider.id, provider] as const))
+  return {
+    ...config,
+    providers: globalProviders,
+    groups: (config.groups ?? []).map(group => {
+      const providers = group.providers ?? group.rules ?? []
+      const providerIds = (group.providerIds ?? providers.map(provider => provider.id))
+        .map(providerId => providerId?.trim())
+        .filter((providerId): providerId is string => Boolean(providerId))
+      const activeProviderId = group.activeProviderId ?? group.activeRuleId ?? null
+      const resolvedProviders = providerIds
+        .map(providerId => providerById.get(providerId))
+        .filter((provider): provider is Group["providers"][number] => Boolean(provider))
+      return {
+        id: group.id,
+        name: group.name,
+        models: group.models ?? [],
+        providerIds,
+        providers: resolvedProviders,
+        activeProviderId,
+      } as Group
+    }),
+  }
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error
+  }
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === "string" && message.trim()) {
+      return message
+    }
+  }
+  return fallback
+}
+
+function requirePayload<P>(payload: P | undefined, name: string): P {
+  if (payload === undefined) {
+    throw new Error(`${name} requires a payload`)
+  }
+  return payload
+}
+
+export const initAction = action<void, Promise<void>>(async store => {
+  try {
+    store.set(loadingState, true)
+    store.set(errorState, null)
+    store.set(bootstrappingState, true)
+    store.set(bootstrapErrorState, null)
+    store.set(lastOperationErrorState, null)
+
+    const [rawConfig, status] = await Promise.all([bridge.getConfig(), bridge.getStatus()])
+    const config = normalizeConfig(rawConfig)
+    const logsStats = await bridge
+      .getLogsStatsSummary(undefined, undefined, undefined, "rule", false)
+      .catch(error => {
+        const errorMessage = getErrorMessage(error, "Failed to load logs stats")
+        store.set(statsErrorState, errorMessage)
+        store.set(lastOperationErrorState, errorMessage)
+        return null
+      })
+
+    store.set(configState, config)
+    store.set(statusState, status)
+    store.set(logsStatsState, logsStats)
+    store.set(loadingState, false)
+    store.set(bootstrappingState, false)
+    store.set(bootstrapErrorState, null)
+
+    startPollingAction()
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to initialize")
+    store.set(loadingState, false)
+    store.set(errorState, errorMessage)
+    store.set(bootstrappingState, false)
+    store.set(bootstrapErrorState, errorMessage)
+    store.set(lastOperationErrorState, errorMessage)
+  }
+})
+
+export const refreshStatusAction = action<void, Promise<void>>(async store => {
+  if (statusRefreshInFlight) {
+    return
+  }
+
+  statusRefreshInFlight = true
+  try {
+    const status = await bridge.getStatus()
+    store.set(statusState, status)
+    store.set(statusErrorState, null)
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to refresh status")
+    store.set(statusErrorState, errorMessage)
+    store.set(lastOperationErrorState, errorMessage)
+  } finally {
+    statusRefreshInFlight = false
+  }
+})
+
+export const refreshLogsAction = action<void, Promise<void>>(async store => {
+  try {
+    const logs = await bridge.listLogs(MAX_LOGS)
+    store.set(logsState, logs)
+    store.set(logsErrorState, null)
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to refresh logs")
+    store.set(logsErrorState, errorMessage)
+    store.set(lastOperationErrorState, errorMessage)
+  }
+})
+
+export const refreshLogsStatsAction = action<
+  {
+    hours?: number
+    ruleKeys?: string[]
+    ruleKey?: string
+    dimension?: StatsDimension
+    enableComparison?: boolean
+  },
+  Promise<void>
+>(async (store, payload) => {
+  try {
+    const request = requirePayload(payload, "refreshLogsStatsAction")
+    const logsStats = await bridge.getLogsStatsSummary(
+      request.hours,
+      request.ruleKeys,
+      request.ruleKey,
+      request.dimension,
+      request.enableComparison
+    )
+    store.set(logsStatsState, logsStats)
+    store.set(statsErrorState, null)
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to refresh logs stats")
+    store.set(statsErrorState, errorMessage)
+    store.set(lastOperationErrorState, errorMessage)
+  }
+})
+
+export const saveConfigAction = action<ProxyConfig, Promise<void>>(async (store, config) => {
+  try {
+    const nextConfig = requirePayload(config, "saveConfigAction")
+    store.set(savingConfigState, true)
+    store.set(lastOperationErrorState, null)
+
+    const result = await bridge.saveConfig(buildSaveConfigPayload(normalizeConfig(nextConfig)))
+
+    store.set(configState, normalizeConfig(result.config))
+    store.set(statusState, result.status)
+    store.set(savingConfigState, false)
+    store.set(lastOperationErrorState, null)
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to save configuration")
+    store.set(savingConfigState, false)
+    store.set(lastOperationErrorState, errorMessage)
+    throw new Error(errorMessage)
+  }
+})
+
+export const exportGroupsBackupAction = action<void, Promise<GroupBackupExportResult>>(
+  async store => {
+    try {
+      store.set(lastOperationErrorState, null)
+      return await bridge.exportGroupsBackup()
+    } catch (error) {
+      const errorMessage = getErrorMessage(error, "Failed to export group backup")
+      store.set(lastOperationErrorState, errorMessage)
+      throw error
+    }
+  }
+)
+
+export const exportGroupsToFolderAction = action<void, Promise<GroupBackupExportResult>>(
+  async store => {
+    try {
+      store.set(lastOperationErrorState, null)
+      return await bridge.exportGroupsToFolder()
+    } catch (error) {
+      const errorMessage = getErrorMessage(error, "Failed to export group backup")
+      store.set(lastOperationErrorState, errorMessage)
+      throw error
+    }
+  }
+)
+
+export const exportGroupsToClipboardAction = action<void, Promise<GroupBackupExportResult>>(
+  async store => {
+    try {
+      store.set(lastOperationErrorState, null)
+      return await bridge.exportGroupsToClipboard()
+    } catch (error) {
+      const errorMessage = getErrorMessage(error, "Failed to export group backup")
+      store.set(lastOperationErrorState, errorMessage)
+      throw error
+    }
+  }
+)
+
+export const importGroupsBackupAction = action<void, Promise<GroupBackupImportResult>>(
+  async store => {
+    try {
+      store.set(savingConfigState, true)
+      store.set(lastOperationErrorState, null)
+      const result = await bridge.importGroupsBackup()
+
+      if (!result.canceled && result.config && result.status) {
+        store.set(configState, normalizeConfig(result.config))
+        store.set(statusState, result.status)
+        store.set(savingConfigState, false)
+      } else {
+        store.set(savingConfigState, false)
+      }
+
+      return result
+    } catch (error) {
+      const errorMessage = getErrorMessage(error, "Failed to import group backup")
+      store.set(savingConfigState, false)
+      store.set(lastOperationErrorState, errorMessage)
+      throw error
+    }
+  }
+)
+
+export const importGroupsFromJsonAction = action<
+  { jsonText: string },
+  Promise<GroupBackupImportResult>
+>(async (store, payload) => {
+  try {
+    const request = requirePayload(payload, "importGroupsFromJsonAction")
+    store.set(savingConfigState, true)
+    store.set(lastOperationErrorState, null)
+    const result = await bridge.importGroupsFromJson(request.jsonText)
+
+    if (!result.canceled && result.config && result.status) {
+      store.set(configState, normalizeConfig(result.config))
+      store.set(statusState, result.status)
+      store.set(savingConfigState, false)
+    } else {
+      store.set(savingConfigState, false)
+    }
+
+    return result
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to import group backup")
+    store.set(savingConfigState, false)
+    store.set(lastOperationErrorState, errorMessage)
+    throw error
+  }
+})
+
+export const remoteRulesUploadAction = action<
+  { force?: boolean },
+  Promise<RemoteRulesUploadResult>
+>(async (store, payload) => {
+  try {
+    const request = payload ?? {}
+    store.set(lastOperationErrorState, null)
+    return await bridge.remoteRulesUpload(request.force)
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to upload remote rules")
+    store.set(lastOperationErrorState, errorMessage)
+    throw error
+  }
+})
+
+export const remoteRulesPullAction = action<{ force?: boolean }, Promise<RemoteRulesPullResult>>(
+  async (store, payload) => {
+    try {
+      const request = payload ?? {}
+      store.set(lastOperationErrorState, null)
+      const result = await bridge.remoteRulesPull(request.force)
+      if (result.config && result.status) {
+        store.set(configState, normalizeConfig(result.config))
+        store.set(statusState, result.status)
+      }
+      return result
+    } catch (error) {
+      const errorMessage = getErrorMessage(error, "Failed to pull remote rules")
+      store.set(lastOperationErrorState, errorMessage)
+      throw error
+    }
+  }
+)
+
+export const readClipboardTextAction = action<void, Promise<ClipboardTextResult>>(async store => {
+  try {
+    store.set(lastOperationErrorState, null)
+    return await bridge.readClipboardText()
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to read clipboard")
+    store.set(lastOperationErrorState, errorMessage)
+    throw error
+  }
+})
+
+export const setActiveGroupIdAction = action<{ groupId: string | null }, void>((store, payload) => {
+  const request = requirePayload(payload, "setActiveGroupIdAction")
+  persistActiveGroupId(request.groupId)
+  store.set(activeGroupIdState, request.groupId)
+})
+
+export const clearLogsAction = action<void, Promise<void>>(async store => {
+  try {
+    await bridge.clearLogs()
+    store.set(logsState, [])
+    store.set(logsErrorState, null)
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to clear logs")
+    store.set(logsErrorState, errorMessage)
+    store.set(lastOperationErrorState, errorMessage)
+  }
+})
+
+export const clearLogsStatsAction = action<{ beforeEpochMs?: number }, Promise<void>>(
+  async (store, payload) => {
+    try {
+      const request = payload ?? {}
+      await bridge.clearLogsStats(request.beforeEpochMs)
+      store.set(logsStatsState, null)
+      store.set(statsErrorState, null)
+    } catch (error) {
+      const errorMessage = getErrorMessage(error, "Failed to clear logs stats")
+      store.set(statsErrorState, errorMessage)
+      store.set(lastOperationErrorState, errorMessage)
+      throw error
+    }
+  }
+)
+
+export const fetchGroupQuotasAction = action<{ groupId: string }, Promise<void>>(
+  async (store, payload) => {
+    try {
+      const request = requirePayload(payload, "fetchGroupQuotasAction")
+      if (!request.groupId.trim()) return
+      store.set(quotaErrorState, null)
+      const snapshots = await bridge.getGroupQuotas(request.groupId)
+      const current = store.get(providerQuotasState)
+      const next = { ...current }
+      for (const snapshot of snapshots) {
+        next[quotaKey(snapshot.groupId, snapshot.ruleId)] = snapshot
+      }
+      store.set(providerQuotasState, next)
+    } catch (error) {
+      const errorMessage = getErrorMessage(error, "Failed to fetch group quotas")
+      store.set(quotaErrorState, errorMessage)
+      store.set(lastOperationErrorState, errorMessage)
+      throw error
+    }
+  }
+)
+
+export const fetchGroupProviderCardStatsAction = action<
+  { groupId: string; hours?: number },
+  Promise<void>
+>(async (store, payload) => {
+  try {
+    const request = requirePayload(payload, "fetchGroupProviderCardStatsAction")
+    if (!request.groupId.trim()) return
+    store.set(statsErrorState, null)
+    const items = await bridge.getRuleCardStats(request.groupId, request.hours)
+    const current = store.get(providerCardStatsByProviderKeyState)
+    const next = { ...current }
+    const groupPrefix = `${request.groupId}:`
+    for (const key of Object.keys(next)) {
+      if (key.startsWith(groupPrefix)) {
+        delete next[key]
+      }
+    }
+    for (const item of items) {
+      next[quotaKey(item.groupId, item.ruleId)] = item
+    }
+    store.set(providerCardStatsByProviderKeyState, next)
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to fetch group provider card stats")
+    store.set(statsErrorState, errorMessage)
+    store.set(lastOperationErrorState, errorMessage)
+    throw error
+  }
+})
+
+export const fetchProviderQuotaAction = action<
+  { groupId: string; providerId: string },
+  Promise<void>
+>(async (store, payload) => {
+  const request = requirePayload(payload, "fetchProviderQuotaAction")
+  const key = quotaKey(request.groupId, request.providerId)
+  try {
+    store.set(quotaErrorState, null)
+    store.set(quotaLoadingProviderKeysState, {
+      ...store.get(quotaLoadingProviderKeysState),
+      [key]: true,
+    })
+    const snapshot = await bridge.getProviderQuota(request.groupId, request.providerId)
+    store.set(providerQuotasState, {
+      ...store.get(providerQuotasState),
+      [key]: snapshot,
+    })
+    store.set(quotaLoadingProviderKeysState, {
+      ...store.get(quotaLoadingProviderKeysState),
+      [key]: false,
+    })
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to fetch provider quota")
+    store.set(quotaErrorState, errorMessage)
+    store.set(lastOperationErrorState, errorMessage)
+    store.set(quotaLoadingProviderKeysState, {
+      ...store.get(quotaLoadingProviderKeysState),
+      [key]: false,
+    })
+    throw error
+  }
+})
+
+export const startPollingAction = action<void, void>(store => {
+  const currentIntervalId = store.get(statusIntervalIdState)
+  if (currentIntervalId !== null) {
+    window.clearInterval(currentIntervalId)
+  }
+
+  const statusIntervalId = window.setInterval(() => {
+    if (document.visibilityState !== "visible") {
+      return
+    }
+    refreshStatusAction()
+  }, STATUS_POLL_INTERVAL)
+
+  store.set(statusIntervalIdState, statusIntervalId)
+})
+
+export const stopPollingAction = action<void, void>(store => {
+  const currentIntervalId = store.get(statusIntervalIdState)
+  if (currentIntervalId !== null) {
+    window.clearInterval(currentIntervalId)
+    store.set(statusIntervalIdState, null)
+  }
+})
+
+export const startServerAction = action<void, Promise<void>>(async store => {
+  try {
+    store.set(serverActionState, "starting")
+    store.set(lastOperationErrorState, null)
+    const status = await bridge.startServer()
+    store.set(statusState, status)
+    store.set(serverActionState, null)
+    store.set(statusErrorState, null)
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to start server")
+    store.set(serverActionState, null)
+    store.set(statusErrorState, errorMessage)
+    store.set(lastOperationErrorState, errorMessage)
+    throw new Error(errorMessage)
+  }
+})
+
+export const stopServerAction = action<void, Promise<void>>(async store => {
+  try {
+    store.set(serverActionState, "stopping")
+    store.set(lastOperationErrorState, null)
+    const status = await bridge.stopServer()
+    store.set(statusState, status)
+    store.set(serverActionState, null)
+    store.set(statusErrorState, null)
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to stop server")
+    store.set(serverActionState, null)
+    store.set(statusErrorState, errorMessage)
+    store.set(lastOperationErrorState, errorMessage)
+    throw new Error(errorMessage)
+  }
+})
+
+export const testProviderModelAction = action<
+  { groupId: string; providerId: string },
+  Promise<ProviderModelTestResult>
+>(async (_store, payload) => {
+  const request = requirePayload(payload, "testProviderModelAction")
+  return await bridge.testProviderModel(request.groupId, request.providerId)
+})
+
+export const testRuleQuotaDraftAction = action<
+  {
+    groupId: string
+    name: string
+    token: string
+    apiAddress: string
+    defaultModel: string
+    quotaConfig: RuleQuotaConfig
+  },
+  Promise<RuleQuotaTestResult>
+>(async (_store, payload) => {
+  const request = requirePayload(payload, "testRuleQuotaDraftAction")
+  return await bridge.testRuleQuotaDraft(
+    request.groupId,
+    request.name,
+    request.token,
+    request.apiAddress,
+    request.defaultModel,
+    request.quotaConfig
+  )
+})
+
+export const getAppInfoAction = action<void, Promise<AppInfo>>(async () => {
+  return await bridge.getAppInfo()
+})

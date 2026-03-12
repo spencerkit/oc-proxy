@@ -5,8 +5,11 @@
  * Provides config selector and saveConfig action.
  */
 
-import { useProxyStore } from "@/store"
+import { configState, lastOperationErrorState, saveConfigAction, savingConfigState } from "@/store"
 import type { ProxyConfig } from "@/types"
+import { useActions, useRelaxValue } from "@/utils/relax"
+
+const CONFIG_ACTIONS = [saveConfigAction] as const
 
 /**
  * Hook for accessing proxy configuration
@@ -23,10 +26,10 @@ import type { ProxyConfig } from "@/types"
  * await saveConfig(updatedConfig);
  */
 export function useProxyConfig() {
-  const config = useProxyStore(state => state.config)
-  const saveConfig = useProxyStore(state => state.saveConfig)
-  const savingConfig = useProxyStore(state => state.savingConfig)
-  const error = useProxyStore(state => state.lastOperationError)
+  const config = useRelaxValue(configState)
+  const savingConfig = useRelaxValue(savingConfigState)
+  const error = useRelaxValue(lastOperationErrorState)
+  const [saveConfig] = useActions(CONFIG_ACTIONS)
 
   return {
     config,
@@ -48,7 +51,7 @@ export function useProxyConfig() {
  * const port = config?.server.port;
  */
 export function useConfigValue(): ProxyConfig | null {
-  return useProxyStore(state => state.config)
+  return useRelaxValue(configState)
 }
 
 /**
@@ -62,5 +65,6 @@ export function useConfigValue(): ProxyConfig | null {
  * await saveConfig(updatedConfig);
  */
 export function useSaveConfigAction(): (config: ProxyConfig) => Promise<void> {
-  return useProxyStore(state => state.saveConfig)
+  const [saveConfig] = useActions(CONFIG_ACTIONS)
+  return saveConfig
 }

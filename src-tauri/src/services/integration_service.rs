@@ -21,6 +21,7 @@ use url::Url;
 
 const SOURCE_PRIMARY: &str = "primary";
 const SOURCE_AUTH: &str = "auth";
+const HEADLESS_DEFAULT_PREFIX: &str = "default";
 
 /// Writes debug log to a file in app data directory.
 fn write_debug_log(message: &str) {
@@ -38,9 +39,68 @@ fn write_debug_log(message: &str) {
     eprintln!("{}", message);
 }
 
+fn user_home_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+fn headless_default_id(kind: &IntegrationClientKind) -> String {
+    let label = match kind {
+        IntegrationClientKind::Claude => "claude",
+        IntegrationClientKind::Codex => "codex",
+        IntegrationClientKind::Opencode => "opencode",
+    };
+    format!("{HEADLESS_DEFAULT_PREFIX}:{label}")
+}
+
+fn build_default_target(kind: IntegrationClientKind, config_dir: PathBuf) -> IntegrationTarget {
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    IntegrationTarget {
+        id: headless_default_id(&kind),
+        kind,
+        config_dir: config_dir.to_string_lossy().to_string(),
+        config: None,
+        created_at: timestamp.clone(),
+        updated_at: timestamp,
+    }
+}
+
+pub fn list_default_targets() -> Vec<IntegrationTarget> {
+    let Some(home) = user_home_dir() else {
+        return Vec::new();
+    };
+
+    vec![
+        build_default_target(IntegrationClientKind::Claude, home.join(".claude")),
+        build_default_target(IntegrationClientKind::Codex, home.join(".codex")),
+        build_default_target(IntegrationClientKind::Opencode, home.join(".opencode")),
+    ]
+}
+
 /// Performs list targets.
 pub fn list_targets(state: &SharedState) -> Vec<IntegrationTarget> {
     state.integration_store.list()
+}
+
+fn resolve_target_by_id(
+    targets: &[IntegrationTarget],
+    target_id: &str,
+) -> AppResult<IntegrationTarget> {
+    let normalized_id = target_id.trim();
+    if normalized_id.is_empty() {
+        return Err(AppError::validation("target id is required"));
+    }
+    targets
+        .iter()
+        .find(|target| target.id == normalized_id)
+        .cloned()
+        .ok_or_else(|| AppError::not_found(format!("target not found: {}", normalized_id)))
 }
 
 /// Adds target for this module's workflow.
@@ -81,6 +141,17 @@ pub fn write_group_entry(
     group_id: &str,
     target_ids: Vec<String>,
 ) -> AppResult<IntegrationWriteResult> {
+    let targets = state.integration_store.list();
+    write_group_entry_with_targets(state, group_id, targets, target_ids)
+}
+
+/// Writes selected targets with current group entry URL using explicit target list.
+pub fn write_group_entry_with_targets(
+    state: &SharedState,
+    group_id: &str,
+    targets: Vec<IntegrationTarget>,
+    target_ids: Vec<String>,
+) -> AppResult<IntegrationWriteResult> {
     let normalized_group_id = group_id.trim();
     if normalized_group_id.is_empty() {
         return Err(AppError::validation("group id is required"));
@@ -101,7 +172,6 @@ pub fn write_group_entry(
     }
 
     let entry_url = build_group_entry_url(state, &config, normalized_group_id);
-    let targets = state.integration_store.list();
     let target_map: HashMap<String, IntegrationTarget> = targets
         .into_iter()
         .map(|target| (target.id.clone(), target))
@@ -130,6 +200,25 @@ pub fn write_group_entry(
             });
             continue;
         };
+
+        let config_dir = PathBuf::from(target.config_dir.trim());
+        if target.id.starts_with(HEADLESS_DEFAULT_PREFIX) && !is_wsl_path(&config_dir) {
+            if !config_dir.exists() {
+                failed += 1;
+                items.push(IntegrationWriteItem {
+                    target_id: target.id.clone(),
+                    kind: Some(target.kind.clone()),
+                    config_dir: target.config_dir.clone(),
+                    file_path: None,
+                    ok: false,
+                    message: Some(
+                        "config directory not found. Please confirm the installation path."
+                            .to_string(),
+                    ),
+                });
+                continue;
+            }
+        }
 
         match write_target_entry(target, &entry_url) {
             Ok(file_path) => {
@@ -757,10 +846,15 @@ base_url = "http://should-not-change"
 /// Reads Agent configuration file content.
 pub fn read_agent_config(state: &SharedState, target_id: &str) -> AppResult<AgentConfigFile> {
     let targets = state.integration_store.list();
-    let target = targets
-        .into_iter()
-        .find(|t| t.id == target_id)
-        .ok_or_else(|| AppError::not_found(format!("target not found: {}", target_id)))?;
+    read_agent_config_with_targets(targets, target_id)
+}
+
+/// Reads Agent configuration file content using explicit target list.
+pub fn read_agent_config_with_targets(
+    targets: Vec<IntegrationTarget>,
+    target_id: &str,
+) -> AppResult<AgentConfigFile> {
+    let target = resolve_target_by_id(&targets, target_id)?;
 
     let config_dir = PathBuf::from(&target.config_dir);
 
@@ -1075,10 +1169,17 @@ pub fn write_agent_config(
     config: AgentConfig,
 ) -> AppResult<WriteAgentConfigResult> {
     let targets = state.integration_store.list();
-    let target = targets
-        .into_iter()
-        .find(|t| t.id == target_id)
-        .ok_or_else(|| AppError::not_found(format!("target not found: {}", target_id)))?;
+    write_agent_config_with_targets(Some(state), targets, target_id, config)
+}
+
+/// Writes Agent configuration to file using explicit target list.
+pub fn write_agent_config_with_targets(
+    state: Option<&SharedState>,
+    targets: Vec<IntegrationTarget>,
+    target_id: &str,
+    config: AgentConfig,
+) -> AppResult<WriteAgentConfigResult> {
+    let target = resolve_target_by_id(&targets, target_id)?;
 
     let config_dir = PathBuf::from(&target.config_dir);
 
@@ -1094,11 +1195,13 @@ pub fn write_agent_config(
         IntegrationClientKind::Codex => write_codex_full_config(&config_dir, &config)?,
     };
 
-    // Update stored config
-    let _ =
-        state
-            .integration_store
-            .update_target_config(target_id, target.config_dir, Some(config));
+    if let Some(state) = state {
+        let _ = state.integration_store.update_target_config(
+            target_id,
+            target.config_dir,
+            Some(config),
+        );
+    }
 
     Ok(WriteAgentConfigResult {
         ok: true,
@@ -1116,10 +1219,18 @@ pub fn write_agent_config_source(
     source_id: Option<&str>,
 ) -> AppResult<WriteAgentConfigResult> {
     let targets = state.integration_store.list();
-    let target = targets
-        .into_iter()
-        .find(|t| t.id == target_id)
-        .ok_or_else(|| AppError::not_found(format!("target not found: {}", target_id)))?;
+    write_agent_config_source_with_targets(Some(state), targets, target_id, content, source_id)
+}
+
+/// Writes raw agent configuration source to file using explicit target list.
+pub fn write_agent_config_source_with_targets(
+    state: Option<&SharedState>,
+    targets: Vec<IntegrationTarget>,
+    target_id: &str,
+    content: &str,
+    source_id: Option<&str>,
+) -> AppResult<WriteAgentConfigResult> {
+    let target = resolve_target_by_id(&targets, target_id)?;
 
     let config_dir = PathBuf::from(&target.config_dir);
     let config_dir = match normalize_wsl_path(&config_dir) {
@@ -1160,10 +1271,13 @@ pub fn write_agent_config_source(
         }
         _ => parse_agent_config(&target.kind, &parsed_root).ok(),
     };
-    let _ =
-        state
-            .integration_store
-            .update_target_config(target_id, target.config_dir, parsed_config);
+    if let Some(state) = state {
+        let _ = state.integration_store.update_target_config(
+            target_id,
+            target.config_dir,
+            parsed_config,
+        );
+    }
 
     Ok(WriteAgentConfigResult {
         ok: true,

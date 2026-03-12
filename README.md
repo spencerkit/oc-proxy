@@ -1,37 +1,32 @@
 # AI Open Router
 
-A desktop local AI gateway for **protocol switching, token/quota stats, and cloud backup**.
+A desktop local AI gateway for **protocol switching, token/quota stats, cloud backup, and auto updates**.
 
 中文文档: [docs/zh/README.md](docs/zh/README.md)
 
 ## Why AI Open Router
 
 - Keep one stable local endpoint while switching upstream providers.
-- Route by group and toggle active rule instantly.
+- Route by group and toggle active provider instantly.
 - Track token usage and request quality in one place.
 - Back up and restore routing configs with Remote Git.
+- Auto-update the desktop app from GitHub Releases.
 
 ## Core Features
 
 | Feature | Value | Where |
 | --- | --- | --- |
 | Protocol switching | Bridge OpenAI-compatible and Anthropic request styles | Service page |
-| Quota stats | Show per-rule quota status (`ok` / `low` / `empty`) | Rule cards |
+| Quota stats | Show per-provider quota status (`ok` / `low` / `empty`) | Provider cards |
 | Token stats | Inspect per-request usage and aggregated trends | Logs page |
-| Cloud backup (Git) | Upload/pull group+rule backups with conflict confirmation | Settings page |
+| Cloud backup (Git) | Upload/pull group+provider backups with conflict confirmation | Settings page |
+| Auto updates | Check GitHub Releases and install updates automatically | Settings page |
 
 ## 3-Minute Quick Start
 
-### 1) Run the app (from source)
+### 1) Launch the app
 
-```bash
-npm install
-npm start
-```
-
-Default bind: `0.0.0.0:8899`
-- `http://localhost:8899`
-- `http://<your-lan-ip>:8899`
+Open the desktop app from your system launcher.
 
 ### 2) Create a group
 
@@ -39,34 +34,23 @@ Default bind: `0.0.0.0:8899`
 2. Set accepted model keys for the group.
 3. The group route prefix becomes `/oc/<groupId>`.
 
-### 3) Add a rule and switch protocol
+### 3) Add providers
 
-1. Add a rule under that group.
+1. Add one or more providers.
 2. Set `protocol`, `token`, upstream API base URL, and default model.
-3. Activate that rule for the group (`activeRuleId`).
 
-### 4) Send one request
+### 4) Associate providers to the group
 
-```bash
-curl http://localhost:8899/oc/claude/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-3-5-sonnet",
-    "messages": [{"role":"user","content":"hi"}]
-  }'
-```
+1. In the group, associate the providers you want to use.
+2. Enable one provider as the active provider for that group.
 
-If local auth is enabled, include:
+### 5) Write config to your agent
 
-```http
-Authorization: Bearer <server.localBearerToken>
-```
+Use the integration panel to write the group config into the agent you use (Claude, Codex, or OpenCode).
 
-### 5) Verify success
+### 6) Switch provider later
 
-- A new successful request appears in Logs.
-- Log detail shows payload and token usage.
-- Stats summary updates (requests/errors/success rate/token metrics).
+Add a new provider, associate it to the group, then enable it as the active provider.
 
 ## Feature Details
 
@@ -80,13 +64,13 @@ Authorization: Bearer <server.localBearerToken>
 - `POST /oc/:groupId` falls back to chat-completions
 - Per request flow:
   1. Resolve `groupId` from path
-  2. Find group + `activeRuleId`
-  3. Forward with active rule
-  4. Translate payloads based on entry protocol and rule protocol
+  2. Find group + `activeProviderId`
+  3. Forward with active provider
+  4. Translate payloads based on entry protocol and provider protocol
 
 ### Quota Stats
 
-Per-rule quota query supports:
+Per-provider quota query supports:
 - `endpoint`, `method`, `authHeader`, `authScheme`
 - `useRuleToken` / `customToken`
 - `response.remaining`, `response.total`, `response.unit`, `response.resetAt`
@@ -119,7 +103,7 @@ Expressions support numeric literals, `+ - * /`, parentheses, and JSONPath-style
 ### Token Stats
 
 - Real-time logs include status, protocol direction, upstream target, and token usage.
-- Aggregated stats can be filtered by time range and rule.
+- Aggregated stats can be filtered by time range and provider.
 - Log details support headers/bodies/errors (when `logging.captureBody` is enabled).
 
 ### Cloud Backup (Remote Git)
@@ -129,9 +113,16 @@ In Settings, configure `repo URL + token + branch` to:
 - Pull remote backup to local state
 - Confirm before overwriting when timestamp conflicts are detected
 
+### Auto Updates
+
+In Settings, enable auto updates to:
+- Check GitHub Releases for new versions
+- Download and install updates in the background
+- See release notes before installing
+
 ## Screenshots
 
-### Service (routing + active rule)
+### Service (routing + active provider)
 
 ![Service Page](docs/assets/screenshots/service-page.png)
 
@@ -139,11 +130,11 @@ In Settings, configure `repo URL + token + branch` to:
 
 ![Group Edit Page](docs/assets/screenshots/group-edit-page.png)
 
-### Rule editor (quota mapping)
+### Provider editor (quota mapping)
 
-![Rule Edit Page](docs/assets/screenshots/rule-edit-page.png)
+![Provider Edit Page](docs/assets/screenshots/rule-edit-page.png)
 
-### Settings (cloud backup)
+### Settings (cloud backup + updates)
 
 ![Settings Page](docs/assets/screenshots/settings-page.png)
 
@@ -161,17 +152,17 @@ In Settings, configure `repo URL + token + branch` to:
 
 Usually no. In most cases, only the base URL changes to `http://localhost:8899/oc/:groupId/...`.
 
-### Can one group have multiple rules?
+### Can one group have multiple providers?
 
-Yes. A group can keep multiple rules, but only one is active at a time.
+Yes. A group can keep multiple providers, but only one is active at a time.
 
 ### Will remote pull overwrite local config?
 
-Yes. Pull/import replaces current groups and rules, so export a local backup first.
+Yes. Pull/import replaces current groups and providers, so export a local backup first.
 
 ### How are tokens stored?
 
-Rule tokens and Remote Git token are currently stored locally in plain text. Use minimum-scope credentials.
+Provider tokens and Remote Git token are currently stored locally in plain text. Use minimum-scope credentials.
 
 ## Docs for Developers
 

@@ -2,25 +2,22 @@ import { ArrowLeft } from "lucide-react"
 import type React from "react"
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { shallow } from "zustand/shallow"
 import { Button, Input } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
-import { useProxyStore } from "@/store"
+import { configState, saveConfigAction } from "@/store"
 import type { ProxyConfig } from "@/types"
+import { useActions, useRelaxValue } from "@/utils/relax"
 import styles from "./GroupEditPage.module.css"
+
+const GROUP_EDIT_ACTIONS = [saveConfigAction] as const
 
 export const GroupEditPage: React.FC = () => {
   const { groupId } = useParams<{ groupId: string }>()
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { showToast } = useLogs()
-  const { config, saveConfig } = useProxyStore(
-    state => ({
-      config: state.config,
-      saveConfig: state.saveConfig,
-    }),
-    shallow
-  )
+  const config = useRelaxValue(configState)
+  const [saveConfig] = useActions(GROUP_EDIT_ACTIONS)
 
   const group = config?.groups.find(item => item.id === groupId)
 

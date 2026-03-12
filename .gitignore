@@ -14,7 +14,14 @@ release
 *.tsbuildinfo
 .env
 .env.*
+.secrets
+secrets/
+secrets/*.key
+secrets/*.pem
+secrets/*.p8
 .playwright-mcp
 src-tauri/target
 src-tauri/gen
 docs/plans
+.tmp/
+packages/aor-cli/vendor/

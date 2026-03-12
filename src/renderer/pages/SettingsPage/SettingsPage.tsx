@@ -1,12 +1,25 @@
 import type React from "react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { shallow } from "zustand/shallow"
 import { Button, Input, Modal, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
-import { useProxyStore } from "@/store"
+import {
+  configState,
+  exportGroupsToClipboardAction,
+  exportGroupsToFolderAction,
+  getAppInfoAction,
+  importGroupsBackupAction,
+  importGroupsFromJsonAction,
+  readClipboardTextAction,
+  remoteRulesPullAction,
+  remoteRulesUploadAction,
+  saveConfigAction,
+  savingConfigState,
+} from "@/store"
 import type { AppInfo, LocaleCode, ProxyConfig, ThemeMode } from "@/types"
-import { ipc } from "@/utils/ipc"
 import { resolveEffectiveLocale } from "@/utils/locale"
+import { useActions, useRelaxValue } from "@/utils/relax"
+import { isHeadlessHttpRuntime } from "@/utils/runtime"
+import { checkForUpdate, installUpdate, readUpdateCache } from "@/utils/updater"
 import styles from "./SettingsPage.module.css"
 
 type ImportSource = "file" | "clipboard"
@@ -24,16 +37,29 @@ const QUOTA_REFRESH_MINUTES_MIN = 1
 const QUOTA_REFRESH_MINUTES_MAX = 1440
 const QUOTA_REFRESH_MINUTES_DEFAULT = 5
 
+const SETTINGS_ACTIONS = [
+  saveConfigAction,
+  exportGroupsToFolderAction,
+  exportGroupsToClipboardAction,
+  importGroupsBackupAction,
+  importGroupsFromJsonAction,
+  remoteRulesPullAction,
+  remoteRulesUploadAction,
+  readClipboardTextAction,
+  getAppInfoAction,
+] as const
+
 /**
  * SettingsPage Component
  * Service settings configuration page
  */
 export const SettingsPage: React.FC = () => {
   const { t } = useTranslation()
-  const {
-    config,
+  const isHeadlessRuntime = isHeadlessHttpRuntime()
+  const config = useRelaxValue(configState)
+  const savingConfig = useRelaxValue(savingConfigState)
+  const [
     saveConfig,
-    savingConfig,
     exportGroupsToFolder,
     exportGroupsToClipboard,
     importGroupsBackup,
@@ -41,21 +67,8 @@ export const SettingsPage: React.FC = () => {
     remoteRulesPull,
     remoteRulesUpload,
     readClipboardText,
-  } = useProxyStore(
-    state => ({
-      config: state.config,
-      saveConfig: state.saveConfig,
-      savingConfig: state.savingConfig,
-      exportGroupsToFolder: state.exportGroupsToFolder,
-      exportGroupsToClipboard: state.exportGroupsToClipboard,
-      importGroupsBackup: state.importGroupsBackup,
-      importGroupsFromJson: state.importGroupsFromJson,
-      remoteRulesPull: state.remoteRulesPull,
-      remoteRulesUpload: state.remoteRulesUpload,
-      readClipboardText: state.readClipboardText,
-    }),
-    shallow
-  )
+    getAppInfo,
+  ] = useActions(SETTINGS_ACTIONS)
   const { showToast } = useLogs()
 
   const [portText, setPortText] = useState("8080")
@@ -70,6 +83,7 @@ export const SettingsPage: React.FC = () => {
   )
   const [theme, setTheme] = useState<ThemeMode>("light")
   const [locale, setLocale] = useState<LocaleCode>("en-US")
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(true)
   const [remoteSyncEnabled, setRemoteSyncEnabled] = useState(false)
   const [remoteRepoUrl, setRemoteRepoUrl] = useState("")
   const [remoteToken, setRemoteToken] = useState("")
@@ -84,10 +98,21 @@ export const SettingsPage: React.FC = () => {
   const [importJsonText, setImportJsonText] = useState("")
   const [readingClipboard, setReadingClipboard] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [remoteSyncAction, setRemoteSyncAction] = useState<RemoteSyncAction>(null)
   const [pendingRemoteConflict, setPendingRemoteConflict] = useState<PendingRemoteConflict>(null)
   const [aboutLoading, setAboutLoading] = useState(false)
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
+  const [updateAvailable, setUpdateAvailable] = useState<{
+    version: string
+    date?: string
+    body?: string
+  } | null>(null)
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateInstalling, setUpdateInstalling] = useState(false)
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
+  const [lastUpdateCheckedAt, setLastUpdateCheckedAt] = useState<string | null>(null)
   const serverSnapshotRef = useRef("")
   const remoteSnapshotRef = useRef("")
   const quotaRefreshSnapshotRef = useRef("")
@@ -141,7 +166,23 @@ export const SettingsPage: React.FC = () => {
         systemLanguage: navigator.language,
       })
     )
+    setAutoUpdateEnabled(config.ui.autoUpdateEnabled ?? true)
   }, [config])
+
+  useEffect(() => {
+    const cache = readUpdateCache()
+    if (cache.lastCheckedAt) setLastUpdateCheckedAt(cache.lastCheckedAt)
+    if (cache.available) {
+      setUpdateAvailable(cache.available)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (appInfo) return
+    void getAppInfo()
+      .then(info => setAppInfo(info))
+      .catch(() => undefined)
+  }, [appInfo, getAppInfo])
 
   const validatePort = useCallback(
     (value: string) => {
@@ -267,7 +308,7 @@ export const SettingsPage: React.FC = () => {
       try {
         setRemoteSyncAction(action)
         if (action === "upload") {
-          const result = await remoteRulesUpload(force)
+          const result = await remoteRulesUpload({ force })
           if (result.needsConfirmation && !force) {
             setPendingRemoteConflict({
               action,
@@ -285,7 +326,7 @@ export const SettingsPage: React.FC = () => {
           return
         }
 
-        const result = await remoteRulesPull(force)
+        const result = await remoteRulesPull({ force })
         if (result.needsConfirmation && !force) {
           setPendingRemoteConflict({
             action,
@@ -371,6 +412,7 @@ export const SettingsPage: React.FC = () => {
       setExporting(true)
       if (exportTarget === "folder") {
         const result = await exportGroupsToFolder()
+        setShowExportModal(false)
         if (!result.canceled) {
           showToast(
             t("settings.backupExportFolderSuccess", { count: result.groupCount }),
@@ -379,6 +421,7 @@ export const SettingsPage: React.FC = () => {
         }
       } else {
         const result = await exportGroupsToClipboard()
+        setShowExportModal(false)
         if (!result.canceled) {
           showToast(
             t("settings.backupExportClipboardSuccess", { count: result.groupCount }),
@@ -386,8 +429,6 @@ export const SettingsPage: React.FC = () => {
           )
         }
       }
-
-      setShowExportModal(false)
     } catch (error) {
       showToast(t("errors.operationFailed", { message: String(error) }), "error")
     } finally {
@@ -400,8 +441,13 @@ export const SettingsPage: React.FC = () => {
     setShowImportModal(true)
   }
 
-  const closeImportModal = () => {
+  const forceCloseImportModal = () => {
     setShowImportModal(false)
+  }
+
+  const closeImportModal = () => {
+    if (importing) return
+    forceCloseImportModal()
   }
 
   const handleReadClipboard = async () => {
@@ -418,20 +464,23 @@ export const SettingsPage: React.FC = () => {
 
   const handleConfirmImport = async () => {
     try {
+      setImporting(true)
       const result =
         importSource === "file"
           ? await importGroupsBackup()
-          : await importGroupsFromJson(importJsonText)
+          : await importGroupsFromJson({ jsonText: importJsonText })
 
+      forceCloseImportModal()
       if (!result.canceled) {
         showToast(
           t("settings.backupImportSuccess", { count: result.importedGroupCount || 0 }),
           "success"
         )
       }
-      closeImportModal()
     } catch (error) {
       showToast(t("errors.operationFailed", { message: String(error) }), "error")
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -441,7 +490,7 @@ export const SettingsPage: React.FC = () => {
 
     try {
       setAboutLoading(true)
-      const info = await ipc.getAppInfo()
+      const info = await getAppInfo()
       setAppInfo(info)
     } catch (error) {
       showToast(t("errors.operationFailed", { message: String(error) }), "error")
@@ -450,7 +499,88 @@ export const SettingsPage: React.FC = () => {
     }
   }
 
+  const handleCheckUpdate = async () => {
+    try {
+      setUpdateChecking(true)
+      setUpdateError(null)
+      const result = await checkForUpdate()
+      setLastUpdateCheckedAt(result.checkedAt)
+      setUpdateAvailable(result.available ? (result.info ?? null) : null)
+      if (result.available && result.info?.version) {
+        showToast(t("toast.updateAvailable", { version: result.info.version }), "info")
+      } else {
+        showToast(t("toast.updateUpToDate"), "success")
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setUpdateError(message)
+      showToast(t("toast.updateFailed", { message }), "error")
+    } finally {
+      setUpdateChecking(false)
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    try {
+      setUpdateInstalling(true)
+      setUpdateProgress(null)
+      setUpdateError(null)
+      showToast(t("toast.updateInstallStarted"), "info")
+      const result = await installUpdate(progress => {
+        if (typeof progress.percent === "number") {
+          setUpdateProgress(progress.percent)
+        }
+      })
+      if (result.installed) {
+        setUpdateAvailable(null)
+        setUpdateProgress(100)
+        showToast(
+          t("toast.updateInstalled", {
+            version: result.version ? ` v${result.version}` : "",
+          }),
+          "success"
+        )
+      } else {
+        showToast(t("toast.updateUpToDate"), "success")
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setUpdateError(message)
+      showToast(t("toast.updateFailed", { message }), "error")
+    } finally {
+      setUpdateInstalling(false)
+    }
+  }
+
   const canConfirmImport = importSource === "file" || importJsonText.trim().length > 0
+
+  const updateStatusText = useMemo(() => {
+    if (updateChecking) return t("settings.updateStatusChecking")
+    if (updateInstalling) {
+      if (typeof updateProgress === "number") {
+        return t("settings.updateStatusInstallingWithProgress", { percent: updateProgress })
+      }
+      return t("settings.updateStatusInstalling")
+    }
+    if (updateError) {
+      return t("settings.updateStatusError", { message: updateError })
+    }
+    if (updateAvailable?.version) {
+      return t("settings.updateStatusAvailable", { version: updateAvailable.version })
+    }
+    if (lastUpdateCheckedAt) {
+      return t("settings.updateStatusUpToDate")
+    }
+    return t("settings.updateStatusIdle")
+  }, [
+    lastUpdateCheckedAt,
+    t,
+    updateAvailable?.version,
+    updateChecking,
+    updateError,
+    updateInstalling,
+    updateProgress,
+  ])
 
   return (
     <div className={styles.settingsPage}>
@@ -463,37 +593,39 @@ export const SettingsPage: React.FC = () => {
 
       <div className={styles.layout}>
         <div className={styles.form}>
-          <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>{t("settings.networkSection")}</h3>
+          {!isHeadlessRuntime && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>{t("settings.networkSection")}</h3>
 
-            <div className={styles.formGroup}>
-              <label htmlFor="port">{t("settings.servicePort")}</label>
-              <Input
-                id="port"
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={portText}
-                onChange={e => handlePortChange(e.target.value)}
-                placeholder="8080"
-                hint={!portError ? t("settings.portHint") : undefined}
-                error={portError || undefined}
-                disabled={savingConfig}
-              />
-            </div>
+              <div className={styles.formGroup}>
+                <label htmlFor="port">{t("settings.servicePort")}</label>
+                <Input
+                  id="port"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={portText}
+                  onChange={e => handlePortChange(e.target.value)}
+                  placeholder="8080"
+                  hint={!portError ? t("settings.portHint") : undefined}
+                  error={portError || undefined}
+                  disabled={savingConfig}
+                />
+              </div>
 
-            <div className={styles.actions}>
-              <Button
-                variant="primary"
-                onClick={handleSaveServer}
-                disabled={!canSaveServer}
-                loading={savingConfig && isServerDirty}
-                type="button"
-              >
-                {t("settings.savePort")}
-              </Button>
+              <div className={styles.actions}>
+                <Button
+                  variant="primary"
+                  onClick={handleSaveServer}
+                  disabled={!canSaveServer}
+                  loading={savingConfig && isServerDirty}
+                  type="button"
+                >
+                  {t("settings.savePort")}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>{t("settings.behaviorSection")}</h3>
@@ -874,6 +1006,77 @@ export const SettingsPage: React.FC = () => {
           </div>
 
           <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>{t("settings.updateSection")}</h3>
+
+            <div className={styles.formGroupSwitch}>
+              <div className={styles.switchLabel}>
+                <label htmlFor="autoUpdateEnabled">{t("settings.autoUpdateEnabled")}</label>
+                <p>{t("settings.autoUpdateEnabledHint")}</p>
+              </div>
+              <Switch
+                id="autoUpdateEnabled"
+                checked={autoUpdateEnabled}
+                disabled={savingConfig}
+                onChange={next => {
+                  setAutoUpdateEnabled(next)
+                  void applyImmediateConfig(current => ({
+                    ...current,
+                    ui: {
+                      ...current.ui,
+                      autoUpdateEnabled: next,
+                    },
+                  }))
+                }}
+              />
+            </div>
+
+            <div className={styles.updateCard}>
+              <div className={styles.updateMeta}>
+                <div>
+                  <span className={styles.updateLabel}>{t("settings.updateCurrentVersion")}</span>
+                  <span>{appInfo?.version ?? "-"}</span>
+                </div>
+                <div>
+                  <span className={styles.updateLabel}>{t("settings.updateLastChecked")}</span>
+                  <span>{formatSyncTime(lastUpdateCheckedAt ?? undefined)}</span>
+                </div>
+              </div>
+              <div className={styles.updateStatus}>{updateStatusText}</div>
+              {updateAvailable?.body && (
+                <details className={styles.updateNotes}>
+                  <summary>{t("settings.updateReleaseNotes")}</summary>
+                  <div className={styles.updateNotesBody}>{updateAvailable.body}</div>
+                </details>
+              )}
+            </div>
+
+            <div className={styles.actions}>
+              <Button
+                variant="default"
+                onClick={handleCheckUpdate}
+                disabled={updateChecking || updateInstalling}
+                loading={updateChecking}
+                type="button"
+              >
+                {t("settings.updateCheckButton")}
+              </Button>
+              {updateAvailable && (
+                <Button
+                  variant="primary"
+                  onClick={handleInstallUpdate}
+                  disabled={updateInstalling || updateChecking}
+                  loading={updateInstalling}
+                  type="button"
+                >
+                  {updateInstalling
+                    ? t("settings.updateInstallingButton")
+                    : t("settings.updateInstallButton")}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className={styles.section}>
             <h3 className={styles.sectionTitle}>{t("settings.aboutSection")}</h3>
 
             <div className={styles.formGroup}>
@@ -987,7 +1190,7 @@ export const SettingsPage: React.FC = () => {
                   variant="default"
                   onClick={handleReadClipboard}
                   loading={readingClipboard}
-                  disabled={savingConfig}
+                  disabled={importing}
                 >
                   {t("settings.readClipboard")}
                 </Button>
@@ -1002,8 +1205,8 @@ export const SettingsPage: React.FC = () => {
             <Button
               variant="danger"
               onClick={handleConfirmImport}
-              disabled={!canConfirmImport}
-              loading={savingConfig}
+              disabled={!canConfirmImport || importing}
+              loading={importing}
             >
               {t("settings.importConfirm")}
             </Button>

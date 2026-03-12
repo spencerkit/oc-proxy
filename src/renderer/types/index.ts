@@ -75,6 +75,13 @@ export interface GroupBackupExportResult {
   charCount?: number
 }
 
+export interface GroupsExportJsonResult {
+  text: string
+  fileName: string
+  groupCount: number
+  charCount: number
+}
+
 export interface GroupBackupImportResult {
   ok: boolean
   canceled: boolean

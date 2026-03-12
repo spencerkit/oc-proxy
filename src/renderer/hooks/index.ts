@@ -44,3 +44,5 @@ export {
   useT,
   useTranslation,
 } from "./useTranslation"
+// Updater hook
+export { useUpdater } from "./useUpdater"

@@ -8,6 +8,7 @@
     "dialog:default",
     "clipboard-manager:default",
     "autostart:default",
-    "log:default"
+    "log:default",
+    "updater:default"
   ]
 }
