@@ -60,14 +60,10 @@ exports.config = {
   onPrepare: () => {
     fs.rmSync(E2E_DATA_DIR, { recursive: true, force: true })
     fs.mkdirSync(E2E_DATA_DIR, { recursive: true })
-    const result = spawnSync(
-      "cargo",
-      ["tauri", "build", "--debug", "--no-bundle"],
-      {
-        cwd: ROOT,
-        stdio: "inherit",
-      }
-    )
+    const result = spawnSync("cargo", ["tauri", "build", "--debug", "--no-bundle"], {
+      cwd: ROOT,
+      stdio: "inherit",
+    })
     if (result.status !== 0) {
       process.exit(result.status ?? 1)
     }
@@ -76,12 +72,7 @@ exports.config = {
     if (!fs.existsSync(TAURI_DRIVER_PATH)) {
       throw new Error(`tauri-driver not found at ${TAURI_DRIVER_PATH}`)
     }
-    const args = [
-      "--port",
-      String(TAURI_DRIVER_PORT),
-      "--native-port",
-      String(TAURI_NATIVE_PORT),
-    ]
+    const args = ["--port", String(TAURI_DRIVER_PORT), "--native-port", String(TAURI_NATIVE_PORT)]
     if (TAURI_NATIVE_DRIVER_PATH) {
       args.push("--native-driver", TAURI_NATIVE_DRIVER_PATH)
     }
