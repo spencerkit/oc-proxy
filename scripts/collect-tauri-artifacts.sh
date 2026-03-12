@@ -11,7 +11,7 @@ TARGET_DIRS=(
 )
 
 mkdir -p "${DIST_DIR}"
-shopt -s nullglob globstar
+shopt -s nullglob
 
 copy_artifact() {
   local source_file="$1"
@@ -69,12 +69,12 @@ for target_dir in "${TARGET_DIRS[@]}"; do
   for file in "${target_dir}"/release/ai-open-router.exe; do
     copy_artifact "${file}"
   done
-  for file in "${target_dir}"/release/**/latest.json; do
+  while IFS= read -r -d '' file; do
     copy_artifact "${file}"
-  done
-  for file in "${target_dir}"/release/**/latest.json.sig; do
+  done < <(find "${target_dir}/release" -name "latest.json" -print0 2>/dev/null || true)
+  while IFS= read -r -d '' file; do
     copy_artifact "${file}"
-  done
+  done < <(find "${target_dir}/release" -name "latest.json.sig" -print0 2>/dev/null || true)
 done
 
 echo "tauri artifacts synced to ${DIST_DIR}"
