@@ -51,8 +51,36 @@ elif command -v python >/dev/null 2>&1; then
   PYTHON_BIN="python"
 fi
 
-if [[ -n "${PYTHON_BIN}" ]]; then
-  "${PYTHON_BIN}" - <<PY
+if [[ "${platform}" == "windows" ]]; then
+  if command -v powershell.exe >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+    dist_win="$(cygpath -w "${DIST_DIR}")"
+    bin_win="$(cygpath -w "${DIST_DIR}/${raw_name}")"
+    zip_win="$(cygpath -w "${DIST_DIR}/${zip_name}")"
+    powershell.exe -NoProfile -Command "Compress-Archive -Path \"${bin_win}\" -DestinationPath \"${zip_win}\" -Force"
+  elif [[ -n "${PYTHON_BIN}" && command -v cygpath >/dev/null 2>&1 ]]; then
+    dist_win="$(cygpath -w "${DIST_DIR}")"
+    bin_win="$(cygpath -w "${DIST_DIR}/${raw_name}")"
+    "${PYTHON_BIN}" - <<PY
+import zipfile
+from pathlib import Path
+
+dist = Path(r"${dist_win}")
+zip_path = dist / "${zip_name}"
+bin_path = Path(r"${bin_win}")
+
+with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    zf.write(bin_path, arcname="${bin_name}")
+PY
+  else
+    echo "zip packaging unavailable on windows; missing powershell.exe or cygpath"
+  fi
+  if [[ ! -f "${DIST_DIR}/${zip_name}" ]]; then
+    echo "zip packaging failed for windows"
+    exit 1
+  fi
+else
+  if [[ -n "${PYTHON_BIN}" ]]; then
+    "${PYTHON_BIN}" - <<PY
 import zipfile
 from pathlib import Path
 
@@ -63,8 +91,9 @@ bin_path = dist / "${raw_name}"
 with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
     zf.write(bin_path, arcname="${bin_name}")
 PY
-else
-  echo "python not found; skipping zip packaging"
+  else
+    echo "python not found; skipping zip packaging"
+  fi
 fi
 
 rm -rf "${tmp_dir}"
