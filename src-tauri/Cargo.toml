@@ -6,6 +6,7 @@ authors = ["AI Open Router"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.77.2"
+default-run = "ai-open-router-tauri"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -38,6 +39,10 @@ directories = "5"
 [[bin]]
 name = "ai-open-router"
 path = "src/bin/ai_open_router.rs"
+
+[[bin]]
+name = "ai-open-router-tauri"
+path = "src/main.rs"
 
 [profile.release]
 panic = "abort"
