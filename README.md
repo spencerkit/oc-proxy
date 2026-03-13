@@ -164,6 +164,18 @@ Yes. Pull/import replaces current groups and providers, so export a local backup
 
 Provider tokens and Remote Git token are currently stored locally in plain text. Use minimum-scope credentials.
 
+### macOS says the app is damaged. How do I open it?
+
+This can happen when the build is not notarized or signed with an Apple Developer ID. If you trust the source:
+
+1. Move the app to `~/Applications` or `/Applications`.
+2. In macOS, open `System Settings` -> `Privacy & Security`, then click `Open Anyway` for AI Open Router.
+3. If it still blocks, remove the quarantine flag and try again:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/AI Open Router.app"
+```
+
 ## Docs for Developers
 
 - `docs/dev-database.md`

@@ -176,6 +176,18 @@ English documentation: [../../README.md](../../README.md)
 
 当前会保存在本地配置中（明文），请使用最小权限凭证，并仅在可信环境使用。
 
+### macOS 提示“应用已损坏”，如何处理？
+
+这通常是因为未完成公证或未使用 Apple Developer ID 签名。若你信任来源，可以按下面方式放行：
+
+1. 将应用移动到 `~/Applications` 或 `/Applications`。
+2. 打开 macOS 的 `系统设置` -> `隐私与安全性`，在提示处点击“仍要打开”。
+3. 若仍被拦截，可移除隔离标记后再试：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/AI Open Router.app"
+```
+
 ## 用户文档与开发文档分层
 
 面向使用者：
