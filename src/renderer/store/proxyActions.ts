@@ -82,9 +82,7 @@ function createDefaultConfig(): ProxyConfig {
 
 type GroupLike = Partial<Group> & Pick<Group, "id" | "name">
 
-function normalizeProviderIds(
-  providerIds: Array<string | null | undefined>
-): string[] {
+function normalizeProviderIds(providerIds: Array<string | null | undefined>): string[] {
   return providerIds
     .map(providerId => providerId?.trim())
     .filter((providerId): providerId is string => Boolean(providerId))
@@ -101,7 +99,9 @@ function getScopedGroupProviders(group: GroupLike): {
   const fallbackProviders = getFallbackGroupProviders(group)
   const hasExplicitProviderIds = Array.isArray(group.providerIds)
   const providerIds = normalizeProviderIds(
-    hasExplicitProviderIds ? group.providerIds ?? [] : fallbackProviders.map(provider => provider.id)
+    hasExplicitProviderIds
+      ? (group.providerIds ?? [])
+      : fallbackProviders.map(provider => provider.id)
   )
 
   if (!hasExplicitProviderIds) {
