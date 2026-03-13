@@ -796,7 +796,8 @@ mod tests {
     }
 
     #[test]
-    fn normalize_config_for_storage_ignores_unlinked_group_providers_when_global_providers_present() {
+    fn normalize_config_for_storage_ignores_unlinked_group_providers_when_global_providers_present()
+    {
         let linked_provider = sample_provider("provider-1");
         let stale_provider = sample_provider("provider-stale");
         let mut cfg = default_config();
@@ -813,7 +814,10 @@ mod tests {
         let normalized = normalize_config_for_storage(cfg).expect("normalize config");
         assert_eq!(normalized.providers.len(), 1);
         assert_eq!(normalized.providers[0].id, "provider-1");
-        assert_eq!(normalized.groups[0].provider_ids, vec!["provider-1".to_string()]);
+        assert_eq!(
+            normalized.groups[0].provider_ids,
+            vec!["provider-1".to_string()]
+        );
         assert_eq!(normalized.groups[0].providers.len(), 1);
         assert_eq!(normalized.groups[0].providers[0].id, "provider-1");
     }
@@ -834,7 +838,10 @@ mod tests {
         let normalized = normalize_config_for_storage(cfg).expect("normalize config");
         assert_eq!(normalized.providers.len(), 1);
         assert_eq!(normalized.providers[0].id, "provider-1");
-        assert_eq!(normalized.groups[0].provider_ids, vec!["provider-1".to_string()]);
+        assert_eq!(
+            normalized.groups[0].provider_ids,
+            vec!["provider-1".to_string()]
+        );
         assert_eq!(normalized.groups[0].providers.len(), 1);
         assert_eq!(normalized.groups[0].providers[0].id, "provider-1");
     }
