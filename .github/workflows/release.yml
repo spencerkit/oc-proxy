@@ -57,10 +57,22 @@ jobs:
           npm run tauri:collect
           bash ./scripts/package-headless-artifacts.sh "${{ github.workspace }}/dist/target/release/ai-open-router"
 
+      - name: Normalize artifact ref name
+        id: artifact_ref
+        shell: bash
+        run: |
+          SAFE_REF_NAME="${GITHUB_REF_NAME//\//-}"
+          SAFE_REF_NAME="$(echo "${SAFE_REF_NAME}" | tr -c 'A-Za-z0-9._-' '-')"
+          SAFE_REF_NAME="$(echo "${SAFE_REF_NAME}" | sed 's/^-*//; s/-*$//')"
+          if [[ -z "${SAFE_REF_NAME}" ]]; then
+            SAFE_REF_NAME="unknown-ref"
+          fi
+          echo "value=${SAFE_REF_NAME}" >> "$GITHUB_OUTPUT"
+
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ai-open-router-${{ matrix.os_name }}-${{ github.ref_name }}
+          name: ai-open-router-${{ matrix.os_name }}-${{ steps.artifact_ref.outputs.value }}
           path: |
             dist/*.dmg
             dist/*-setup.exe
