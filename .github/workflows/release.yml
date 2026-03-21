@@ -22,6 +22,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - os: ubuntu-latest
+            os_name: linux
+            bundles: deb,appimage
           - os: macos-latest
             os_name: macos
             bundles: app,dmg
@@ -43,6 +46,25 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies (Tauri)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config \
+            wget
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2.0.0" --locked
@@ -76,6 +98,8 @@ jobs:
           name: ai-open-router-${{ matrix.os_name }}-${{ github.ref_name }}
           path: |
             dist/*.dmg
+            dist/*.deb
+            dist/*.rpm
             dist/*-setup.exe
             dist/*.msi
             dist/*-setup.exe.zip
@@ -136,7 +160,7 @@ jobs:
             case "${name}" in
               latest.json.sig)
                 ;;
-              *.dmg|*-setup.exe|*.msi|*-setup.exe.zip|*.msi.zip|*.app.tar.gz|*.AppImage|*.sig|ai-open-router-*.tar.gz|ai-open-router-*.zip|ai-open-router-*.exe|latest.json)
+              *.dmg|*.deb|*.rpm|*-setup.exe|*.msi|*-setup.exe.zip|*.msi.zip|*.app.tar.gz|*.AppImage|*.sig|ai-open-router-*.tar.gz|ai-open-router-*.zip|ai-open-router-*.exe|latest.json)
                 cp -f "${file}" release-publish/
                 ;;
               ai-open-router-darwin-*|ai-open-router-linux-*)

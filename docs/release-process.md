@@ -100,7 +100,8 @@ git commit -m "chore(release): vX.Y.Z"
 1. 合并 release PR 到 `main`
 2. `CI` 工作流自动读取 `package.json` 版本并创建 `vX.Y.Z` tag（若远端已存在同名 tag 会自动跳过）
 3. `Release Build` 工作流自动执行：
-- 多平台打包（macOS + Windows）
+- 多平台打包（Linux + macOS + Windows）
+- Linux 产物包含 `deb` 与 `AppImage`
 - 上传产物 artifact
 - 从 `CHANGELOG.md` 提取当前版本说明
 - 自动创建 GitHub Release 并附带产物
