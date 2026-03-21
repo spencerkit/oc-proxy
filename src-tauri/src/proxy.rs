@@ -8,6 +8,7 @@ use crate::stats_store::StatsStore;
 use axum::routing::{get, post};
 use axum::Router;
 use reqwest::Client;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use tauri::AppHandle;
@@ -165,13 +166,13 @@ impl ProxyRuntime {
             .route("/metrics-lite", get(pipeline::metrics_lite))
             .route("/oc/:group_id", post(pipeline::handle_proxy_root))
             .route("/oc/:group_id/*suffix", post(pipeline::handle_proxy_suffix))
-            .merge(crate::http_api::router())
+            .merge(crate::http_api::router(service_state.clone()))
             .with_state(service_state);
 
         self.inner.metrics.mark_started();
 
         let handle = tokio::spawn(async move {
-            let server = axum::serve(listener, app);
+            let server = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>());
             let graceful = server.with_graceful_shutdown(async {
                 let _ = rx.await;
             });

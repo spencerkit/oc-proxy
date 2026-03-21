@@ -7,6 +7,20 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AuthSessionStatus {
+    pub authenticated: bool,
+    pub remote_request: bool,
+    pub password_configured: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OkResult {
+    pub ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveConfigResult {
     pub ok: bool,
     pub config: ProxyConfig,

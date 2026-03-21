@@ -5,7 +5,9 @@
 use crate::app_state::{apply_launch_on_startup_setting, sync_runtime_config, SharedState};
 use crate::backup::extract_groups_from_import_payload;
 use crate::domain::entities::Group;
-use crate::models::{GroupBackupImportResult, ProxyConfig, ProxyStatus, SaveConfigResult};
+use crate::models::{
+    AuthSessionStatus, GroupBackupImportResult, ProxyConfig, ProxyStatus, SaveConfigResult,
+};
 use crate::services::{AppError, AppResult};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -15,6 +17,49 @@ use uuid::Uuid;
 /// Performs get config.
 pub fn get_config(state: &SharedState) -> ProxyConfig {
     state.config_store.get()
+}
+
+/// Builds the remote admin auth session status for local or remote callers.
+pub fn auth_session_status(
+    state: &SharedState,
+    remote_request: bool,
+    authenticated: bool,
+) -> AuthSessionStatus {
+    let password_configured = state.remote_admin_auth.password_configured();
+    AuthSessionStatus {
+        authenticated: if remote_request && password_configured {
+            authenticated
+        } else {
+            true
+        },
+        remote_request,
+        password_configured,
+    }
+}
+
+/// Sets the remote admin password used by `/api/*` and `/management`.
+pub fn set_remote_admin_password(
+    state: &SharedState,
+    password: String,
+    remote_request: bool,
+) -> AppResult<AuthSessionStatus> {
+    state
+        .remote_admin_auth
+        .set_password(&password)
+        .map_err(AppError::validation)?;
+    Ok(auth_session_status(state, remote_request, !remote_request))
+}
+
+/// Clears the remote admin password used by `/api/*` and `/management`.
+pub fn clear_remote_admin_password(
+    state: &SharedState,
+    remote_request: bool,
+) -> AppResult<AuthSessionStatus> {
+    state
+        .remote_admin_auth
+        .clear_password()
+        .map_err(AppError::internal)?;
+    Ok(auth_session_status(state, remote_request, true))
 }
 
 /// Saves config for this module's workflow.

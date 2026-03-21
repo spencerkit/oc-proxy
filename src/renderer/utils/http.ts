@@ -2,6 +2,7 @@ import type {
   AgentConfig,
   AgentConfigFile,
   AppInfo,
+  AuthSessionStatus,
   ClipboardTextResult,
   GroupBackupExportResult,
   GroupBackupImportResult,
@@ -116,6 +117,7 @@ async function request<T>(method: HttpMethod, path: string, body?: unknown): Pro
   }
   const response = await fetch(url, {
     method,
+    credentials: "include",
     headers,
     body: payload,
   })
@@ -261,6 +263,18 @@ async function pickJsonFileText(): Promise<string | null> {
 }
 
 export const httpApi = {
+  getAuthSession(): Promise<AuthSessionStatus> {
+    return request<AuthSessionStatus>("GET", "/api/auth/session")
+  },
+
+  loginRemoteAdmin(password: string): Promise<AuthSessionStatus> {
+    return request<AuthSessionStatus>("POST", "/api/auth/login", { password })
+  },
+
+  logoutRemoteAdmin(): Promise<AuthSessionStatus> {
+    return request<AuthSessionStatus>("POST", "/api/auth/logout")
+  },
+
   getAppInfo(): Promise<AppInfo> {
     return request<AppInfo>("GET", "/api/app/info")
   },
@@ -301,6 +315,14 @@ export const httpApi = {
 
   saveConfig(config: ProxyConfig): Promise<SaveConfigResult> {
     return request<SaveConfigResult>("PUT", "/api/config", { nextConfig: config })
+  },
+
+  setRemoteAdminPassword(password: string): Promise<AuthSessionStatus> {
+    return request<AuthSessionStatus>("PUT", "/api/config/remote-admin-password", { password })
+  },
+
+  clearRemoteAdminPassword(): Promise<AuthSessionStatus> {
+    return request<AuthSessionStatus>("DELETE", "/api/config/remote-admin-password")
   },
 
   async exportGroupsBackup(): Promise<GroupBackupExportResult> {

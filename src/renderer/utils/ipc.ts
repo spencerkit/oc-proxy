@@ -2,6 +2,7 @@ import type {
   AgentConfig,
   AgentConfigFile,
   AppInfo,
+  AuthSessionStatus,
   ClipboardTextResult,
   GroupBackupExportResult,
   GroupBackupImportResult,
@@ -44,6 +45,18 @@ function getInvoke(): InvokeFn {
 }
 
 export const ipc = {
+  getAuthSession(): Promise<AuthSessionStatus> {
+    return getInvoke()<AuthSessionStatus>("auth_get_session_status")
+  },
+
+  loginRemoteAdmin(password: string): Promise<AuthSessionStatus> {
+    return getInvoke()<AuthSessionStatus>("auth_login", { password })
+  },
+
+  logoutRemoteAdmin(): Promise<AuthSessionStatus> {
+    return getInvoke()<AuthSessionStatus>("auth_logout")
+  },
+
   getAppInfo(): Promise<AppInfo> {
     return getInvoke()<AppInfo>("app_get_info")
   },
@@ -91,6 +104,14 @@ export const ipc = {
 
   saveConfig(config: ProxyConfig): Promise<SaveConfigResult> {
     return getInvoke()<SaveConfigResult>("config_save", { nextConfig: config })
+  },
+
+  setRemoteAdminPassword(password: string): Promise<AuthSessionStatus> {
+    return getInvoke()<AuthSessionStatus>("config_set_remote_admin_password", { password })
+  },
+
+  clearRemoteAdminPassword(): Promise<AuthSessionStatus> {
+    return getInvoke()<AuthSessionStatus>("config_clear_remote_admin_password")
   },
 
   exportGroupsBackup(): Promise<GroupBackupExportResult> {

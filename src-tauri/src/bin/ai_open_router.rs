@@ -1,6 +1,7 @@
 //! Headless server entrypoint for CLI usage.
 
 use ai_open_router_tauri::app_state::AppState;
+use ai_open_router_tauri::auth::RemoteAdminAuthStore;
 use ai_open_router_tauri::config_store::ConfigStore;
 use ai_open_router_tauri::integration_store::IntegrationStore;
 use ai_open_router_tauri::log_store::LogStore;
@@ -35,6 +36,8 @@ async fn main() -> Result<(), String> {
     let _ = config_store.initialize();
     let integration_store = IntegrationStore::new(app_data_dir.join("client-integrations.json"));
     let _ = integration_store.initialize();
+    let remote_admin_auth = RemoteAdminAuthStore::new(app_data_dir.join("remote-admin-auth.json"));
+    let _ = remote_admin_auth.initialize();
     let dev_log_path = if cfg!(debug_assertions) {
         Some(app_data_dir.join("proxy-dev-logs.jsonl"))
     } else {
@@ -58,6 +61,7 @@ async fn main() -> Result<(), String> {
         },
         config_store,
         integration_store,
+        remote_admin_auth,
         runtime,
         renderer_ready: AtomicBool::new(false),
     });

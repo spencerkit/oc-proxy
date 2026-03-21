@@ -2,6 +2,7 @@
 //! Shared app state coordination utilities.
 //! Applies config updates and synchronizes proxy runtime lifecycle when settings change.
 
+use crate::auth::RemoteAdminAuthStore;
 use crate::config_store::ConfigStore;
 use crate::integration_store::IntegrationStore;
 use crate::models::{AppInfo, ProxyConfig, ProxyStatus};
@@ -15,6 +16,7 @@ pub struct AppState {
     pub app_info: AppInfo,
     pub config_store: ConfigStore,
     pub integration_store: IntegrationStore,
+    pub remote_admin_auth: RemoteAdminAuthStore,
     pub runtime: ProxyRuntime,
     pub renderer_ready: AtomicBool,
 }

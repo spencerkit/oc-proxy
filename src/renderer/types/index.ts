@@ -66,6 +66,16 @@ export interface SaveConfigResult {
   status: ProxyStatus
 }
 
+export interface AuthSessionStatus {
+  authenticated: boolean
+  remoteRequest: boolean
+  passwordConfigured: boolean
+}
+
+export interface OkResult {
+  ok: boolean
+}
+
 export interface GroupBackupExportResult {
   ok: boolean
   canceled: boolean
