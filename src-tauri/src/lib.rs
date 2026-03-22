@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod app_state;
+pub mod auth;
 pub mod backup;
 pub mod bootstrap;
 pub mod commands;

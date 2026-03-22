@@ -7,6 +7,7 @@ import App from "./App"
 import { ToastContainer } from "./components/common/ToastContainer"
 import { ToastProvider } from "./contexts/ToastContext"
 import i18n, { initI18n, type Locale } from "./i18n"
+import type { AuthSessionStatus } from "./types"
 import { bridge } from "./utils/bridge"
 import { resolveEffectiveLocale } from "./utils/locale"
 import "./styles.css"
@@ -88,15 +89,24 @@ function resolveRouter() {
 async function init() {
   let initialLocale: Locale = "en-US"
   let initialTheme: "light" | "dark" = resolveTheme()
+  let authSession: AuthSessionStatus | null = null
 
   try {
-    const config = await bridge.getConfig()
-    initialLocale = resolveEffectiveLocale({
-      locale: config?.ui?.locale,
-      localeMode: config?.ui?.localeMode,
-      systemLanguage: navigator.language,
-    }) as Locale
-    initialTheme = resolveTheme(config?.ui?.theme)
+    authSession = await bridge.getAuthSession().catch(() => null)
+
+    const needsLogin = Boolean(
+      authSession?.remoteRequest && authSession.passwordConfigured && !authSession.authenticated
+    )
+
+    if (!needsLogin) {
+      const config = await bridge.getConfig()
+      initialLocale = resolveEffectiveLocale({
+        locale: config?.ui?.locale,
+        localeMode: config?.ui?.localeMode,
+        systemLanguage: navigator.language,
+      }) as Locale
+      initialTheme = resolveTheme(config?.ui?.theme)
+    }
   } catch (error) {
     console.error("[Main] Failed to load config for bootstrap preferences:", error)
   }

@@ -4,7 +4,8 @@
 
 use crate::app_state::SharedState;
 use crate::models::{
-    GroupBackupExportResult, GroupBackupImportResult, ProxyConfig, SaveConfigResult,
+    AuthSessionStatus, GroupBackupExportResult, GroupBackupImportResult, ProxyConfig,
+    SaveConfigResult,
 };
 use crate::services::{config_service, group_backup_service};
 use serde_json::Value;
@@ -26,6 +27,23 @@ pub async fn config_save(
     config_service::save_config(&state, &app, next_config)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+/// IPC command: sets the remote admin password for `/api/*` and `/management`.
+pub async fn config_set_remote_admin_password(
+    state: State<'_, SharedState>,
+    password: String,
+) -> Result<AuthSessionStatus, String> {
+    config_service::set_remote_admin_password(&state, password, false).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+/// IPC command: clears the remote admin password for `/api/*` and `/management`.
+pub async fn config_clear_remote_admin_password(
+    state: State<'_, SharedState>,
+) -> Result<AuthSessionStatus, String> {
+    config_service::clear_remote_admin_password(&state, false).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

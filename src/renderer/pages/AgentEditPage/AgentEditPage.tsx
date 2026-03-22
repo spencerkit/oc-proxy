@@ -1,4 +1,4 @@
-import { ArrowLeft, Bot, Braces, Code2, Eye, EyeOff, FileCode2, Save } from "lucide-react"
+import { ArrowLeft, Bot, Braces, Code2, Eye, EyeOff, FileCode2, Save, Workflow } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { Button, Input, Switch } from "@/components"
@@ -19,6 +19,9 @@ const AGENT_EDIT_ACTIONS = [
 ] as const
 
 const DEFAULT_TIMEOUT_MS = "300000"
+const DEFAULT_OPENCLAW_AGENT_ID = "default"
+const DEFAULT_OPENCLAW_PROVIDER_ID = "aor_shared"
+const DEFAULT_OPENCLAW_API_FORMAT = "openai-responses"
 
 const AGENT_META: Record<
   IntegrationClientKind,
@@ -35,6 +38,10 @@ const AGENT_META: Record<
     icon: Braces,
     format: "config.toml",
   },
+  openclaw: {
+    icon: Workflow,
+    format: "openclaw.json + agent files",
+  },
   opencode: {
     icon: Code2,
     format: "opencode.json(c)",
@@ -43,9 +50,13 @@ const AGENT_META: Record<
 
 function buildFormState(parsed?: AgentConfig | null): AgentConfig {
   return {
+    agentId: parsed?.agentId ?? "",
+    providerId: parsed?.providerId ?? "",
     url: parsed?.url ?? "",
     apiToken: parsed?.apiToken ?? "",
+    apiFormat: parsed?.apiFormat ?? "",
     model: parsed?.model ?? "",
+    fallbackModels: parsed?.fallbackModels ?? [],
     timeout: parsed?.timeout,
     alwaysThinkingEnabled: parsed?.alwaysThinkingEnabled ?? false,
     includeCoAuthoredBy: parsed?.includeCoAuthoredBy ?? false,
@@ -55,14 +66,30 @@ function buildFormState(parsed?: AgentConfig | null): AgentConfig {
 
 function normalizeFormConfig(config: AgentConfig): AgentConfig {
   return {
+    agentId: config.agentId?.trim() || undefined,
+    providerId: config.providerId?.trim() || undefined,
     url: config.url?.trim() || undefined,
     apiToken: config.apiToken?.trim() || undefined,
+    apiFormat: config.apiFormat?.trim() || undefined,
     model: config.model?.trim() || undefined,
+    fallbackModels: (() => {
+      const items = config.fallbackModels?.map(item => item.trim()).filter(item => item.length > 0)
+      return items?.length ? items : undefined
+    })(),
     timeout: config.timeout,
     alwaysThinkingEnabled: config.alwaysThinkingEnabled ?? false,
     includeCoAuthoredBy: config.includeCoAuthoredBy ?? false,
     skipDangerousModePermissionPrompt: config.skipDangerousModePermissionPrompt ?? false,
   }
+}
+
+function parseFallbackModels(text: string): string[] | undefined {
+  const items = text
+    .split(",")
+    .map(item => item.trim())
+    .filter(Boolean)
+
+  return items.length > 0 ? items : undefined
 }
 
 function serializeConfig(config: AgentConfig): string {
@@ -90,8 +117,16 @@ function buildSourcePlaceholder(kind: IntegrationClientKind, sourceId: string): 
         return '{\n  "OPENAI_API_KEY": "sk-..."\n}\n'
       }
       return 'model_provider = "your_provider"\n\n[model_providers.your_provider]\nbase_url = "http://localhost:8080/oc/your-group"\n'
+    case "openclaw":
+      if (sourceId === "auth-profiles") {
+        return '{\n  "profiles": {\n    "aor_shared": {\n      "apiKey": "sk-..."\n    }\n  }\n}\n'
+      }
+      if (sourceId === "models") {
+        return '{\n  "providers": {\n    "aor_shared": {\n      "api": "openai-responses",\n      "baseUrl": "http://localhost:8080/oc/your-group/v1",\n      "apiKey": "sk-..."\n    }\n  }\n}\n'
+      }
+      return '{\n  "agents": {\n    "defaults": {\n      "model": {\n        "primary": "gpt-4.1-mini",\n        "fallbacks": ["gpt-4o-mini"]\n      }\n    }\n  },\n  "models": {\n    "providers": {\n      "aor_shared": {\n        "api": "openai-responses",\n        "baseUrl": "http://localhost:8080/oc/your-group/v1",\n        "apiKey": "sk-..."\n      }\n    }\n  }\n}\n'
     case "opencode":
-      return '{\n  "provider": {\n    "aor_shared": {\n      "options": {\n        "baseURL": "http://localhost:8080/oc/your-group"\n      }\n    }\n  }\n}\n'
+      return '{\n  "provider": {\n    "aor_shared": {\n      "options": {\n        "baseURL": "http://localhost:8080/oc/your-group",\n        "apiKey": "sk-..."\n      }\n    }\n  }\n}\n'
   }
 }
 
@@ -122,6 +157,7 @@ export const AgentEditPage: React.FC = () => {
   const [success, setSuccess] = useState<string | null>(null)
   const [formData, setFormData] = useState<AgentConfig>(buildFormState())
   const [timeoutText, setTimeoutText] = useState("")
+  const [fallbackModelsText, setFallbackModelsText] = useState("")
   const [showApiToken, setShowApiToken] = useState(false)
   const [activeSourceId, setActiveSourceId] = useState("primary")
   const [sourceDrafts, setSourceDrafts] = useState<Record<string, string>>({})
@@ -140,6 +176,7 @@ export const AgentEditPage: React.FC = () => {
       setTimeoutText(
         result.parsedConfig?.timeout !== undefined ? String(result.parsedConfig.timeout) : ""
       )
+      setFallbackModelsText(result.parsedConfig?.fallbackModels?.join(", ") ?? "")
       const nextSourceFiles = buildSourceFiles(result)
       setActiveSourceId(current =>
         nextSourceFiles.some(file => file.sourceId === current)
@@ -167,7 +204,7 @@ export const AgentEditPage: React.FC = () => {
   }, [configFile])
 
   const kind = configFile?.kind ?? "claude"
-  const supportsTimeout = kind !== "codex"
+  const supportsTimeout = kind === "claude" || kind === "opencode"
   const meta = AGENT_META[kind]
   const KindIcon = meta.icon
   const sourceFiles = useMemo(() => buildSourceFiles(configFile), [configFile])
@@ -187,9 +224,10 @@ export const AgentEditPage: React.FC = () => {
     () =>
       normalizeFormConfig({
         ...formData,
+        fallbackModels: kind === "openclaw" ? parseFallbackModels(fallbackModelsText) : undefined,
         timeout: supportsTimeout && timeoutText.trim() ? Number(timeoutText.trim()) : undefined,
       }),
-    [formData, supportsTimeout, timeoutText]
+    [fallbackModelsText, formData, kind, supportsTimeout, timeoutText]
   )
   const initialFormConfig = useMemo(
     () => buildFormState(configFile?.parsedConfig),
@@ -327,6 +365,38 @@ export const AgentEditPage: React.FC = () => {
 
         {editMode === "form" ? (
           <div className={styles.formLayout}>
+            {kind === "openclaw" && (
+              <section className={styles.formSection}>
+                <div className={styles.sectionHeading}>
+                  <h2>{t("agentManagement.openclawScopeSection")}</h2>
+                  <p>{t("agentManagement.openclawScopeHint")}</p>
+                </div>
+
+                <div className={styles.fieldGrid}>
+                  <Input
+                    label={t("agentManagement.openclawAgentId")}
+                    value={formData.agentId}
+                    hint={t("agentManagement.openclawAgentIdHint")}
+                    onChange={event =>
+                      setFormData(current => ({ ...current, agentId: event.target.value }))
+                    }
+                    placeholder={DEFAULT_OPENCLAW_AGENT_ID}
+                    fullWidth
+                  />
+                  <Input
+                    label={t("agentManagement.openclawProviderId")}
+                    value={formData.providerId}
+                    hint={t("agentManagement.openclawProviderIdHint")}
+                    onChange={event =>
+                      setFormData(current => ({ ...current, providerId: event.target.value }))
+                    }
+                    placeholder={DEFAULT_OPENCLAW_PROVIDER_ID}
+                    fullWidth
+                  />
+                </div>
+              </section>
+            )}
+
             <section className={styles.formSection}>
               <div className={styles.sectionHeading}>
                 <h2>{t("agentManagement.connectionSection")}</h2>
@@ -340,14 +410,24 @@ export const AgentEditPage: React.FC = () => {
                   onChange={event =>
                     setFormData(current => ({ ...current, url: event.target.value }))
                   }
-                  placeholder="http://localhost:8080/oc/group"
+                  placeholder={
+                    kind === "openclaw"
+                      ? "http://localhost:8080/oc/group/v1"
+                      : "http://localhost:8080/oc/group"
+                  }
                   fullWidth
                 />
                 <Input
                   label={t("agentManagement.apiToken")}
                   type={showApiToken ? "text" : "password"}
                   value={formData.apiToken}
-                  hint={kind === "codex" ? t("agentManagement.codexTokenHint") : undefined}
+                  hint={
+                    kind === "codex"
+                      ? t("agentManagement.codexTokenHint")
+                      : kind === "openclaw"
+                        ? t("agentManagement.openclawTokenHint")
+                        : undefined
+                  }
                   onChange={event =>
                     setFormData(current => ({ ...current, apiToken: event.target.value }))
                   }
@@ -389,9 +469,21 @@ export const AgentEditPage: React.FC = () => {
                   onChange={event =>
                     setFormData(current => ({ ...current, model: event.target.value }))
                   }
-                  placeholder="claude-sonnet-4-5-20250929"
+                  placeholder={kind === "openclaw" ? "gpt-4.1" : "claude-sonnet-4-5-20250929"}
                   fullWidth
                 />
+                {kind === "openclaw" && (
+                  <Input
+                    label={t("agentManagement.openclawApiFormat")}
+                    value={formData.apiFormat}
+                    hint={t("agentManagement.openclawApiFormatHint")}
+                    onChange={event =>
+                      setFormData(current => ({ ...current, apiFormat: event.target.value }))
+                    }
+                    placeholder={DEFAULT_OPENCLAW_API_FORMAT}
+                    fullWidth
+                  />
+                )}
                 {supportsTimeout && (
                   <Input
                     label={t("agentManagement.timeout")}
@@ -405,6 +497,23 @@ export const AgentEditPage: React.FC = () => {
                 )}
               </div>
             </section>
+
+            {kind === "openclaw" && (
+              <section className={styles.formSection}>
+                <div className={styles.sectionHeading}>
+                  <h2>{t("agentManagement.openclawFallbackModels")}</h2>
+                  <p>{t("agentManagement.openclawFallbackModelsHint")}</p>
+                </div>
+
+                <Input
+                  label={t("agentManagement.openclawFallbackModels")}
+                  value={fallbackModelsText}
+                  onChange={event => setFallbackModelsText(event.target.value)}
+                  placeholder="gpt-4.1-mini, gpt-4o-mini"
+                  fullWidth
+                />
+              </section>
+            )}
 
             {kind === "claude" && (
               <section className={styles.formSection}>
@@ -495,6 +604,19 @@ export const AgentEditPage: React.FC = () => {
             )}
             {kind === "codex" && activeSourceFile?.sourceId === "auth" && (
               <p className={styles.sourceHintText}>{t("agentManagement.codexAuthSourceHint")}</p>
+            )}
+            {kind === "openclaw" && activeSourceFile?.sourceId === "primary" && (
+              <p className={styles.sourceHintText}>
+                {t("agentManagement.openclawPrimarySourceHint")}
+              </p>
+            )}
+            {kind === "openclaw" && activeSourceFile?.sourceId === "auth-profiles" && (
+              <p className={styles.sourceHintText}>{t("agentManagement.openclawAuthSourceHint")}</p>
+            )}
+            {kind === "openclaw" && activeSourceFile?.sourceId === "models" && (
+              <p className={styles.sourceHintText}>
+                {t("agentManagement.openclawModelsSourceHint")}
+              </p>
             )}
 
             <textarea

@@ -1,4 +1,4 @@
-import { Bot, Braces, Code2, FolderPlus, Pencil, Trash2 } from "lucide-react"
+import { Bot, Braces, Code2, FolderPlus, Pencil, Trash2, Workflow } from "lucide-react"
 import type React from "react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
@@ -24,7 +24,7 @@ const AGENT_LIST_ACTIONS = [
   removeIntegrationTargetAction,
 ] as const
 
-const AGENT_TYPES: IntegrationClientKind[] = ["claude", "codex", "opencode"]
+const AGENT_TYPES: IntegrationClientKind[] = ["claude", "codex", "openclaw", "opencode"]
 
 const AGENT_META: Record<
   IntegrationClientKind,
@@ -40,6 +40,10 @@ const AGENT_META: Record<
   codex: {
     icon: Braces,
     format: "config.toml",
+  },
+  openclaw: {
+    icon: Workflow,
+    format: "openclaw.json + agent files",
   },
   opencode: {
     icon: Code2,
@@ -64,7 +68,11 @@ function getConfiguredFieldCount(target: IntegrationTarget): number {
 
   if (target.config?.url?.trim()) count += 1
   if (target.config?.apiToken?.trim()) count += 1
+  if (target.config?.apiFormat?.trim()) count += 1
   if (target.config?.model?.trim()) count += 1
+  if (target.config?.providerId?.trim()) count += 1
+  if (target.config?.agentId?.trim()) count += 1
+  if (target.config?.fallbackModels?.length) count += 1
   if (target.config?.timeout !== undefined && target.config.timeout !== null) count += 1
 
   if (target.kind === "claude") {
@@ -112,6 +120,7 @@ export const AgentListPage: React.FC = () => {
     () => ({
       claude: targets.filter(target => target.kind === "claude"),
       codex: targets.filter(target => target.kind === "codex"),
+      openclaw: targets.filter(target => target.kind === "openclaw"),
       opencode: targets.filter(target => target.kind === "opencode"),
     }),
     [targets]

@@ -73,11 +73,106 @@ jobs:
       - name: Cargo contract tests (Tauri backend)
         run: cargo test --manifest-path src-tauri/Cargo.toml contract_
 
+  linux_smoke_ubuntu22:
+    name: Linux Smoke (Ubuntu 22.04)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Linux system dependencies (Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config \
+            wget
+
+      - name: Build renderer assets
+        run: npm run build
+
+      - name: Build headless binary
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/dist/target
+        run: cargo build --release --bin ai-open-router --manifest-path src-tauri/Cargo.toml
+
+      - name: Smoke test headless startup
+        shell: bash
+        run: |
+          APP_DIR="$(mktemp -d)"
+          PORT=19089
+          LOG_PATH="${APP_DIR}/smoke.log"
+
+          cat > "${APP_DIR}/config.json" <<EOF
+          {
+            "server": {
+              "host": "127.0.0.1",
+              "port": ${PORT}
+            },
+            "ui": {
+              "locale": "en-US",
+              "localeMode": "manual"
+            }
+          }
+          EOF
+
+          AOR_APP_DATA_DIR="${APP_DIR}" "${GITHUB_WORKSPACE}/dist/target/release/ai-open-router" >"${LOG_PATH}" 2>&1 &
+          APP_PID=$!
+
+          cleanup() {
+            kill "${APP_PID}" 2>/dev/null || true
+            wait "${APP_PID}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for _ in {1..30}; do
+            if ! kill -0 "${APP_PID}" 2>/dev/null; then
+              echo "headless process exited unexpectedly"
+              cat "${LOG_PATH}"
+              exit 1
+            fi
+
+            if curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null; then
+              echo "health check passed on Ubuntu 22.04"
+              exit 0
+            fi
+
+            sleep 1
+          done
+
+          echo "health check timed out"
+          cat "${LOG_PATH}"
+          exit 1
+
   auto_tag:
     name: Auto Tag Release Version
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
       - verify
+      - linux_smoke_ubuntu22
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -3,6 +3,7 @@
 //! Creates stores/services/runtime and prepares shared state used by Tauri commands.
 
 use crate::app_state::{apply_launch_on_startup_setting, AppState, SharedState};
+use crate::auth::RemoteAdminAuthStore;
 use crate::config_store::ConfigStore;
 use crate::integration_store::IntegrationStore;
 use crate::log_store::LogStore;
@@ -345,6 +346,8 @@ pub fn setup_app(app: &mut App, app_name: &str, app_version: &str) -> Result<(),
     let _ = config_store.initialize();
     let integration_store = IntegrationStore::new(app_data_dir.join("client-integrations.json"));
     let _ = integration_store.initialize();
+    let remote_admin_auth = RemoteAdminAuthStore::new(app_data_dir.join("remote-admin-auth.json"));
+    let _ = remote_admin_auth.initialize();
 
     let dev_log_path = if cfg!(debug_assertions) {
         Some(app_data_dir.join("proxy-dev-logs.jsonl"))
@@ -369,6 +372,7 @@ pub fn setup_app(app: &mut App, app_name: &str, app_version: &str) -> Result<(),
         },
         config_store,
         integration_store,
+        remote_admin_auth,
         runtime,
         renderer_ready: AtomicBool::new(false),
     });

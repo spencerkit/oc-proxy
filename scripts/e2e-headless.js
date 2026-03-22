@@ -100,13 +100,32 @@ async function run() {
   fs.mkdirSync(homeDir, { recursive: true })
   const claudeDir = path.join(homeDir, ".claude")
   const codexDir = path.join(homeDir, ".codex")
-  const opencodeDir = path.join(homeDir, ".opencode")
+  const openclawDir = path.join(homeDir, ".openclaw")
+  const opencodeDir = path.join(homeDir, ".config", "opencode")
   fs.mkdirSync(claudeDir, { recursive: true })
   fs.mkdirSync(codexDir, { recursive: true })
+  fs.mkdirSync(openclawDir, { recursive: true })
   fs.mkdirSync(opencodeDir, { recursive: true })
   fs.writeFileSync(
     path.join(codexDir, "config.toml"),
     'model_provider = "aor_shared"\n\n[model_providers.aor_shared]\nbase_url = "http://example"\n'
+  )
+  fs.writeFileSync(
+    path.join(opencodeDir, "opencode.json"),
+    JSON.stringify(
+      {
+        provider: {
+          aor_shared: {
+            options: {
+              baseURL: "http://example",
+              apiKey: "keep-opencode-token",
+            },
+          },
+        },
+      },
+      null,
+      2
+    )
   )
   const configPath = path.join(dataDir, "config.json")
   fs.writeFileSync(
@@ -327,9 +346,55 @@ async function run() {
     await page.locator('xpath=//button[normalize-space()="Write Now"]').waitFor({ timeout: 15000 })
     await safeClick(page, 'xpath=//label[.//span[contains(., ".claude")]]')
     await safeClick(page, 'xpath=//label[.//span[contains(., ".codex")]]')
-    await safeClick(page, 'xpath=//label[.//span[contains(., ".opencode")]]')
+    await safeClick(
+      page,
+      'xpath=//section[.//h4[normalize-space()="OpenClaw"]]//label[contains(@class, "integrationTargetLabel")]'
+    )
+    await safeClick(page, 'xpath=//label[.//span[contains(., ".config/opencode")]]')
     await safeClick(page, 'xpath=//button[normalize-space()="Write Now"]')
     await waitForHidden(page, 'xpath=//button[normalize-space()="Write Now"]')
+
+    const openclawConfigPath = path.join(openclawDir, "openclaw.json")
+    const openclawModelsPath = path.join(openclawDir, "agents", "default", "agent", "models.json")
+    const opencodeConfigPath = path.join(opencodeDir, "opencode.json")
+    const openclawConfig = JSON.parse(fs.readFileSync(openclawConfigPath, "utf-8"))
+    const openclawModels = JSON.parse(fs.readFileSync(openclawModelsPath, "utf-8"))
+    const opencodeConfig = JSON.parse(fs.readFileSync(opencodeConfigPath, "utf-8"))
+    const expectedOpenclawPath = `/oc/${groupId}/v1`
+    const expectedOpencodePath = `/oc/${groupId}`
+    const hasExpectedOpenclawBaseUrl = value => {
+      try {
+        const parsed = new URL(value)
+        return parsed.port === String(port) && parsed.pathname === expectedOpenclawPath
+      } catch {
+        return false
+      }
+    }
+    const hasExpectedOpencodeBaseUrl = value => {
+      try {
+        const parsed = new URL(value)
+        return parsed.port === String(port) && parsed.pathname === expectedOpencodePath
+      } catch {
+        return false
+      }
+    }
+    const writtenOpenclawBaseUrl = openclawConfig?.models?.providers?.aor_shared?.baseUrl
+    const registryOpenclawBaseUrl = openclawModels?.providers?.aor_shared?.baseUrl
+    const writtenOpencodeBaseUrl = opencodeConfig?.provider?.aor_shared?.options?.baseURL
+    const writtenOpencodeApiKey = opencodeConfig?.provider?.aor_shared?.options?.apiKey
+    if (
+      !hasExpectedOpenclawBaseUrl(writtenOpenclawBaseUrl) ||
+      !hasExpectedOpenclawBaseUrl(registryOpenclawBaseUrl) ||
+      writtenOpenclawBaseUrl !== registryOpenclawBaseUrl
+    ) {
+      throw new Error("openclaw config write missing expected /v1 baseUrl")
+    }
+    if (
+      !hasExpectedOpencodeBaseUrl(writtenOpencodeBaseUrl) ||
+      writtenOpencodeApiKey !== "keep-opencode-token"
+    ) {
+      throw new Error("opencode config write missing expected baseURL or preserved apiKey")
+    }
 
     lastStep = "agents-nav"
     await safeClick(page, selectors.agentsNav)

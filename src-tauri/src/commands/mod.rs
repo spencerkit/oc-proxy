@@ -5,6 +5,8 @@
 #[macro_use]
 mod app;
 #[macro_use]
+mod auth;
+#[macro_use]
 mod config;
 #[macro_use]
 mod integration;
@@ -21,9 +23,11 @@ pub use app::{
     app_get_info, app_get_status, app_read_clipboard_text, app_renderer_ready,
     app_report_renderer_error, app_start_server, app_stop_server,
 };
+pub use auth::{auth_get_session_status, auth_login, auth_logout};
 pub use config::{
-    config_export_groups, config_export_groups_clipboard, config_export_groups_folder, config_get,
-    config_import_groups, config_import_groups_json, config_save,
+    config_clear_remote_admin_password, config_export_groups, config_export_groups_clipboard,
+    config_export_groups_folder, config_get, config_import_groups, config_import_groups_json,
+    config_save, config_set_remote_admin_password,
 };
 pub use integration::{
     integration_add_target, integration_list_targets, integration_pick_directory,
@@ -48,8 +52,13 @@ pub fn build_invoke_handler(
         app_stop_server,
         app_renderer_ready,
         app_report_renderer_error,
+        auth_get_session_status,
+        auth_login,
+        auth_logout,
         config_get,
         config_save,
+        config_set_remote_admin_password,
+        config_clear_remote_admin_password,
         config_export_groups,
         config_export_groups_folder,
         config_export_groups_clipboard,

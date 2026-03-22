@@ -15,7 +15,9 @@ import {
   saveConfigAction,
   savingConfigState,
 } from "@/store"
-import type { AppInfo, LocaleCode, ProxyConfig, ThemeMode } from "@/types"
+import type { AppInfo, AuthSessionStatus, LocaleCode, ProxyConfig, ThemeMode } from "@/types"
+import { emitAuthSessionChanged } from "@/utils/authSession"
+import { bridge } from "@/utils/bridge"
 import { resolveEffectiveLocale } from "@/utils/locale"
 import { useActions, useRelaxValue } from "@/utils/relax"
 import { isHeadlessHttpRuntime } from "@/utils/runtime"
@@ -36,6 +38,7 @@ type PendingRemoteConflict = {
 const QUOTA_REFRESH_MINUTES_MIN = 1
 const QUOTA_REFRESH_MINUTES_MAX = 1440
 const QUOTA_REFRESH_MINUTES_DEFAULT = 5
+const REMOTE_ADMIN_PASSWORD_MIN = 8
 
 const SETTINGS_ACTIONS = [
   saveConfigAction,
@@ -72,6 +75,8 @@ export const SettingsPage: React.FC = () => {
   const { showToast } = useLogs()
 
   const [portText, setPortText] = useState("8080")
+  const [ocAuthEnabled, setOcAuthEnabled] = useState(false)
+  const [ocBearerToken, setOcBearerToken] = useState("")
   const [strictMode, setStrictMode] = useState(false)
   const [textToolCallFallbackEnabled, setTextToolCallFallbackEnabled] = useState(true)
   const [detailedLogs, setDetailedLogs] = useState(false)
@@ -113,7 +118,16 @@ export const SettingsPage: React.FC = () => {
   const [updateProgress, setUpdateProgress] = useState<number | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
   const [lastUpdateCheckedAt, setLastUpdateCheckedAt] = useState<string | null>(null)
+  const [authSession, setAuthSession] = useState<AuthSessionStatus | null>(null)
+  const [authSessionLoading, setAuthSessionLoading] = useState(false)
+  const [remoteAdminPassword, setRemoteAdminPassword] = useState("")
+  const [remoteAdminPasswordConfirm, setRemoteAdminPasswordConfirm] = useState("")
+  const [savingOcAuth, setSavingOcAuth] = useState(false)
+  const [savingRemoteAdminPassword, setSavingRemoteAdminPassword] = useState(false)
+  const [clearingRemoteAdminPassword, setClearingRemoteAdminPassword] = useState(false)
+  const [loggingOutRemoteAdmin, setLoggingOutRemoteAdmin] = useState(false)
   const serverSnapshotRef = useRef("")
+  const ocAuthSnapshotRef = useRef("")
   const remoteSnapshotRef = useRef("")
   const quotaRefreshSnapshotRef = useRef("")
   const remoteSyncing = remoteSyncAction !== null
@@ -128,6 +142,17 @@ export const SettingsPage: React.FC = () => {
       serverSnapshotRef.current = nextServerSnapshot
       setPortText(String(config.server.port))
       setPortError("")
+    }
+
+    const nextOcAuthSnapshot = JSON.stringify({
+      authEnabled: !!config.server.authEnabled,
+      localBearerToken: config.server.localBearerToken ?? "",
+    })
+    if (nextOcAuthSnapshot !== ocAuthSnapshotRef.current) {
+      ocAuthSnapshotRef.current = nextOcAuthSnapshot
+      const nextToken = config.server.localBearerToken ?? ""
+      setOcAuthEnabled(!!config.server.authEnabled)
+      setOcBearerToken(nextToken)
     }
 
     const nextRemoteSnapshot = JSON.stringify({
@@ -184,6 +209,23 @@ export const SettingsPage: React.FC = () => {
       .catch(() => undefined)
   }, [appInfo, getAppInfo])
 
+  const loadAuthSession = useCallback(async () => {
+    try {
+      setAuthSessionLoading(true)
+      const session = await bridge.getAuthSession()
+      setAuthSession(session)
+      emitAuthSessionChanged(session)
+    } catch (error) {
+      showToast(t("errors.operationFailed", { message: String(error) }), "error")
+    } finally {
+      setAuthSessionLoading(false)
+    }
+  }, [showToast, t])
+
+  useEffect(() => {
+    void loadAuthSession()
+  }, [loadAuthSession])
+
   const validatePort = useCallback(
     (value: string) => {
       if (!/^\d+$/.test(value)) {
@@ -238,10 +280,57 @@ export const SettingsPage: React.FC = () => {
     [config, saveConfig, showToast, t]
   )
 
+  const ocAuthValidationMessage = useMemo(() => {
+    const nextToken = ocBearerToken.trim()
+    if (ocAuthEnabled && !nextToken) {
+      return t("settings.ocAuthValidationRequired")
+    }
+    return ""
+  }, [ocAuthEnabled, ocBearerToken, t])
+
+  const remoteAdminValidationMessage = useMemo(() => {
+    const nextPassword = remoteAdminPassword.trim()
+    const nextConfirm = remoteAdminPasswordConfirm.trim()
+
+    if (!nextPassword && !nextConfirm) {
+      return ""
+    }
+
+    if (!nextPassword || !nextConfirm) {
+      return t("settings.remoteAdminValidationRequired")
+    }
+
+    if (nextPassword.length < REMOTE_ADMIN_PASSWORD_MIN) {
+      return t("settings.remoteAdminValidationMin", {
+        count: REMOTE_ADMIN_PASSWORD_MIN,
+      })
+    }
+
+    if (nextPassword !== nextConfirm) {
+      return t("settings.remoteAdminValidationMismatch")
+    }
+
+    return ""
+  }, [remoteAdminPassword, remoteAdminPasswordConfirm, t])
+
   const parsedPort = /^\d+$/.test(portText) ? Number(portText) : NaN
   const isServerDirty = Boolean(config && portText !== String(config.server.port))
+  const isOcAuthDirty = Boolean(
+    config &&
+      (ocAuthEnabled !== !!config.server.authEnabled ||
+        ocBearerToken !== (config.server.localBearerToken ?? ""))
+  )
   const canSaveServer = Boolean(
     config && isServerDirty && !savingConfig && !portError && Number.isInteger(parsedPort)
+  )
+  const canSaveOcAuth = Boolean(
+    config && isOcAuthDirty && !savingConfig && !savingOcAuth && !ocAuthValidationMessage
+  )
+  const canSaveRemoteAdminPassword = Boolean(
+    remoteAdminPassword.trim() &&
+      !remoteAdminValidationMessage &&
+      !savingRemoteAdminPassword &&
+      !clearingRemoteAdminPassword
   )
 
   const remoteIsConfigured = useMemo(
@@ -379,6 +468,75 @@ export const SettingsPage: React.FC = () => {
       showToast(t("settings.networkSaveSuccess"), "success")
     } catch (error) {
       showToast(t("errors.saveFailed", { message: String(error) }), "error")
+    }
+  }
+
+  const handleSaveOcAuth = async () => {
+    if (!config || ocAuthValidationMessage) return
+
+    try {
+      setSavingOcAuth(true)
+      await saveConfig({
+        ...config,
+        server: {
+          ...config.server,
+          authEnabled: ocAuthEnabled,
+          localBearerToken: ocBearerToken.trim(),
+        },
+      })
+      showToast(t("settings.ocAuthSaveSuccess"), "success")
+    } catch (error) {
+      showToast(t("errors.saveFailed", { message: String(error) }), "error")
+    } finally {
+      setSavingOcAuth(false)
+    }
+  }
+
+  const handleSetRemoteAdminPassword = async () => {
+    if (remoteAdminValidationMessage) return
+
+    try {
+      setSavingRemoteAdminPassword(true)
+      const session = await bridge.setRemoteAdminPassword(remoteAdminPassword.trim())
+      setAuthSession(session)
+      emitAuthSessionChanged(session)
+      setRemoteAdminPassword("")
+      setRemoteAdminPasswordConfirm("")
+      showToast(t("settings.remoteAdminPasswordSaved"), "success")
+    } catch (error) {
+      showToast(t("errors.operationFailed", { message: String(error) }), "error")
+    } finally {
+      setSavingRemoteAdminPassword(false)
+    }
+  }
+
+  const handleClearRemoteAdminPassword = async () => {
+    try {
+      setClearingRemoteAdminPassword(true)
+      const session = await bridge.clearRemoteAdminPassword()
+      setAuthSession(session)
+      emitAuthSessionChanged(session)
+      setRemoteAdminPassword("")
+      setRemoteAdminPasswordConfirm("")
+      showToast(t("settings.remoteAdminPasswordCleared"), "success")
+    } catch (error) {
+      showToast(t("errors.operationFailed", { message: String(error) }), "error")
+    } finally {
+      setClearingRemoteAdminPassword(false)
+    }
+  }
+
+  const handleRemoteAdminLogout = async () => {
+    try {
+      setLoggingOutRemoteAdmin(true)
+      const session = await bridge.logoutRemoteAdmin()
+      setAuthSession(session)
+      emitAuthSessionChanged(session)
+      showToast(t("settings.remoteAdminLoggedOut"), "success")
+    } catch (error) {
+      showToast(t("errors.operationFailed", { message: String(error) }), "error")
+    } finally {
+      setLoggingOutRemoteAdmin(false)
     }
   }
 
@@ -582,6 +740,28 @@ export const SettingsPage: React.FC = () => {
     updateProgress,
   ])
 
+  const accessStatusBadges = useMemo(() => {
+    if (authSessionLoading) {
+      return [t("settings.remoteAdminStatusChecking")]
+    }
+
+    if (!authSession) {
+      return []
+    }
+
+    return [
+      authSession.remoteRequest
+        ? t("settings.remoteAdminSessionRemote")
+        : t("settings.remoteAdminSessionLocal"),
+      authSession.passwordConfigured
+        ? t("settings.remoteAdminStatusConfigured")
+        : t("settings.remoteAdminStatusOpen"),
+      authSession.authenticated
+        ? t("settings.remoteAdminStatusAuthenticated")
+        : t("settings.remoteAdminStatusLocked"),
+    ]
+  }, [authSession, authSessionLoading, t])
+
   return (
     <div className={styles.settingsPage}>
       <div className="app-top-header">
@@ -626,6 +806,151 @@ export const SettingsPage: React.FC = () => {
               </div>
             </div>
           )}
+
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>{t("settings.accessSection")}</h3>
+
+            <div className={styles.accessInlineBlock}>
+              <div className={styles.formGroupSwitch}>
+                <div className={styles.switchLabel}>
+                  <label htmlFor="settings-oc-auth-enabled">{t("settings.ocAuthEnabled")}</label>
+                  <p>{t("settings.ocAuthHint")}</p>
+                </div>
+                <Switch
+                  id="settings-oc-auth-enabled"
+                  checked={ocAuthEnabled}
+                  disabled={savingConfig || savingOcAuth}
+                  onChange={setOcAuthEnabled}
+                />
+              </div>
+
+              <div className={styles.securityFields}>
+                <div className={`${styles.formGroup} ${styles.fieldSpanFull}`}>
+                  <label htmlFor="settings-oc-bearer-token">{t("settings.ocAuthToken")}</label>
+                  <Input
+                    id="settings-oc-bearer-token"
+                    type="password"
+                    value={ocBearerToken}
+                    onChange={event => setOcBearerToken(event.target.value)}
+                    placeholder={t("settings.ocAuthTokenPlaceholder")}
+                    error={ocAuthValidationMessage || undefined}
+                    disabled={savingConfig || savingOcAuth}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.actions}>
+                <Button
+                  variant="primary"
+                  onClick={handleSaveOcAuth}
+                  disabled={!canSaveOcAuth}
+                  loading={savingOcAuth}
+                  type="button"
+                >
+                  {t("settings.ocAuthSave")}
+                </Button>
+              </div>
+            </div>
+
+            <div className={styles.securityCard}>
+              <div className={styles.securityHeader}>
+                <div>
+                  <h4 className={styles.securityTitle}>{t("settings.remoteAdminTitle")}</h4>
+                  <p className={styles.securityDescription}>{t("settings.remoteAdminHint")}</p>
+                </div>
+                <span className={styles.securitySurfaceTag}>/api/* + /management</span>
+              </div>
+
+              {accessStatusBadges.length > 0 && (
+                <div className={styles.statusBadgeRow}>
+                  {accessStatusBadges.map(badge => (
+                    <span key={badge} className={styles.statusBadge}>
+                      {badge}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className={styles.securityFields}>
+                <div className={styles.formGroup}>
+                  <label htmlFor="settings-remote-admin-password">
+                    {t("settings.remoteAdminPassword")}
+                  </label>
+                  <Input
+                    id="settings-remote-admin-password"
+                    type="password"
+                    value={remoteAdminPassword}
+                    onChange={event => setRemoteAdminPassword(event.target.value)}
+                    placeholder={t("settings.remoteAdminPasswordPlaceholder")}
+                    hint={
+                      !remoteAdminValidationMessage
+                        ? t("settings.remoteAdminPasswordHint")
+                        : undefined
+                    }
+                    error={remoteAdminValidationMessage || undefined}
+                    disabled={savingRemoteAdminPassword || clearingRemoteAdminPassword}
+                  />
+                </div>
+
+                <div className={styles.formGroup}>
+                  <label htmlFor="settings-remote-admin-password-confirm">
+                    {t("settings.remoteAdminPasswordConfirm")}
+                  </label>
+                  <Input
+                    id="settings-remote-admin-password-confirm"
+                    type="password"
+                    value={remoteAdminPasswordConfirm}
+                    onChange={event => setRemoteAdminPasswordConfirm(event.target.value)}
+                    placeholder={t("settings.remoteAdminPasswordConfirmPlaceholder")}
+                    error={remoteAdminValidationMessage || undefined}
+                    disabled={savingRemoteAdminPassword || clearingRemoteAdminPassword}
+                  />
+                </div>
+              </div>
+
+              <div className={styles.securityActions}>
+                <Button
+                  variant="primary"
+                  onClick={handleSetRemoteAdminPassword}
+                  disabled={!canSaveRemoteAdminPassword}
+                  loading={savingRemoteAdminPassword}
+                  type="button"
+                >
+                  {authSession?.passwordConfigured
+                    ? t("settings.remoteAdminUpdate")
+                    : t("settings.remoteAdminSet")}
+                </Button>
+
+                <Button
+                  variant="danger"
+                  onClick={handleClearRemoteAdminPassword}
+                  disabled={
+                    !authSession?.passwordConfigured ||
+                    savingRemoteAdminPassword ||
+                    clearingRemoteAdminPassword
+                  }
+                  loading={clearingRemoteAdminPassword}
+                  type="button"
+                >
+                  {t("settings.remoteAdminClear")}
+                </Button>
+
+                {authSession?.remoteRequest &&
+                  authSession.passwordConfigured &&
+                  authSession.authenticated && (
+                    <Button
+                      variant="ghost"
+                      onClick={handleRemoteAdminLogout}
+                      disabled={loggingOutRemoteAdmin}
+                      loading={loggingOutRemoteAdmin}
+                      type="button"
+                    >
+                      {t("settings.remoteAdminLogout")}
+                    </Button>
+                  )}
+              </div>
+            </div>
+          </div>
 
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>{t("settings.behaviorSection")}</h3>

@@ -1,7 +1,7 @@
 import type React from "react"
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Navigate, Route, Routes } from "react-router-dom"
-import { Layout } from "@/components"
+import { Layout, RemoteManagementLogin } from "@/components"
 import { useLogs, useTranslation, useUpdater } from "@/hooks"
 import {
   AgentEditPage,
@@ -25,6 +25,9 @@ import {
   statusState,
   stopServerAction,
 } from "@/store"
+import type { AuthSessionStatus } from "@/types"
+import { emitAuthSessionChanged, subscribeAuthSessionChanged } from "@/utils/authSession"
+import { bridge } from "@/utils/bridge"
 import { useActions, useRelaxValue } from "@/utils/relax"
 import { isHeadlessHttpRuntime } from "@/utils/runtime"
 import {
@@ -50,6 +53,9 @@ const App: React.FC = () => {
   const { t } = useTranslation()
   const { showToast } = useLogs()
   const initStartedRef = useRef(false)
+  const [authSession, setAuthSession] = useState<AuthSessionStatus | null>(null)
+  const [authSessionLoading, setAuthSessionLoading] = useState(false)
+  const [authSessionError, setAuthSessionError] = useState<string | null>(null)
 
   useUpdater()
 
@@ -75,6 +81,18 @@ const App: React.FC = () => {
 
   const isRunning = status?.running ?? false
   const isHeadlessRuntime = isHeadlessHttpRuntime()
+  const managementLocked = Boolean(
+    isHeadlessRuntime &&
+      authSession?.remoteRequest &&
+      authSession.passwordConfigured &&
+      !authSession.authenticated
+  )
+  const canInitialize =
+    !isHeadlessRuntime ||
+    Boolean(
+      authSession &&
+        (!authSession.remoteRequest || !authSession.passwordConfigured || authSession.authenticated)
+    )
   const serverAddresses = status
     ? resolveReachableServerBaseUrls({
         statusAddress: status.address,
@@ -118,19 +136,86 @@ const App: React.FC = () => {
     "bootstrapError:",
     bootstrapError,
     "status:",
-    status
+    status,
+    "authSession:",
+    authSession
   )
 
+  const loadAuthSession = useCallback(async () => {
+    if (!isHeadlessRuntime) {
+      setAuthSession({
+        authenticated: true,
+        remoteRequest: false,
+        passwordConfigured: false,
+      })
+      setAuthSessionError(null)
+      return
+    }
+
+    try {
+      setAuthSessionLoading(true)
+      const session = await bridge.getAuthSession()
+      setAuthSession(session)
+      setAuthSessionError(null)
+      emitAuthSessionChanged(session)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setAuthSessionError(message || translate("auth.sessionLoadFailed"))
+    } finally {
+      setAuthSessionLoading(false)
+    }
+  }, [isHeadlessRuntime, translate])
+
+  const handleRemoteAdminLogin = useCallback(async (password: string) => {
+    const session = await bridge.loginRemoteAdmin(password)
+    initStartedRef.current = false
+    setAuthSession(session)
+    setAuthSessionError(null)
+    emitAuthSessionChanged(session)
+  }, [])
+
   useEffect(() => {
-    if (initStartedRef.current) {
+    return subscribeAuthSessionChanged(session => {
+      setAuthSession(session)
+      setAuthSessionError(null)
+    })
+  }, [])
+
+  useEffect(() => {
+    void loadAuthSession()
+  }, [loadAuthSession])
+
+  useEffect(() => {
+    if (initStartedRef.current || !canInitialize) {
       return
     }
     initStartedRef.current = true
     console.log("[App] useEffect running, calling init()...")
     void init()
-  }, [init])
+  }, [canInitialize, init])
 
   console.log("[App] About to render layout")
+
+  if (authSessionLoading && !authSession) {
+    return (
+      <div className="loading-screen">
+        <p>{translate("auth.sessionChecking")}</p>
+      </div>
+    )
+  }
+
+  if (authSessionError && !authSession) {
+    return (
+      <div className="error-screen">
+        <p>{translate("auth.sessionLoadFailed")}</p>
+        <p>{authSessionError}</p>
+      </div>
+    )
+  }
+
+  if (managementLocked) {
+    return <RemoteManagementLogin onSubmit={handleRemoteAdminLogin} />
+  }
 
   if (bootstrapping && !bootstrapError && !config && !status) {
     console.log("[App] Showing loading screen")

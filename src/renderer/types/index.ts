@@ -66,6 +66,16 @@ export interface SaveConfigResult {
   status: ProxyStatus
 }
 
+export interface AuthSessionStatus {
+  authenticated: boolean
+  remoteRequest: boolean
+  passwordConfigured: boolean
+}
+
+export interface OkResult {
+  ok: boolean
+}
+
 export interface GroupBackupExportResult {
   ok: boolean
   canceled: boolean
@@ -237,12 +247,16 @@ export interface AppInfo {
   version: string
 }
 
-export type IntegrationClientKind = "claude" | "codex" | "opencode"
+export type IntegrationClientKind = "claude" | "codex" | "openclaw" | "opencode"
 
 export interface AgentConfig {
+  agentId?: string
+  providerId?: string
   url?: string
   apiToken?: string
+  apiFormat?: string
   model?: string
+  fallbackModels?: string[]
   timeout?: number
   alwaysThinkingEnabled?: boolean
   includeCoAuthoredBy?: boolean

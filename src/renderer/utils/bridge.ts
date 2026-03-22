@@ -44,6 +44,21 @@ async function withBridge<T>(httpFn: () => Promise<T>, ipcFn: () => Promise<T>):
 }
 
 export const bridge = {
+  getAuthSession() {
+    return withBridge(httpApi.getAuthSession, ipc.getAuthSession)
+  },
+
+  loginRemoteAdmin(password: string) {
+    return withBridge(
+      () => httpApi.loginRemoteAdmin(password),
+      () => ipc.loginRemoteAdmin(password)
+    )
+  },
+
+  logoutRemoteAdmin() {
+    return withBridge(httpApi.logoutRemoteAdmin, ipc.logoutRemoteAdmin)
+  },
+
   getAppInfo() {
     return withBridge(httpApi.getAppInfo, ipc.getAppInfo)
   },
@@ -84,6 +99,17 @@ export const bridge = {
       () => httpApi.saveConfig(config),
       () => ipc.saveConfig(config)
     )
+  },
+
+  setRemoteAdminPassword(password: string) {
+    return withBridge(
+      () => httpApi.setRemoteAdminPassword(password),
+      () => ipc.setRemoteAdminPassword(password)
+    )
+  },
+
+  clearRemoteAdminPassword() {
+    return withBridge(httpApi.clearRemoteAdminPassword, ipc.clearRemoteAdminPassword)
   },
 
   exportGroupsBackup() {

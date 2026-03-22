@@ -10,14 +10,15 @@ use super::observability::{
 };
 use super::routing::{
     assert_rule_ready, build_rule_headers, detect_entry_protocol, refresh_route_index_if_needed,
-    resolve_target_model, resolve_upstream_path, resolve_upstream_url, EntryEndpoint, ParsedPath,
-    PathEntry, RouteResolution,
+    resolve_target_model, resolve_upstream_path, resolve_upstream_url, EntryEndpoint,
+    EntryProtocol, ParsedPath, PathEntry, RouteResolution,
 };
 use super::{
     ServiceState, MAX_REQUEST_BODY_BYTES, MAX_STREAM_LOG_BODY_BYTES,
     MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS, NON_STREAM_REQUEST_TIMEOUT_MS,
     STREAM_REQUEST_TIMEOUT_MS,
 };
+use crate::auth::extract_bearer_token;
 use crate::models::{RuleProtocol, TokenUsage};
 use crate::transformer::convert::claude_openai_responses::ResponsesToClaudeOptions;
 use crate::transformer::{StreamContext, Transformer};
@@ -179,55 +180,6 @@ pub(super) async fn handle_proxy_request(
         return reject_and_log(&state, trace_id, method, &parsed_path, 404, payload).await;
     }
 
-    if let Err(msg) = refresh_route_index_if_needed(&state) {
-        state.metrics.increment_error();
-        return proxy_error_response(500, "proxy_error", &msg, None, "proxy", &trace_id);
-    }
-
-    let (auth_enabled, expected_auth, capture_body, _strict_mode, text_tool_call_fallback_enabled) =
-        match state.config.read() {
-            Ok(cfg) => {
-                let expected = format!("Bearer {}", cfg.server.local_bearer_token);
-                (
-                    cfg.server.auth_enabled,
-                    expected,
-                    cfg.logging.capture_body,
-                    cfg.compat.strict_mode,
-                    cfg.compat.text_tool_call_fallback_enabled,
-                )
-            }
-            Err(_) => {
-                state.metrics.increment_error();
-                return proxy_error_response(
-                    500,
-                    "proxy_error",
-                    "Failed to acquire config lock",
-                    None,
-                    "proxy",
-                    &trace_id,
-                );
-            }
-        };
-
-    if auth_enabled {
-        let auth = headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_string();
-        if auth != expected_auth {
-            return reject_and_log(
-                &state,
-                trace_id,
-                method,
-                &parsed_path,
-                401,
-                json!({"error": {"code": "unauthorized", "message": "Missing or invalid local bearer token"}}),
-            )
-            .await;
-        }
-    }
-
     let entry = match detect_entry_protocol(&parsed_path.suffix) {
         Some(v) => v,
         None => {
@@ -242,6 +194,50 @@ pub(super) async fn handle_proxy_request(
             .await;
         }
     };
+
+    if let Err(msg) = refresh_route_index_if_needed(&state) {
+        state.metrics.increment_error();
+        return proxy_error_response(500, "proxy_error", &msg, None, "proxy", &trace_id);
+    }
+
+    let (
+        auth_enabled,
+        local_access_token,
+        capture_body,
+        _strict_mode,
+        text_tool_call_fallback_enabled,
+    ) = match state.config.read() {
+        Ok(cfg) => (
+            cfg.server.auth_enabled,
+            cfg.server.local_bearer_token.clone(),
+            cfg.logging.capture_body,
+            cfg.compat.strict_mode,
+            cfg.compat.text_tool_call_fallback_enabled,
+        ),
+        Err(_) => {
+            state.metrics.increment_error();
+            return proxy_error_response(
+                500,
+                "proxy_error",
+                "Failed to acquire config lock",
+                None,
+                "proxy",
+                &trace_id,
+            );
+        }
+    };
+
+    if auth_enabled && !request_matches_local_access_token(&headers, &entry, &local_access_token) {
+        return reject_and_log(
+            &state,
+            trace_id,
+            method,
+            &parsed_path,
+            401,
+            json!({"error": {"code": "unauthorized", "message": "Missing or invalid access token"}}),
+        )
+        .await;
+    }
 
     let active_route = match state.route_index.read() {
         Ok(index) => index.get(&parsed_path.group_id).cloned(),
@@ -1530,6 +1526,39 @@ pub(super) async fn handle_proxy_request(
     resp
 }
 
+fn extract_header_token(headers: &HeaderMap, header_name: &str) -> Option<String> {
+    let raw = headers.get(header_name)?.to_str().ok()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(raw.to_string())
+}
+
+fn request_matches_local_access_token(
+    headers: &HeaderMap,
+    entry: &PathEntry,
+    expected_token: &str,
+) -> bool {
+    let expected = expected_token.trim();
+    if expected.is_empty() {
+        return false;
+    }
+
+    let bearer_matches = extract_bearer_token(headers)
+        .map(|token| token == expected)
+        .unwrap_or(false);
+
+    match entry.protocol {
+        EntryProtocol::Anthropic => {
+            let api_key_matches = extract_header_token(headers, "x-api-key")
+                .map(|token| token == expected)
+                .unwrap_or(false);
+            api_key_matches || bearer_matches
+        }
+        EntryProtocol::Openai => bearer_matches,
+    }
+}
+
 /// Build upstream payload for the selected target protocol surface.
 pub(super) fn build_upstream_body(
     transformer: &dyn Transformer,
@@ -1966,10 +1995,12 @@ fn looks_like_sse_prelude(chunk: &[u8]) -> bool {
 mod tests {
     use super::{
         find_sse_delimiter, looks_like_sse_prelude, merge_token_usage, pop_sse_event,
-        prepare_transformer_for_route, stream_requires_sse_event_buffer, EntryEndpoint, PathEntry,
+        prepare_transformer_for_route, request_matches_local_access_token,
+        stream_requires_sse_event_buffer, EntryEndpoint, PathEntry,
     };
     use crate::models::{RuleProtocol, TokenUsage};
     use crate::proxy::routing::EntryProtocol;
+    use axum::http::{HeaderMap, HeaderValue};
     use std::collections::HashSet;
 
     #[test]
@@ -2140,5 +2171,75 @@ mod tests {
         assert_eq!(merged.output_tokens, upstream.output_tokens);
         assert_eq!(merged.cache_read_tokens, upstream.cache_read_tokens);
         assert_eq!(merged.cache_write_tokens, upstream.cache_write_tokens);
+    }
+
+    #[test]
+    fn local_access_token_accepts_bearer_for_openai_entries() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Openai,
+            endpoint: EntryEndpoint::Responses,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer local-test-token"),
+        );
+
+        assert!(request_matches_local_access_token(
+            &headers,
+            &entry,
+            "local-test-token"
+        ));
+    }
+
+    #[test]
+    fn local_access_token_accepts_x_api_key_for_anthropic_entries() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Anthropic,
+            endpoint: EntryEndpoint::Messages,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", HeaderValue::from_static("local-test-token"));
+
+        assert!(request_matches_local_access_token(
+            &headers,
+            &entry,
+            "local-test-token"
+        ));
+    }
+
+    #[test]
+    fn local_access_token_allows_bearer_fallback_for_anthropic_entries() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Anthropic,
+            endpoint: EntryEndpoint::Messages,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer local-test-token"),
+        );
+
+        assert!(request_matches_local_access_token(
+            &headers,
+            &entry,
+            "local-test-token"
+        ));
+    }
+
+    #[test]
+    fn local_access_token_rejects_x_api_key_for_openai_entries() {
+        let entry = PathEntry {
+            protocol: EntryProtocol::Openai,
+            endpoint: EntryEndpoint::ChatCompletions,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", HeaderValue::from_static("local-test-token"));
+
+        assert!(!request_matches_local_access_token(
+            &headers,
+            &entry,
+            "local-test-token"
+        ));
     }
 }

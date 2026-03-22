@@ -1,5 +1,52 @@
 # Problems
 
+## 2026-03-22: 内置窗口长时间运行后 management UI 可能 crash（疑似 renderer/WebView 内存压力）
+
+- 现象:
+  - 用户反馈：应用“用久了之后”内置窗口里的 web 页面会 crash。
+  - 当前仅在 **内置窗口** 观察到，外部浏览器访问 `/management` 是否同样受影响，尚未验证。
+  - 目前没有稳定复现步骤，也没有抓到一条明确的崩溃日志或最小触发条件。
+
+### 当前判断
+
+- 暂时**没有证据**表明存在一个明确的 Rust 侧无界内存泄漏。
+- 更像是 renderer/WebView 侧的**长期内存压力**问题，可能表现为：
+  - 高频轮询带来的持续对象分配与序列化开销；
+  - ECharts / Canvas / GPU / WebView 原生资源长期更新后的内存占用增长；
+  - Tauri IPC 通道相较浏览器 HTTP 路径更容易放大内置窗口侧压力。
+- 因为内置窗口优先走 IPC、浏览器走 HTTP，所以“只在内置窗口 crash”这一现象与当前架构是对得上的。
+
+### 当前最可疑的代码位置
+
+- `src/renderer/pages/LogsPage/LogsPage.tsx`
+  - 日志页存在 3 秒一次的日志刷新与统计刷新；
+  - 统计刷新当前未限制为仅在 `stats` tab 生效；
+  - 页面内同时维护 4 个 ECharts 实例，长期运行可能累积 WebView 侧内存/显存压力。
+- `src/renderer/utils/bridge.ts`
+  - 内置窗口优先走 Tauri IPC，不走浏览器 HTTP。
+- `src/renderer/utils/ipc.ts`
+  - 日志与统计数据通过 `invoke` 往返传输，可能放大大对象序列化/反序列化成本。
+- `src/renderer/hooks/useLogs.ts`
+  - `useLogs()` 同时订阅 `logsState`，但部分调用方只是想拿 toast 能力，可能放大不必要的重渲染范围。
+
+### 暂定结论
+
+- 当前更适合把它视为：
+  - “内置窗口 renderer / WebView 长期运行稳定性问题”
+  - 而不是已经确认的“React 重渲染导致的典型 JS 内存泄漏”
+- 需要后续通过复现、内存曲线和崩溃日志进一步确认：
+  - 是 JS heap 增长；
+  - 还是 IPC / 图表 / GPU / WebView 原生内存增长。
+
+### 后续建议
+
+- 先补一轮针对内置窗口的观测与止血优化，再判断是否真正存在泄漏：
+  - 为日志页和统计页增加更严格的轮询暂停条件；
+  - 限制统计轮询仅在 `stats` tab 生效；
+  - 降低图表刷新频率或动画强度；
+  - 区分“只需要 toast”与“需要订阅 logsState”的 hook 用法；
+  - 如果问题仍在，再补内置窗口侧内存观测和复现脚本。
+
 ## 2026-03-06: `GLM /v1/chat/completions` 链路中 `/responses -> /chat/completions` 返回上游 400（角色信息不正确）
 
 - 现象:

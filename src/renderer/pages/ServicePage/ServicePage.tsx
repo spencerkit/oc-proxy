@@ -150,6 +150,11 @@ export const ServicePage: React.FC = () => {
         hint: t("integration.codex.hint"),
       },
       {
+        kind: "openclaw" as const,
+        title: t("integration.openclaw.title"),
+        hint: t("integration.openclaw.hint"),
+      },
+      {
         kind: "opencode" as const,
         title: t("integration.opencode.title"),
         hint: t("integration.opencode.hint"),
@@ -166,6 +171,7 @@ export const ServicePage: React.FC = () => {
     () => ({
       claude: integrationTargets.filter(item => item.kind === "claude"),
       codex: integrationTargets.filter(item => item.kind === "codex"),
+      openclaw: integrationTargets.filter(item => item.kind === "openclaw"),
       opencode: integrationTargets.filter(item => item.kind === "opencode"),
     }),
     [integrationTargets]
@@ -395,6 +401,8 @@ export const ServicePage: React.FC = () => {
         return t("integration.claude.title")
       case "codex":
         return t("integration.codex.title")
+      case "openclaw":
+        return t("integration.openclaw.title")
       default:
         return t("integration.opencode.title")
     }
@@ -566,6 +574,8 @@ export const ServicePage: React.FC = () => {
         return `${target.configDir}${withSlash ? "" : "/"}settings.json`
       case "codex":
         return `${target.configDir}${withSlash ? "" : "/"}config.toml`
+      case "openclaw":
+        return `${target.configDir}${withSlash ? "" : "/"}openclaw.json`
       default:
         return `${target.configDir}${withSlash ? "" : "/"}opencode.json(c)`
     }
@@ -577,6 +587,8 @@ export const ServicePage: React.FC = () => {
         return "env.ANTHROPIC_BASE_URL"
       case "codex":
         return "model_providers.<model_provider>.base_url"
+      case "openclaw":
+        return "models.providers.<providerId>.baseUrl"
       default:
         return "provider.aor_shared.options.baseURL"
     }
@@ -599,7 +611,12 @@ export const ServicePage: React.FC = () => {
     return entryUrls.find(url => !url.includes("://localhost")) ?? entryUrls[0] ?? ""
   }, [entryUrls])
   const entryUrlSet = useMemo(
-    () => new Set(entryUrls.map(url => normalizeComparableUrl(url)).filter(Boolean)),
+    () =>
+      new Set(
+        entryUrls
+          .flatMap(url => [normalizeComparableUrl(url), normalizeComparableUrl(`${url}/v1`)])
+          .filter(Boolean)
+      ),
     [entryUrls]
   )
   const integrationSnapshotSections = useMemo(() => {
