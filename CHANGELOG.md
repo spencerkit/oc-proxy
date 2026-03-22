@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.12 - 2026-03-22
+### Features
+- feat: add remote auth and openclaw integration (94ad54d)
+- feat: add remote management password flow (edfa18c)
+### Fixes
+- fix: support opencode tokens and oc auth compatibility (ed07a3a)
+### Maintenance
+- ci: build renderer assets in linux smoke (0c10b35)
+- refactor: simplify access control settings (ee3b8d6)
+- docs: record desktop webview stability issue (7175043)
+- ci: pin linux release to ubuntu 22.04 (7b85475)
+- build: add linux release packaging (46d228a)
+
 ## v0.2.11 - 2026-03-13
 ### Fixes
 - fix(release): build and sign updater artifacts explicitly (7482d5e)

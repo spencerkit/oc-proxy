@@ -1,6 +1,6 @@
 [package]
 name = "ai-open-router-tauri"
-version = "0.2.11"
+version = "0.2.12"
 description = "AI Open Router Tauri app"
 authors = ["AI Open Router"]
 license = "MIT"

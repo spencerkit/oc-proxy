@@ -7,6 +7,7 @@
 - 采用 `SemVer`：`MAJOR.MINOR.PATCH`
 - 版本号必须在以下文件保持一致：
 - `package.json`
+- `packages/aor-cli/package.json`
 - `package-lock.json`
 - `src-tauri/Cargo.toml`
 - `src-tauri/tauri.conf.json`
@@ -77,6 +78,7 @@ npm run release:prepare -- --from-tag v0.2.1
 命令会自动更新：
 
 - `package.json` / `package-lock.json`
+- `packages/aor-cli/package.json`
 - `src-tauri/Cargo.toml`
 - `src-tauri/tauri.conf.json`
 - `CHANGELOG.md`（新增 `## vX.Y.Z - YYYY-MM-DD`）
@@ -85,7 +87,7 @@ npm run release:prepare -- --from-tag v0.2.1
 
 ```bash
 git checkout -b release/vX.Y.Z
-git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json CHANGELOG.md
+git add package.json packages/aor-cli/package.json package-lock.json src-tauri/Cargo.toml src-tauri/tauri.conf.json CHANGELOG.md
 git commit -m "chore(release): vX.Y.Z"
 ```
 
@@ -160,6 +162,7 @@ bash ./scripts/package-headless-artifacts.sh
 - 症状：提示多文件版本不一致
 - 处理：
 - 检查 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`
+- 以及 `packages/aor-cli/package.json`
 - 使用 `npm run release:prepare` 重新统一版本
 
 ### 7.3 `Release Build` 无法生成 Release Notes

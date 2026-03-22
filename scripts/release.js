@@ -6,6 +6,7 @@ const { spawnSync } = require("node:child_process")
 
 const rootDir = path.resolve(__dirname, "..")
 const packageJsonPath = path.join(rootDir, "package.json")
+const cliPackageJsonPath = path.join(rootDir, "packages", "aor-cli", "package.json")
 const packageLockPath = path.join(rootDir, "package-lock.json")
 const cargoTomlPath = path.join(rootDir, "src-tauri", "Cargo.toml")
 const tauriConfigPath = path.join(rootDir, "src-tauri", "tauri.conf.json")
@@ -268,10 +269,12 @@ function updateChangelog(section) {
 
 function writeVersionFiles(nextVersion, changelogSection, dryRun) {
   const packageJson = readJson(packageJsonPath)
+  const cliPackageJson = readJson(cliPackageJsonPath)
   const tauriConfig = readJson(tauriConfigPath)
   const cargoToml = fs.readFileSync(cargoTomlPath, "utf8")
 
   packageJson.version = nextVersion
+  cliPackageJson.version = nextVersion
   tauriConfig.version = nextVersion
 
   const nextCargoToml = updateCargoVersion(cargoToml, nextVersion)
@@ -282,6 +285,7 @@ function writeVersionFiles(nextVersion, changelogSection, dryRun) {
   }
 
   writeJson(packageJsonPath, packageJson)
+  writeJson(cliPackageJsonPath, cliPackageJson)
   writeJson(tauriConfigPath, tauriConfig)
   fs.writeFileSync(cargoTomlPath, nextCargoToml, "utf8")
   fs.writeFileSync(changelogPath, nextChangelog, "utf8")
@@ -300,12 +304,13 @@ function main() {
   const options = parseArgs(args)
 
   const packageVersion = readPackageVersion()
+  const cliPackageVersion = readJson(cliPackageJsonPath).version
   const cargoVersion = readCargoVersion()
   const tauriVersion = readJson(tauriConfigPath).version
-  const versions = new Set([packageVersion, cargoVersion, tauriVersion])
+  const versions = new Set([packageVersion, cliPackageVersion, cargoVersion, tauriVersion])
   if (versions.size !== 1) {
     throw new Error(
-      `Version mismatch before release preparation: package=${packageVersion}, cargo=${cargoVersion}, tauri=${tauriVersion}`
+      `Version mismatch before release preparation: package=${packageVersion}, cli=${cliPackageVersion}, cargo=${cargoVersion}, tauri=${tauriVersion}`
     )
   }
 
@@ -355,7 +360,7 @@ function main() {
     console.log("[release] dry run only. no files written.")
   } else {
     console.log(
-      "[release] updated files: package.json, package-lock.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, CHANGELOG.md"
+      "[release] updated files: package.json, packages/aor-cli/package.json, package-lock.json, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, CHANGELOG.md"
     )
   }
 }
