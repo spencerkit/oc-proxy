@@ -180,6 +180,18 @@ pub fn write_group_entry_with_targets(
     targets: Vec<IntegrationTarget>,
     target_ids: Vec<String>,
 ) -> AppResult<IntegrationWriteResult> {
+    write_group_entry_with_targets_and_base_url(state, group_id, targets, target_ids, None)
+}
+
+/// Writes selected targets with current group entry URL using explicit target list and optional
+/// request-derived base URL override.
+pub fn write_group_entry_with_targets_and_base_url(
+    state: &SharedState,
+    group_id: &str,
+    targets: Vec<IntegrationTarget>,
+    target_ids: Vec<String>,
+    base_url_override: Option<&str>,
+) -> AppResult<IntegrationWriteResult> {
     let normalized_group_id = group_id.trim();
     if normalized_group_id.is_empty() {
         return Err(AppError::validation("group id is required"));
@@ -199,7 +211,7 @@ pub fn write_group_entry_with_targets(
         )));
     }
 
-    let entry_url = build_group_entry_url(state, &config, normalized_group_id);
+    let entry_url = build_group_entry_url(state, &config, normalized_group_id, base_url_override);
     let target_map: HashMap<String, IntegrationTarget> = targets
         .into_iter()
         .map(|target| (target.id.clone(), target))
@@ -289,8 +301,17 @@ pub fn write_group_entry_with_targets(
 }
 
 /// Builds group entry URL for external client configs.
-fn build_group_entry_url(state: &SharedState, config: &ProxyConfig, group_id: &str) -> String {
+fn build_group_entry_url(
+    state: &SharedState,
+    config: &ProxyConfig,
+    group_id: &str,
+    base_url_override: Option<&str>,
+) -> String {
     let port = config.server.port;
+    if let Some(base_url) = base_url_override.and_then(|raw| normalize_base_url_override(raw, port))
+    {
+        return format!("{base_url}/oc/{group_id}");
+    }
 
     let status = state.runtime.get_status();
     if let Some(base_url) = choose_ip_base_url_from_status(status.lan_address.as_deref(), port) {
@@ -309,6 +330,33 @@ fn build_group_entry_url(state: &SharedState, config: &ProxyConfig, group_id: &s
     }
 
     format!("http://127.0.0.1:{port}/oc/{group_id}")
+}
+
+fn normalize_base_url_override(raw: &str, fallback_port: u16) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let with_scheme = if raw.starts_with("http://") || raw.starts_with("https://") {
+        raw.to_string()
+    } else {
+        format!("http://{raw}")
+    };
+    let mut parsed = Url::parse(&with_scheme).ok()?;
+    let host_text = parsed.host_str()?.trim().to_ascii_lowercase();
+    if host_text.is_empty() || is_wildcard_host(&host_text) {
+        return None;
+    }
+
+    if parsed.port().is_none() {
+        let _ = parsed.set_port(Some(fallback_port));
+    }
+    parsed.set_path("");
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    let normalized = parsed.to_string();
+    Some(normalized.trim_end_matches('/').to_string())
 }
 
 /// Chooses base URL from runtime status address and enforces IP host.
@@ -1076,8 +1124,67 @@ fn ensure_toml_table<'a>(parent: &'a mut Table, key: &str) -> &'a mut Table {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_state::{AppState, SharedState};
+    use crate::auth::RemoteAdminAuthStore;
+    use crate::integration_store::IntegrationStore;
+    use crate::log_store::LogStore;
+    use crate::models::AppInfo;
+    use crate::proxy::ProxyRuntime;
+    use crate::stats_store::StatsStore;
     use serde_json::json;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_shared_state() -> SharedState {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let base_dir =
+            std::env::temp_dir().join(format!("oc-proxy-integration-service-{unique_id}"));
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let config_store = crate::config_store::ConfigStore::new(base_dir.join("config.json"));
+        config_store
+            .initialize()
+            .expect("config store should initialize");
+
+        let integration_store = IntegrationStore::new(base_dir.join("integrations.json"));
+        integration_store
+            .initialize()
+            .expect("integration store should initialize");
+
+        let remote_admin_auth = RemoteAdminAuthStore::new(base_dir.join("remote-admin-auth.json"));
+        remote_admin_auth
+            .initialize()
+            .expect("remote admin auth should initialize");
+
+        let stats_store = StatsStore::new(base_dir.join("stats.sqlite"));
+        stats_store
+            .initialize()
+            .expect("stats store should initialize");
+
+        let runtime = ProxyRuntime::new(
+            config_store.shared_config(),
+            config_store.shared_revision(),
+            LogStore::new(64),
+            stats_store,
+        )
+        .expect("runtime should initialize");
+
+        Arc::new(AppState {
+            app_info: AppInfo {
+                name: "test".to_string(),
+                version: "0.0.0".to_string(),
+            },
+            config_store,
+            integration_store,
+            remote_admin_auth,
+            runtime,
+            renderer_ready: AtomicBool::new(false),
+        })
+    }
 
     #[test]
     fn codex_config_shape_can_be_created_from_empty_document() {
@@ -1092,6 +1199,27 @@ mod tests {
         assert!(output.contains("model_providers"));
         assert!(output.contains("custom_provider"));
         assert!(output.contains("base_url"));
+    }
+
+    #[test]
+    fn normalize_base_url_override_rejects_wildcard_hosts_and_adds_missing_port() {
+        assert_eq!(
+            normalize_base_url_override("https://remote-aor.test", 8899).as_deref(),
+            Some("https://remote-aor.test:8899")
+        );
+        assert_eq!(normalize_base_url_override("0.0.0.0:8899", 8899), None);
+        assert_eq!(normalize_base_url_override("::", 8899), None);
+    }
+
+    #[test]
+    fn build_group_entry_url_prefers_base_url_override() {
+        let state = test_shared_state();
+        let config = state.config_store.get();
+
+        assert_eq!(
+            build_group_entry_url(&state, &config, "dev", Some("https://remote-aor.test:17777")),
+            "https://remote-aor.test:17777/oc/dev"
+        );
     }
 
     #[test]

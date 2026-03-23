@@ -74,6 +74,7 @@ function dedupeBaseUrls(urls: string[]): string[] {
 }
 
 export interface ResolveServerAddressParams {
+  currentOrigin?: string | null
   statusAddress?: string | null
   statusLanAddress?: string | null
   configHost?: string
@@ -84,6 +85,13 @@ export interface ResolveServerAddressParams {
 export function resolveReachableServerBaseUrls(params: ResolveServerAddressParams): string[] {
   const fallbackPort = params.configPort ?? 8899
   const urls: string[] = []
+
+  if (params.currentOrigin) {
+    const normalized = normalizeBaseUrl(params.currentOrigin, fallbackPort)
+    if (normalized) {
+      urls.push(normalized)
+    }
+  }
 
   if (params.statusAddress) {
     const normalized = normalizeBaseUrl(params.statusAddress, fallbackPort)
@@ -123,7 +131,7 @@ export function formatServerAddressForDisplay(baseUrl: string): string {
     return baseUrl
   }
 
-  const host = parsed.hostname
+  const host = parsed.hostname.replace(/^\[|\]$/g, "")
   const displayHost = host.includes(":") ? `[${host}]` : host
   const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80")
   return `${displayHost}:${port}`

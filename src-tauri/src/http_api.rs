@@ -4,8 +4,8 @@
 
 use crate::app_state::{sync_runtime_config, SharedState};
 use crate::auth::{
-    build_clear_session_cookie, build_session_cookie, extract_cookie_value, is_remote_request,
-    SESSION_COOKIE_NAME,
+    build_clear_session_cookie, build_session_cookie, extract_cookie_value,
+    is_remote_request_with_headers, SESSION_COOKIE_NAME,
 };
 use crate::backup::{backup_default_file_name, create_groups_backup_payload};
 use crate::models::{
@@ -382,7 +382,40 @@ fn request_socket_addr(request: &Request<axum::body::Body>) -> Option<SocketAddr
 }
 
 fn request_is_remote(request: &Request<axum::body::Body>) -> bool {
-    is_remote_request(request_socket_addr(request))
+    is_remote_request_with_headers(request_socket_addr(request), request.headers())
+}
+
+fn resolve_remote_request(
+    socket_addr: SocketAddr,
+    headers: &HeaderMap,
+) -> bool {
+    is_remote_request_with_headers(Some(socket_addr), headers)
+}
+
+fn resolve_request_base_url(headers: &HeaderMap) -> Option<String> {
+    let origin = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(origin) = origin {
+        return Some(origin.trim_end_matches('/').to_string());
+    }
+
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get(header::HOST))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| *value == "http" || *value == "https")
+        .unwrap_or("http");
+
+    Some(format!("{scheme}://{}", host.trim_end_matches('/')))
 }
 
 fn set_cookie_header(response: &mut Response, cookie_value: &str) -> Result<(), ApiError> {
@@ -427,7 +460,7 @@ async fn auth_session(
     headers: HeaderMap,
 ) -> ApiResult<AuthSessionStatus> {
     let shared = require_shared_state(&state)?;
-    let remote_request = is_remote_request(Some(socket_addr));
+    let remote_request = resolve_remote_request(socket_addr, &headers);
     let authenticated = if remote_request && shared.remote_admin_auth.password_configured() {
         shared
             .remote_admin_auth
@@ -451,10 +484,11 @@ struct AuthLoginRequest {
 async fn auth_login(
     State(state): State<ServiceState>,
     ConnectInfo(socket_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(payload): Json<AuthLoginRequest>,
 ) -> Result<Response, ApiError> {
     let shared = require_shared_state(&state)?;
-    let remote_request = is_remote_request(Some(socket_addr));
+    let remote_request = resolve_remote_request(socket_addr, &headers);
     if !remote_request || !shared.remote_admin_auth.password_configured() {
         return Ok(Json(config_service::auth_session_status(
             &shared,
@@ -495,7 +529,7 @@ async fn auth_logout(
     if let Some(session_token) = extract_cookie_value(&headers, SESSION_COOKIE_NAME) {
         shared.remote_admin_auth.revoke_session(&session_token);
     }
-    let remote_request = is_remote_request(Some(socket_addr));
+    let remote_request = resolve_remote_request(socket_addr, &headers);
     let mut response = Json(config_service::auth_session_status(
         &shared,
         remote_request,
@@ -650,10 +684,11 @@ async fn config_save(
 async fn config_set_remote_admin_password(
     State(state): State<ServiceState>,
     ConnectInfo(socket_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(payload): Json<RemoteAdminPasswordRequest>,
 ) -> Result<Response, ApiError> {
     let shared = require_shared_state(&state)?;
-    let remote_request = is_remote_request(Some(socket_addr));
+    let remote_request = resolve_remote_request(socket_addr, &headers);
     let status =
         config_service::set_remote_admin_password(&shared, payload.password, remote_request)
             .map_err(ApiError::from)?;
@@ -671,9 +706,10 @@ async fn config_set_remote_admin_password(
 async fn config_clear_remote_admin_password(
     State(state): State<ServiceState>,
     ConnectInfo(socket_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let shared = require_shared_state(&state)?;
-    let remote_request = is_remote_request(Some(socket_addr));
+    let remote_request = resolve_remote_request(socket_addr, &headers);
     let status = config_service::clear_remote_admin_password(&shared, remote_request)
         .map_err(ApiError::from)?;
     let mut response = Json(status).into_response();
@@ -1098,6 +1134,8 @@ struct IntegrationWriteEntryRequest {
 
 async fn integration_write_group_entry(
     State(state): State<ServiceState>,
+    ConnectInfo(socket_addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(payload): Json<IntegrationWriteEntryRequest>,
 ) -> ApiResult<IntegrationWriteResult> {
     let shared = require_shared_state(&state)?;
@@ -1106,11 +1144,17 @@ async fn integration_write_group_entry(
     } else {
         integration_service::list_targets(&shared)
     };
-    let result = integration_service::write_group_entry_with_targets(
+    let base_url_override = if resolve_remote_request(socket_addr, &headers) {
+        resolve_request_base_url(&headers)
+    } else {
+        None
+    };
+    let result = integration_service::write_group_entry_with_targets_and_base_url(
         &shared,
         &payload.group_id,
         targets,
         payload.target_ids,
+        base_url_override.as_deref(),
     )
     .map_err(ApiError::from)?;
     Ok(Json(result))
@@ -1200,4 +1244,54 @@ async fn integration_write_agent_config_source(
     )
     .map_err(ApiError::from)?;
     Ok(Json(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_request_base_url;
+    use axum::http::{header, HeaderMap, HeaderValue};
+
+    #[test]
+    fn resolve_request_base_url_prefers_origin() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://remote-aor.test:17777"),
+        );
+        headers.insert(
+            "x-forwarded-host",
+            HeaderValue::from_static("ignored.example:18888"),
+        );
+
+        assert_eq!(
+            resolve_request_base_url(&headers).as_deref(),
+            Some("https://remote-aor.test:17777")
+        );
+    }
+
+    #[test]
+    fn resolve_request_base_url_uses_forwarded_host_and_proto() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-host",
+            HeaderValue::from_static("remote-aor.test:17777"),
+        );
+        headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+
+        assert_eq!(
+            resolve_request_base_url(&headers).as_deref(),
+            Some("https://remote-aor.test:17777")
+        );
+    }
+
+    #[test]
+    fn resolve_request_base_url_falls_back_to_host_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("localhost:8899"));
+
+        assert_eq!(
+            resolve_request_base_url(&headers).as_deref(),
+            Some("http://localhost:8899")
+        );
+    }
 }

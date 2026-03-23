@@ -7,7 +7,7 @@ use axum::http::{header, HeaderMap};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -228,6 +228,21 @@ pub fn is_remote_request(socket_addr: Option<SocketAddr>) -> bool {
         .unwrap_or(false)
 }
 
+/// Returns whether the incoming request should be treated as remote, honoring
+/// trusted proxy forwarding headers only when the direct peer is loopback.
+pub fn is_remote_request_with_headers(
+    socket_addr: Option<SocketAddr>,
+    headers: &HeaderMap,
+) -> bool {
+    if is_remote_request(socket_addr) {
+        return true;
+    }
+
+    forwarded_client_ip(headers)
+        .map(|ip| !ip.is_loopback())
+        .unwrap_or(false)
+}
+
 /// Extracts a bearer token from the Authorization header.
 pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?.trim();
@@ -255,6 +270,53 @@ pub fn extract_cookie_value(headers: &HeaderMap, key: &str) -> Option<String> {
     None
 }
 
+fn forwarded_client_ip(headers: &HeaderMap) -> Option<IpAddr> {
+    forwarded_for_ip(headers).or_else(|| x_forwarded_for_ip(headers))
+}
+
+fn forwarded_for_ip(headers: &HeaderMap) -> Option<IpAddr> {
+    let forwarded = headers.get("forwarded")?.to_str().ok()?;
+    for entry in forwarded.split(',') {
+        for part in entry.split(';') {
+            let trimmed = part.trim();
+            let Some(value) = trimmed.strip_prefix("for=") else {
+                continue;
+            };
+            if let Some(parsed) = parse_forwarded_ip(value) {
+                return Some(parsed);
+            }
+        }
+    }
+    None
+}
+
+fn x_forwarded_for_ip(headers: &HeaderMap) -> Option<IpAddr> {
+    let forwarded_for = headers.get("x-forwarded-for")?.to_str().ok()?;
+    for candidate in forwarded_for.split(',') {
+        if let Some(parsed) = parse_forwarded_ip(candidate) {
+            return Some(parsed);
+        }
+    }
+    None
+}
+
+fn parse_forwarded_ip(raw: &str) -> Option<IpAddr> {
+    let trimmed = raw.trim().trim_matches('"');
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("unknown") {
+        return None;
+    }
+
+    let host = if let Some(stripped) = trimmed.strip_prefix('[') {
+        stripped.split(']').next().unwrap_or(stripped)
+    } else if trimmed.matches(':').count() == 1 && trimmed.contains('.') {
+        trimmed.split(':').next().unwrap_or(trimmed)
+    } else {
+        trimmed
+    };
+
+    host.parse::<IpAddr>().ok()
+}
+
 /// Creates a Set-Cookie header value for a fresh authenticated session.
 pub fn build_session_cookie(token: &str) -> String {
     format!(
@@ -274,7 +336,8 @@ pub fn build_clear_session_cookie() -> String {
 mod tests {
     use super::{
         build_clear_session_cookie, build_session_cookie, extract_bearer_token,
-        extract_cookie_value, is_remote_request, RemoteAdminAuthStore, SESSION_COOKIE_NAME,
+        extract_cookie_value, is_remote_request, is_remote_request_with_headers,
+        RemoteAdminAuthStore, SESSION_COOKIE_NAME,
     };
     use axum::http::{header, HeaderMap, HeaderValue};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -296,6 +359,31 @@ mod tests {
             8899
         ))));
         assert!(!is_remote_request(None));
+    }
+
+    #[test]
+    fn forwarded_headers_mark_loopback_proxy_requests_as_remote() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("192.168.1.25, 127.0.0.1"),
+        );
+
+        assert!(is_remote_request_with_headers(
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8899)),
+            &headers
+        ));
+    }
+
+    #[test]
+    fn forwarded_headers_do_not_weaken_direct_remote_detection() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", HeaderValue::from_static("127.0.0.1"));
+
+        assert!(is_remote_request_with_headers(
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)), 8899)),
+            &headers
+        ));
     }
 
     #[test]

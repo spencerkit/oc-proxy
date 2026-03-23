@@ -1,3 +1,5 @@
+import type { ProviderModelHealthSnapshot } from "../utils/providerTesting"
+
 /**
  * Direction for request translation
  * - 'oc': OpenAI format -> Anthropic format
@@ -68,6 +70,7 @@ export interface ProviderModelTestResult {
   ok: boolean
   resolvedModel?: string | null
   rawText?: string | null
+  responseTimeMs?: number | null
   message?: string | null
 }
 
@@ -90,6 +93,7 @@ export interface Rule {
   protocol: RuleProtocol
   token: string
   apiAddress: string
+  website?: string
   defaultModel: string
   modelMappings: Record<string, string>
   quota: RuleQuotaConfig
@@ -123,6 +127,8 @@ export interface ProxyStatus {
   lanAddress?: string | null
   metrics: ProxyMetrics
 }
+
+export type { ProviderModelHealthSnapshot }
 
 /**
  * Proxy metrics interface

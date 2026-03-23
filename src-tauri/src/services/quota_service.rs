@@ -57,6 +57,7 @@ pub async fn test_draft(
         protocol: RuleProtocol::Openai,
         token: rule_token,
         api_address: rule_api_address,
+        website: String::new(),
         default_model: rule_default_model,
         model_mappings: std::collections::HashMap::new(),
         quota,

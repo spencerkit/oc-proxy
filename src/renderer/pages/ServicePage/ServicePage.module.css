@@ -481,6 +481,47 @@
   min-width: 0;
 }
 
+.ruleHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.headerIconButton {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--accent) 8%, var(--surface));
+  color: color-mix(in oklab, var(--accent) 82%, var(--text-primary));
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.headerIconButton:hover {
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface-hover));
+  border-color: color-mix(in oklab, var(--accent) 34%, var(--border));
+  color: var(--accent);
+}
+
+.headerIconButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.headerIconButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
 .ruleListHeader h3 {
   font-family: var(--font-body);
   font-size: var(--text-xs);
@@ -514,8 +555,14 @@
   gap: 8px;
 }
 
+.ruleItemsTwoColumn {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .ruleItemsCatalog {
-  gap: 10px;
+  gap: 8px;
 }
 
 .ruleItemContainer {
@@ -533,22 +580,25 @@
 }
 
 .ruleItemContainerCompact {
-  min-height: 106px;
-  gap: 10px;
-  padding: 10px 12px;
+  min-height: auto;
+  gap: 6px;
+  padding: 8px 9px 9px;
   border-color: color-mix(in oklab, var(--accent) 24%, var(--border));
   background: linear-gradient(
-    155deg,
+    150deg,
     color-mix(in oklab, var(--accent) 8%, var(--surface)),
-    color-mix(in oklab, var(--surface) 92%, var(--bg-raised))
+    color-mix(in oklab, var(--surface) 95%, var(--bg-raised))
   );
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--accent) 10%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--accent) 10%, transparent),
+    0 4px 14px color-mix(in oklab, black 4%, transparent);
+  overflow: hidden;
 }
 
 .ruleItemContainerCompact:hover {
   border-color: color-mix(in oklab, var(--accent) 36%, var(--border));
   background: linear-gradient(
-    155deg,
+    150deg,
     color-mix(in oklab, var(--accent) 12%, var(--surface-hover)),
     color-mix(in oklab, var(--surface-hover) 95%, var(--bg-raised))
   );
@@ -560,7 +610,7 @@
 .ruleItemContainerCompact.ruleItemContainerActive {
   border-color: color-mix(in oklab, var(--success) 44%, var(--border));
   background: linear-gradient(
-    155deg,
+    150deg,
     color-mix(in oklab, var(--success) 14%, var(--surface)),
     color-mix(in oklab, var(--success) 5%, var(--bg-raised))
   );
@@ -569,6 +619,31 @@
     inset 0 1px 0 color-mix(in oklab, var(--success) 20%, transparent),
     0 0 0 1px color-mix(in oklab, var(--success) 18%, transparent),
     var(--shadow-sm);
+}
+
+.ruleItemContainerCompact::after,
+.ruleItemContainerCatalog::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--accent) 60%, transparent),
+    transparent 72%
+  );
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.ruleItemContainerCompact.ruleItemContainerActive::after {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--success) 72%, transparent),
+    transparent 72%
+  );
 }
 
 .ruleItemContainerCompact.ruleItemContainerActive:hover {
@@ -582,27 +657,27 @@
 .ruleItemContainerCompact .ruleCardTop {
   min-height: auto;
   align-items: flex-start;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 
 .ruleItemContainerCompact .ruleItem {
   padding: 0;
   min-height: auto;
-  gap: 8px;
+  gap: 6px;
 }
 
 .ruleItemContainerCompact .ruleTitleLine {
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
 }
 
 .ruleItemContainerCompact .ruleModel {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: var(--weight-semibold);
 }
 
 .ruleItemContainerCompact .ruleDirection {
-  font-size: 10px;
+  font-size: 9px;
   border: 1px solid color-mix(in oklab, var(--accent) 22%, transparent);
   background: color-mix(in oklab, var(--accent) 12%, var(--surface));
 }
@@ -612,11 +687,11 @@
 }
 
 .ruleItemContainerCatalog {
-  min-height: 158px;
-  gap: 10px;
-  padding: 12px 14px;
+  min-height: 140px;
+  gap: 6px;
+  padding: 10px 11px 9px;
   contain: layout paint style;
-  contain-intrinsic-size: 186px;
+  contain-intrinsic-size: 160px;
   border-radius: var(--radius-lg);
   border: none;
   background: linear-gradient(
@@ -627,6 +702,7 @@
   box-shadow:
     inset 0 1px 0 color-mix(in oklab, white 18%, transparent),
     0 6px 16px color-mix(in oklab, black 8%, transparent);
+  overflow: hidden;
 }
 
 .ruleItemContainerCatalog::before {
@@ -636,29 +712,29 @@
 .ruleItemContainerCatalog .ruleCardTop {
   min-height: auto;
   align-items: flex-start;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 
 .ruleItemContainerCatalog .ruleItem {
   padding: 0;
   min-height: auto;
-  gap: 10px;
+  gap: 8px;
 }
 
 .ruleItemContainerCatalog .ruleTitleLine {
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
 .ruleItemContainerCatalog .ruleModel {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: var(--weight-semibold);
   letter-spacing: 0;
 }
 
 .ruleItemContainerCatalog .ruleDirection {
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 0.04em;
   border: none;
   background: color-mix(in oklab, var(--accent) 10%, var(--surface));
@@ -780,7 +856,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
-  gap: 8px;
+  gap: 0;
   min-height: auto;
   padding-top: 6px;
   border-top: none;
@@ -795,20 +871,27 @@
 }
 
 .ruleMetaLeftCatalog {
-  order: 2;
+  order: 1;
   width: 100%;
-  min-height: 34px;
-  padding: 6px 8px;
-  border: none;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid color-mix(in oklab, var(--border) 78%, transparent);
   border-radius: var(--radius-md);
-  background: color-mix(in oklab, var(--surface-active) 72%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--surface-active) 78%, transparent),
+    color-mix(in oklab, var(--surface) 94%, transparent)
+  );
+  justify-content: space-between;
+  flex-wrap: wrap;
 }
 
 .ruleMetaLeftCatalog .quotaRefreshButton {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-sm);
-  background: color-mix(in oklab, var(--surface) 86%, transparent);
+  border: 1px solid color-mix(in oklab, var(--border) 82%, transparent);
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
 }
 
 .ruleMetaLeftCatalog .quotaRefreshButton:hover {
@@ -816,16 +899,16 @@
 }
 
 .ruleMetaLeftCatalog .quotaBadge {
-  min-height: 22px;
+  min-height: 18px;
   min-width: 92px;
   border-radius: var(--radius-sm);
-  padding: 0 8px;
-  font-size: 10px;
+  padding: 0 7px;
+  font-size: 9px;
   font-weight: var(--weight-semibold);
 }
 
 .ruleMetaLeftCatalog .quotaResetAt {
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .ruleActionButtons {
@@ -837,20 +920,31 @@
 }
 
 .ruleActionButtonsCompact {
-  gap: 6px;
-  padding: 4px;
+  gap: 3px;
+  padding: 3px;
   border-radius: var(--radius-md);
-  border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
-  background: color-mix(in oklab, var(--bg-raised) 82%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 18%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--bg-raised) 92%, transparent),
+    color-mix(in oklab, var(--surface) 92%, transparent)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 14%, transparent);
 }
 
 .ruleItemContainerCatalog .ruleActionButtons {
-  gap: 6px;
-  padding: 5px;
+  gap: 4px;
+  padding: 4px;
   border-radius: var(--radius-md);
-  border: none;
-  background: color-mix(in oklab, var(--bg-raised) 82%, transparent);
-  box-shadow: 0 2px 8px color-mix(in oklab, black 7%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 18%, var(--border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--bg-raised) 94%, transparent),
+    color-mix(in oklab, var(--surface) 92%, transparent)
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 14%, transparent),
+    0 2px 8px color-mix(in oklab, black 5%, transparent);
 }
 
 .ruleHeaderRight {
@@ -922,6 +1016,204 @@
   min-width: 0;
 }
 
+.providerCompactCardTop,
+.providerCatalogCardTop {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.providerCompactCardHeader,
+.providerCatalogCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+}
+
+.providerCatalogLead {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.providerCompactCardHeader .ruleTitleLine,
+.providerCatalogCardHeader .ruleTitleLine {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.providerCompactCardHeader .ruleHeaderRight,
+.providerCatalogCardHeader .ruleHeaderRight {
+  flex: 0 0 auto;
+}
+
+.providerPanelEyebrow {
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  font-family: var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.providerCompactSummaryRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.providerCompactModelPanel,
+.providerCompactSignalPanel,
+.providerCatalogModelPanel,
+.providerCatalogUsagePanel {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in oklab, var(--border) 74%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--bg-raised) 96%, var(--surface)),
+    color-mix(in oklab, var(--surface-active) 46%, transparent)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 12%, transparent);
+}
+
+.providerCompactModelPanel {
+  display: grid;
+  gap: 3px;
+}
+
+.providerCatalogModelPanel,
+.providerCatalogUsagePanel {
+  padding: 7px 8px;
+}
+
+.providerCompactModelValue,
+.providerCatalogModelValue {
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.providerCompactSignalPanel {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.providerCatalogSignalRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.providerCatalogSummaryRow {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.providerCatalogModelPanel,
+.providerCatalogUsagePanel {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.providerCatalogUsageRow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.providerCatalogUsageItem {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--surface-active) 78%, transparent);
+  border: 1px solid color-mix(in oklab, var(--border) 74%, transparent);
+}
+
+.providerCatalogUsageLabel {
+  min-width: 0;
+  color: var(--text-tertiary);
+  font-size: 8px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.providerCatalogUsageValue {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ruleTitleExternalLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  text-decoration: none;
+  flex: 0 0 auto;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.ruleTitleExternalLink:hover {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  transform: translateY(-1px);
+}
+
+.ruleTitleExternalLink:focus-visible {
+  outline: none;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+}
+
 .ruleAssociationMeta {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -937,7 +1229,7 @@
   justify-content: center;
   gap: 2px;
   min-width: 0;
-  padding: 6px 8px;
+  padding: 5px 7px;
   border-radius: var(--radius-sm);
   border: 1px solid color-mix(in oklab, var(--border) 82%, transparent);
   background: color-mix(in oklab, var(--surface-active) 76%, transparent);
@@ -950,8 +1242,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 11px;
   font-family: var(--font-mono);
+}
+
+.ruleMetaLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ruleMetaLink:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .ruleAssociationMetaLabel {
@@ -960,6 +1262,10 @@
   font-family: var(--font-body);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.ruleMetaPrimaryItem {
+  grid-column: 1 / -1;
 }
 
 .ruleCatalogMeta {
@@ -1003,9 +1309,68 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.2;
   font-family: var(--font-mono);
+}
+
+.providerHealthRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.providerHealthStatus,
+.providerHealthMetric {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  max-width: 100%;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  font-size: 9px;
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.providerHealthStatus {
+  border: 1px solid transparent;
+}
+
+.providerHealthMetric {
+  background: color-mix(in oklab, var(--surface-active) 86%, transparent);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.providerHealthStatusAvailable {
+  background: color-mix(in oklab, var(--success) 16%, transparent);
+  border-color: color-mix(in oklab, var(--success) 30%, transparent);
+  color: color-mix(in oklab, var(--success) 86%, black);
+}
+
+.providerHealthStatusUnavailable {
+  background: color-mix(in oklab, var(--danger) 12%, transparent);
+  border-color: color-mix(in oklab, var(--danger) 24%, transparent);
+  color: color-mix(in oklab, var(--danger) 80%, var(--text-primary));
+}
+
+.providerHealthStatusUntested {
+  background: color-mix(in oklab, var(--surface-active) 90%, transparent);
+  border-color: color-mix(in oklab, var(--border) 86%, transparent);
+  color: var(--text-secondary);
+}
+
+.providerHealthStatusTesting {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 28%, transparent);
+  color: var(--accent);
 }
 
 .ruleCatalogCapabilities {
@@ -1086,12 +1451,14 @@
   gap: var(--sp-2);
   min-width: 0;
   flex: 1 1 auto;
+  flex-wrap: wrap;
 }
 
 .quotaResetAt {
   font-size: 8px;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1123,8 +1490,8 @@
 .ruleItemContainerCompact .deleteButton,
 .ruleItemContainerCompact .testIconButton {
   opacity: 1;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   border: 1px solid color-mix(in oklab, var(--border) 78%, transparent);
 }
 
@@ -1156,8 +1523,8 @@
 .ruleItemContainerCatalog .deleteButton,
 .ruleItemContainerCatalog .testIconButton {
   opacity: 1;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   border: 1px solid color-mix(in oklab, var(--accent) 20%, var(--border));
 }
 
@@ -1264,13 +1631,15 @@
 
 .editButton,
 .deleteButton,
-.testIconButton {
+.testIconButton,
+.headerIconButton {
   position: relative;
 }
 
 .editButton[data-tooltip]::after,
 .deleteButton[data-tooltip]::after,
-.testIconButton[data-tooltip]::after {
+.testIconButton[data-tooltip]::after,
+.headerIconButton[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
   left: 50%;
@@ -1294,7 +1663,8 @@
 
 .editButton[data-tooltip]::before,
 .deleteButton[data-tooltip]::before,
-.testIconButton[data-tooltip]::before {
+.testIconButton[data-tooltip]::before,
+.headerIconButton[data-tooltip]::before {
   content: "";
   position: absolute;
   left: 50%;
@@ -1322,7 +1692,11 @@
 .testIconButton[data-tooltip]:hover::after,
 .testIconButton[data-tooltip]:hover::before,
 .testIconButton[data-tooltip]:focus-visible::after,
-.testIconButton[data-tooltip]:focus-visible::before {
+.testIconButton[data-tooltip]:focus-visible::before,
+.headerIconButton[data-tooltip]:hover::after,
+.headerIconButton[data-tooltip]:hover::before,
+.headerIconButton[data-tooltip]:focus-visible::after,
+.headerIconButton[data-tooltip]:focus-visible::before {
   opacity: 1;
   transform: translateY(0);
 }
@@ -1332,7 +1706,9 @@
 .deleteButton[data-tooltip]:hover::before,
 .deleteButton[data-tooltip]:focus-visible::before,
 .testIconButton[data-tooltip]:hover::before,
-.testIconButton[data-tooltip]:focus-visible::before {
+.testIconButton[data-tooltip]:focus-visible::before,
+.headerIconButton[data-tooltip]:hover::before,
+.headerIconButton[data-tooltip]:focus-visible::before {
   transform: translate(-50%, 0) rotate(45deg);
 }
 
@@ -1341,7 +1717,9 @@
 .deleteButton[data-tooltip]:hover::after,
 .deleteButton[data-tooltip]:focus-visible::after,
 .testIconButton[data-tooltip]:hover::after,
-.testIconButton[data-tooltip]:focus-visible::after {
+.testIconButton[data-tooltip]:focus-visible::after,
+.headerIconButton[data-tooltip]:hover::after,
+.headerIconButton[data-tooltip]:focus-visible::after {
   transform: translate(-50%, 0);
 }
 
@@ -1358,7 +1736,7 @@
 }
 
 .ruleTrendWrapCatalog {
-  order: 1;
+  order: 2;
   width: 100%;
   align-items: stretch;
 }
@@ -1379,18 +1757,18 @@
 .ruleTrendInlineMetaCatalog {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: stretch;
   justify-content: stretch;
-  gap: 8px;
+  gap: 6px;
   padding-bottom: 0;
 }
 
 .ruleTrendInlineMetaCatalog span {
   display: flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 8px;
+  min-height: 24px;
+  padding: 0 7px;
   border: none;
   border-radius: var(--radius-sm);
   background: color-mix(in oklab, var(--surface) 76%, var(--bg-base));
@@ -1398,6 +1776,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 9px;
   box-shadow: 0 1px 2px color-mix(in oklab, black 4%, transparent);
 }
 
@@ -1846,6 +2225,10 @@
     width: 100%;
   }
 
+  .ruleItemsTwoColumn {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .ruleItem {
     min-height: 52px;
   }
@@ -1862,6 +2245,11 @@
   .ruleItemContainerCompact .ruleCardTop {
     flex-direction: column;
     gap: var(--sp-2);
+  }
+
+  .providerCompactCardHeader,
+  .providerCatalogCardHeader {
+    flex-direction: column;
   }
 
   .ruleItemContainerCompact .ruleHeaderRight {
@@ -1899,6 +2287,19 @@
 
   .ruleMetaLeftCatalog {
     padding: 6px var(--sp-2);
+  }
+
+  .providerCompactSummaryRow,
+  .providerCatalogSummaryRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .providerCompactSignalPanel {
+    justify-content: flex-start;
+  }
+
+  .providerCatalogUsageRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .ruleTrendInlineMetaCatalog {
