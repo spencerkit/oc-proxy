@@ -1,6 +1,6 @@
 {
   "name": "@spencer-kit/aor",
-  "version": "0.2.12",
+  "version": "0.2.14",
   "description": "AI Open Router headless CLI",
   "license": "MIT",
   "type": "commonjs",
