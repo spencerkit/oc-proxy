@@ -2,6 +2,7 @@ import { computed, state } from "@relax-state/core"
 import type {
   Group,
   LogEntry,
+  ProviderModelHealthSnapshot,
   ProxyConfig,
   ProxyStatus,
   RuleCardStatsItem,
@@ -26,6 +27,9 @@ export const quotaLoadingProviderKeysState = state<Record<string, boolean>>(
   {},
   "proxy.quotaLoadingKeys"
 )
+export const providerModelHealthByProviderKeyState = state<
+  Record<string, ProviderModelHealthSnapshot>
+>({}, "proxy.providerModelHealth")
 export const activeGroupIdState = state<string | null>(
   readPersistedActiveGroupId(),
   "proxy.activeGroupId"

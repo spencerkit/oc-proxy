@@ -298,6 +298,7 @@ mod tests {
             protocol: RuleProtocol::Openai,
             token: "token".to_string(),
             api_address: "https://example.com".to_string(),
+            website: String::new(),
             default_model: model.to_string(),
             model_mappings: HashMap::new(),
             quota: default_rule_quota_config(),

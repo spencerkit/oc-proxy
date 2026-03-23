@@ -503,6 +503,7 @@ mod tests {
             protocol: RuleProtocol::Openai,
             token: "tok".to_string(),
             api_address: "https://api.example.com".to_string(),
+            website: String::new(),
             default_model: "gpt-4.1".to_string(),
             model_mappings: HashMap::new(),
             quota,

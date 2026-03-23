@@ -211,6 +211,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
   const [token, setToken] = useState("")
   const [showToken, setShowToken] = useState(false)
   const [apiAddress, setApiAddress] = useState("")
+  const [website, setWebsite] = useState("")
   const [defaultModel, setDefaultModel] = useState("")
   const [modelMappings, setModelMappings] = useState<Record<string, string>>({})
 
@@ -300,6 +301,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
     setProtocol(provider.protocol)
     setToken(provider.token)
     setApiAddress(provider.apiAddress)
+    setWebsite(provider.website || "")
     setDefaultModel(provider.defaultModel)
     setModelMappings(provider.modelMappings || {})
 
@@ -560,6 +562,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
       protocol,
       token,
       apiAddress,
+      website: website.trim(),
       defaultModel: defaultModel.trim(),
       modelMappings: Object.fromEntries(
         Object.entries(modelMappings)
@@ -818,6 +821,18 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
                   className={styles.input}
                   error={errors.apiAddress}
                   hint={t("ruleForm.endpointHint")}
+                />
+              </div>
+
+              <div className={styles.formGroup}>
+                <label htmlFor="website">{t("ruleForm.officialWebsite")}</label>
+                <Input
+                  id="website"
+                  value={website}
+                  onChange={e => setWebsite(e.target.value)}
+                  placeholder={t("ruleForm.officialWebsitePlaceholder")}
+                  className={styles.input}
+                  hint={t("ruleForm.officialWebsiteHint")}
                 />
               </div>
             </section>

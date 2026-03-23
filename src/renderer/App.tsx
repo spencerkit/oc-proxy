@@ -95,6 +95,7 @@ const App: React.FC = () => {
     )
   const serverAddresses = status
     ? resolveReachableServerBaseUrls({
+        currentOrigin: isHeadlessRuntime ? window.location.origin : null,
         statusAddress: status.address,
         statusLanAddress: status.lanAddress,
         configHost: config?.server.host,

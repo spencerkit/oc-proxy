@@ -12,14 +12,17 @@ import {
   integrationTargetsState,
   loadIntegrationTargetsAction,
   pickIntegrationDirectoryAction,
+  providerModelHealthByProviderKeyState,
   readAgentConfigAction,
   saveConfigAction,
   setActiveGroupIdAction,
   statusState,
+  testProviderModelAction,
   updateIntegrationTargetAction,
   writeGroupEntryAction,
 } from "@/store"
 import type { Group, IntegrationClientKind, IntegrationTarget, ProxyConfig } from "@/types"
+import { createProviderTestKey, formatProviderLatency } from "@/utils/providerTesting"
 import { useActions, useRelaxValue } from "@/utils/relax"
 import { isHeadlessHttpRuntime } from "@/utils/runtime"
 import { resolveReachableServerBaseUrls } from "@/utils/serverAddress"
@@ -36,6 +39,7 @@ const SERVICE_ACTIONS = [
   updateIntegrationTargetAction,
   writeGroupEntryAction,
   readAgentConfigAction,
+  testProviderModelAction,
 ] as const
 
 /** Matches search text against a list of candidate strings. */
@@ -63,6 +67,7 @@ export const ServicePage: React.FC = () => {
   const activeGroupId = useRelaxValue(activeGroupIdState)
   const integrationTargets = useRelaxValue(integrationTargetsState)
   const integrationLoading = useRelaxValue(integrationTargetsLoadingState)
+  const providerModelHealthByProviderKey = useRelaxValue(providerModelHealthByProviderKeyState)
   const [
     saveConfig,
     setActiveGroupId,
@@ -73,6 +78,7 @@ export const ServicePage: React.FC = () => {
     updateIntegrationTarget,
     writeGroupEntry,
     readAgentConfigAction,
+    testProviderModel,
   ] = useActions(SERVICE_ACTIONS)
   const { showToast } = useLogs()
   const [groupSearchValue, setGroupSearchValue] = useState("")
@@ -86,6 +92,8 @@ export const ServicePage: React.FC = () => {
     {}
   )
   const [activatingProviderId, setActivatingProviderId] = useState<string | null>(null)
+  const [testingProviderIds, setTestingProviderIds] = useState<Record<string, boolean>>({})
+  const [testingAllProviders, setTestingAllProviders] = useState(false)
   const [showIntegrationWriteModal, setShowIntegrationWriteModal] = useState(false)
   const [integrationStatusRefreshing, setIntegrationStatusRefreshing] = useState(false)
   const [integrationTargetUrlById, setIntegrationTargetUrlById] = useState<Record<string, string>>(
@@ -118,6 +126,15 @@ export const ServicePage: React.FC = () => {
   const activeGroupProviderIdSet = useMemo(() => {
     return new Set(activeGroupProviderIds)
   }, [activeGroupProviderIds])
+  const providerHealthByProviderId = useMemo(() => {
+    if (!activeGroup) return {}
+    return Object.fromEntries(
+      activeGroup.providers.map(provider => {
+        const key = createProviderTestKey(activeGroup.id, provider.id)
+        return [provider.id, providerModelHealthByProviderKey[key]]
+      })
+    )
+  }, [activeGroup, providerModelHealthByProviderKey])
   const associateCandidates = useMemo(() => {
     const normalized = associateProviderSearch.trim().toLowerCase()
     const candidates = globalProviders.filter(
@@ -125,9 +142,13 @@ export const ServicePage: React.FC = () => {
     )
     if (!normalized) return candidates
     return candidates.filter(provider =>
-      [provider.name, provider.id, provider.apiAddress].some(value =>
-        value?.toLowerCase().includes(normalized)
-      )
+      [
+        provider.name,
+        provider.id,
+        provider.apiAddress,
+        provider.defaultModel,
+        provider.website,
+      ].some(value => value?.toLowerCase().includes(normalized))
     )
   }, [activeGroupProviderIdSet, associateProviderSearch, globalProviders])
   const selectedAssociateProviderIds = useMemo(() => {
@@ -196,6 +217,8 @@ export const ServicePage: React.FC = () => {
     setShowDeleteProviderModal(false)
     setShowAssociateProviderModal(false)
     setPendingDeleteProviderId(null)
+    setTestingProviderIds({})
+    setTestingAllProviders(false)
   }
 
   const openAddGroupModal = () => {
@@ -343,6 +366,107 @@ export const ServicePage: React.FC = () => {
     } finally {
       setActivatingProviderId(null)
     }
+  }
+
+  const handleTestProviderModel = async (providerId: string) => {
+    if (!activeGroup) return
+    if (testingProviderIds[providerId]) return
+
+    const provider = activeGroup.providers.find(item => item.id === providerId)
+    if (!provider) {
+      showToast(t("toast.ruleNotFound"), "error")
+      return
+    }
+
+    setTestingProviderIds(prev => ({ ...prev, [providerId]: true }))
+    try {
+      const result = await testProviderModel({ groupId: activeGroup.id, providerId })
+      if (!result.ok) {
+        showToast(
+          t("toast.providerModelTestFailed", {
+            provider: provider.name,
+            message:
+              result.message?.trim() || t("errors.operationFailed", { message: provider.name }),
+          }),
+          "error"
+        )
+        return
+      }
+
+      const modelName =
+        result.resolvedModel?.trim() ||
+        result.rawText?.trim() ||
+        provider.defaultModel.trim() ||
+        provider.name
+      const latencyLabel = formatProviderLatency(result.responseTimeMs)
+
+      showToast(
+        t("toast.providerModelTestSuccess", {
+          provider: provider.name,
+          model: modelName,
+          latency: latencyLabel || "-",
+        }),
+        "success"
+      )
+    } catch (error) {
+      showToast(
+        t("toast.providerModelTestFailed", {
+          provider: provider.name,
+          message: String(error),
+        }),
+        "error"
+      )
+    } finally {
+      setTestingProviderIds(prev => {
+        const next = { ...prev }
+        delete next[providerId]
+        return next
+      })
+    }
+  }
+
+  const handleTestAllProviders = async () => {
+    if (!activeGroup || testingAllProviders || activeGroup.providers.length === 0) return
+
+    setTestingAllProviders(true)
+    setTestingProviderIds(
+      Object.fromEntries(activeGroup.providers.map(provider => [provider.id, true]))
+    )
+
+    let available = 0
+    let unavailable = 0
+
+    for (const provider of activeGroup.providers) {
+      try {
+        const result = await testProviderModel({
+          groupId: activeGroup.id,
+          providerId: provider.id,
+        })
+        if (result.ok) {
+          available += 1
+        } else {
+          unavailable += 1
+        }
+      } catch {
+        unavailable += 1
+      } finally {
+        setTestingProviderIds(prev => {
+          const next = { ...prev }
+          delete next[provider.id]
+          return next
+        })
+      }
+    }
+
+    setTestingAllProviders(false)
+    showToast(
+      t("toast.providerBatchTestSummary", {
+        available,
+        unavailable,
+        skipped: 0,
+      }),
+      unavailable > 0 ? "error" : "success"
+    )
   }
 
   const handleDeleteProvider = async () => {
@@ -596,12 +720,19 @@ export const ServicePage: React.FC = () => {
 
   const serverBaseUrls = React.useMemo(() => {
     return resolveReachableServerBaseUrls({
+      currentOrigin: isHeadlessRuntime ? window.location.origin : null,
       statusAddress: status?.address,
       statusLanAddress: status?.lanAddress,
       configHost: config?.server.host,
       configPort: config?.server.port,
     })
-  }, [status?.address, status?.lanAddress, config?.server.host, config?.server.port])
+  }, [
+    status?.address,
+    status?.lanAddress,
+    config?.server.host,
+    config?.server.port,
+    isHeadlessRuntime,
+  ])
 
   const entryUrls = React.useMemo(() => {
     if (!activeGroup) return []
@@ -837,6 +968,11 @@ export const ServicePage: React.FC = () => {
               activeProviderId={activeGroup.activeProviderId}
               onActivate={handleActivateProvider}
               activatingProviderId={activatingProviderId}
+              onTestModel={handleTestProviderModel}
+              onTestAll={() => void handleTestAllProviders()}
+              testingProviderIds={testingProviderIds}
+              providerHealthByProviderId={providerHealthByProviderId}
+              testingAll={testingAllProviders}
               onDelete={handleRequestDeleteProvider}
               onEdit={providerId => navigate(`/providers/${providerId}/edit`)}
               onAdd={openAssociateProviderModal}
@@ -1101,7 +1237,7 @@ export const ServicePage: React.FC = () => {
                         <span className={styles.integrationTargetPathWrap}>
                           <span className={styles.integrationTargetPath}>{provider.name}</span>
                           <span className={styles.integrationTargetWriteDetail}>
-                            {provider.protocol} · {provider.apiAddress}
+                            {provider.protocol} · {provider.defaultModel || "-"}
                           </span>
                         </span>
                       </label>

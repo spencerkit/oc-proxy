@@ -209,6 +209,8 @@ pub struct Rule {
     pub protocol: RuleProtocol,
     pub token: String,
     pub api_address: String,
+    #[serde(default)]
+    pub website: String,
     pub default_model: String,
     #[serde(default)]
     pub model_mappings: HashMap<String, String>,
@@ -379,6 +381,7 @@ pub struct ProviderModelTestResult {
     pub ok: bool,
     pub resolved_model: Option<String>,
     pub raw_text: Option<String>,
+    pub response_time_ms: Option<u64>,
     pub message: Option<String>,
 }
 
