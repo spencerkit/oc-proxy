@@ -1217,7 +1217,12 @@ mod tests {
         let config = state.config_store.get();
 
         assert_eq!(
-            build_group_entry_url(&state, &config, "dev", Some("https://remote-aor.test:17777")),
+            build_group_entry_url(
+                &state,
+                &config,
+                "dev",
+                Some("https://remote-aor.test:17777")
+            ),
             "https://remote-aor.test:17777/oc/dev"
         );
     }

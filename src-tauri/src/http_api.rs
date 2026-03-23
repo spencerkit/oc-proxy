@@ -385,10 +385,7 @@ fn request_is_remote(request: &Request<axum::body::Body>) -> bool {
     is_remote_request_with_headers(request_socket_addr(request), request.headers())
 }
 
-fn resolve_remote_request(
-    socket_addr: SocketAddr,
-    headers: &HeaderMap,
-) -> bool {
+fn resolve_remote_request(socket_addr: SocketAddr, headers: &HeaderMap) -> bool {
     is_remote_request_with_headers(Some(socket_addr), headers)
 }
 
