@@ -87,10 +87,10 @@ pub async fn test_model(
                 .iter()
                 .find(|event| extract_error_message(event).is_some())
         });
-        return Ok(failure_result(describe_error_response(
-            status, error_body, &raw_body,
-        ))
-        .with_response_time(started_at.elapsed()));
+        return Ok(
+            failure_result(describe_error_response(status, error_body, &raw_body))
+                .with_response_time(started_at.elapsed()),
+        );
     }
 
     let raw_text = extract_response_text(

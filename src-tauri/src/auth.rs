@@ -381,7 +381,10 @@ mod tests {
         headers.insert("x-forwarded-for", HeaderValue::from_static("127.0.0.1"));
 
         assert!(is_remote_request_with_headers(
-            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)), 8899)),
+            Some(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 8)),
+                8899
+            )),
             &headers
         ));
     }
