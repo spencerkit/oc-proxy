@@ -1245,8 +1245,12 @@ async fn integration_write_agent_config_source(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_request_base_url;
-    use axum::http::{header, HeaderMap, HeaderValue};
+    use super::{resolve_request_base_url, router};
+    use crate::models::IntegrationClientKind;
+    use crate::proxy::headless_service_state_for_tests;
+    use axum::body::{to_bytes, Body};
+    use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
+    use tower::util::ServiceExt;
 
     #[test]
     fn resolve_request_base_url_prefers_origin() {
@@ -1290,5 +1294,41 @@ mod tests {
             resolve_request_base_url(&headers).as_deref(),
             Some("http://localhost:8899")
         );
+    }
+
+    #[tokio::test]
+    async fn integration_targets_endpoint_returns_headless_default_targets() {
+        let service_state = headless_service_state_for_tests();
+        let app = router(service_state.clone()).with_state(service_state);
+        let request = Request::builder()
+            .uri("/api/integration/targets")
+            .body(Body::empty())
+            .expect("request should be built");
+
+        let response = app
+            .oneshot(request)
+            .await
+            .expect("router should respond to integration targets request");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let targets: Vec<crate::models::IntegrationTarget> =
+            serde_json::from_slice(&body).expect("response should deserialize into targets");
+
+        assert_eq!(targets.len(), 4);
+        assert!(targets.iter().any(|target| {
+            target.id == "default:claude" && target.kind == IntegrationClientKind::Claude
+        }));
+        assert!(targets.iter().any(|target| {
+            target.id == "default:codex" && target.kind == IntegrationClientKind::Codex
+        }));
+        assert!(targets.iter().any(|target| {
+            target.id == "default:openclaw" && target.kind == IntegrationClientKind::Openclaw
+        }));
+        assert!(targets.iter().any(|target| {
+            target.id == "default:opencode" && target.kind == IntegrationClientKind::Opencode
+        }));
     }
 }
