@@ -20,4 +20,5 @@ pub mod remote_sync;
 pub mod services;
 pub mod stats_store;
 pub mod transformer;
+pub mod user_home;
 pub mod wsl;

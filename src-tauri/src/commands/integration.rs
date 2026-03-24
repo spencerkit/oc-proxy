@@ -5,6 +5,7 @@ use crate::api::dto::{AgentConfig, AgentConfigFile, WriteAgentConfigResult};
 use crate::app_state::SharedState;
 use crate::models::{IntegrationClientKind, IntegrationTarget, IntegrationWriteResult};
 use crate::services::integration_service;
+use crate::user_home::user_home_dir;
 use crate::wsl;
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -91,18 +92,6 @@ fn resolve_starting_directory_with_root_paths(
     match candidate {
         Some(path) if path.exists() => Some(path),
         _ => Some(home.to_path_buf()),
-    }
-}
-
-/// Resolves user home directory from environment variables.
-fn user_home_dir() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var_os("USERPROFILE").map(PathBuf::from)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var_os("HOME").map(PathBuf::from)
     }
 }
 

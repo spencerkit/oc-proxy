@@ -50,6 +50,7 @@ dependencies = [
  "directories",
  "futures-util",
  "json5",
+ "libc",
  "mime_guess",
  "reqwest 0.12.28",
  "rusqlite",

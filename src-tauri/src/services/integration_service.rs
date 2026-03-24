@@ -9,6 +9,7 @@ use crate::models::{
     ProxyConfig,
 };
 use crate::services::{AppError, AppResult};
+use crate::user_home::user_home_dir;
 use crate::wsl;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -42,17 +43,6 @@ fn write_debug_log(message: &str) {
     }
     // Also print to stderr
     eprintln!("{}", message);
-}
-
-fn user_home_dir() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var_os("USERPROFILE").map(PathBuf::from)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var_os("HOME").map(PathBuf::from)
-    }
 }
 
 fn root_hidden_config_fallback_with_root_home(
