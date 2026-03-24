@@ -231,7 +231,7 @@ export const bridge = {
     )
   },
 
-  testProviderModel(groupId: string, providerId: string) {
+  testProviderModel(groupId: string | undefined, providerId: string) {
     return withBridge(
       () => httpApi.testProviderModel(groupId, providerId),
       () => ipc.testProviderModel(groupId, providerId)

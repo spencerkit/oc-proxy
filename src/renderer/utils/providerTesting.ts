@@ -1,5 +1,7 @@
 export type ProviderHealthStatus = "available" | "unavailable"
 
+export const GLOBAL_PROVIDER_TEST_GROUP_ID = "__global__"
+
 export interface ProviderModelHealthSnapshot {
   groupId: string
   providerId: string
@@ -10,8 +12,16 @@ export interface ProviderModelHealthSnapshot {
   testedAt: string
 }
 
-export function createProviderTestKey(groupId: string, providerId: string): string {
-  return `${groupId}:${providerId}`
+export function resolveProviderTestGroupId(groupId?: string | null): string {
+  const normalized = groupId?.trim()
+  return normalized || GLOBAL_PROVIDER_TEST_GROUP_ID
+}
+
+export function createProviderTestKey(
+  groupId: string | null | undefined,
+  providerId: string
+): string {
+  return `${resolveProviderTestGroupId(groupId)}:${providerId}`
 }
 
 export function buildProviderModelHealthSnapshot(params: {

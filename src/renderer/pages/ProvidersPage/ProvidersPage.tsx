@@ -18,6 +18,7 @@ import {
 import type { ProxyConfig, RuleCardStatsItem, RuleQuotaSnapshot } from "@/types"
 import { createStableId } from "@/utils/id"
 import {
+  createProviderTestKey,
   formatProviderLatency,
   pickLatestProviderModelHealthSnapshot,
 } from "@/utils/providerTesting"
@@ -247,11 +248,12 @@ export const ProvidersPage: React.FC = () => {
     const result: Record<string, ReturnType<typeof pickLatestProviderModelHealthSnapshot>> = {}
     for (const provider of filteredProviders) {
       const groupIds = associatedGroupIdsByProviderId[provider.id] ?? []
-      const snapshot = pickLatestProviderModelHealthSnapshot(
-        groupIds.map(
+      const snapshot = pickLatestProviderModelHealthSnapshot([
+        ...groupIds.map(
           groupId => providerModelHealthByProviderKey[providerQuotaKey(groupId, provider.id)]
-        )
-      )
+        ),
+        providerModelHealthByProviderKey[createProviderTestKey(undefined, provider.id)],
+      ])
       if (snapshot) {
         result[provider.id] = snapshot
       }
@@ -399,20 +401,9 @@ export const ProvidersPage: React.FC = () => {
       return providerIds.includes(providerId)
     })
 
-    if (!targetGroup) {
-      showToast(
-        t("toast.providerModelTestFailed", {
-          provider: provider.name,
-          message: t("providersPage.providerTestRequiresAssociation"),
-        }),
-        "error"
-      )
-      return
-    }
-
     setTestingProviderIds(prev => ({ ...prev, [providerId]: true }))
     try {
-      const result = await testProviderModel({ groupId: targetGroup.id, providerId })
+      const result = await testProviderModel({ groupId: targetGroup?.id, providerId })
       if (!result.ok) {
         showToast(
           t("toast.providerModelTestFailed", {
@@ -460,24 +451,10 @@ export const ProvidersPage: React.FC = () => {
   const handleTestAllProviders = async () => {
     if (!config || testingAllProviders || filteredProviders.length === 0) return
 
-    const testableProviders = filteredProviders
-      .map(provider => {
-        const groupId = associatedGroupIdsByProviderId[provider.id]?.[0]
-        return groupId ? { provider, groupId } : null
-      })
-      .filter(
-        (
-          item
-        ): item is {
-          provider: (typeof filteredProviders)[number]
-          groupId: string
-        } => Boolean(item)
-      )
-
-    if (testableProviders.length === 0) {
-      showToast(t("providersPage.providerTestRequiresAssociation"), "error")
-      return
-    }
+    const testableProviders = filteredProviders.map(provider => ({
+      provider,
+      groupId: associatedGroupIdsByProviderId[provider.id]?.[0],
+    }))
 
     setTestingAllProviders(true)
     setTestingProviderIds(prev => ({
@@ -487,7 +464,7 @@ export const ProvidersPage: React.FC = () => {
 
     let available = 0
     let unavailable = 0
-    const skipped = filteredProviders.length - testableProviders.length
+    const skipped = 0
 
     for (const item of testableProviders) {
       try {

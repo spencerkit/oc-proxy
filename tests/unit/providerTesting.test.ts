@@ -5,11 +5,21 @@ import {
   buildProviderModelHealthSnapshot,
   createProviderTestKey,
   formatProviderLatency,
+  GLOBAL_PROVIDER_TEST_GROUP_ID,
   pickLatestProviderModelHealthSnapshot,
+  resolveProviderTestGroupId,
 } from "../../src/renderer/utils/providerTesting"
 
 test("createProviderTestKey builds a stable composite key", () => {
   assert.equal(createProviderTestKey("group-a", "provider-1"), "group-a:provider-1")
+})
+
+test("createProviderTestKey falls back to a global scope when group is missing", () => {
+  assert.equal(
+    createProviderTestKey(undefined, "provider-1"),
+    `${GLOBAL_PROVIDER_TEST_GROUP_ID}:provider-1`
+  )
+  assert.equal(resolveProviderTestGroupId(""), GLOBAL_PROVIDER_TEST_GROUP_ID)
 })
 
 test("buildProviderModelHealthSnapshot normalizes text and latency", () => {

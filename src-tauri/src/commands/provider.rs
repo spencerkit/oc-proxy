@@ -11,7 +11,7 @@ use tauri::State;
 /// Tests upstream model identity for a saved provider.
 pub async fn provider_test_model(
     state: State<'_, SharedState>,
-    group_id: String,
+    group_id: Option<String>,
     provider_id: String,
 ) -> Result<ProviderModelTestResult, String> {
     provider_service::test_model(&state, group_id, provider_id)

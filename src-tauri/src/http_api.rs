@@ -1006,8 +1006,8 @@ async fn quota_test_draft(
 
 #[derive(Debug, Deserialize)]
 struct ProviderTestRequest {
-    #[serde(rename = "groupId")]
-    group_id: String,
+    #[serde(default, rename = "groupId")]
+    group_id: Option<String>,
     #[serde(rename = "providerId")]
     provider_id: String,
 }

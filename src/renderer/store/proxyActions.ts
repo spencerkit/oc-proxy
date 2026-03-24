@@ -15,7 +15,11 @@ import type {
   StatsDimension,
 } from "@/types"
 import { bridge } from "@/utils/bridge"
-import { buildProviderModelHealthSnapshot, createProviderTestKey } from "@/utils/providerTesting"
+import {
+  buildProviderModelHealthSnapshot,
+  createProviderTestKey,
+  resolveProviderTestGroupId,
+} from "@/utils/providerTesting"
 import {
   activeGroupIdState,
   bootstrapErrorState,
@@ -234,6 +238,10 @@ function buildSaveConfigPayload(config: ProxyConfig): ProxyConfig {
 
 function collectValidProviderKeys(config: ProxyConfig): Set<string> {
   const keys = new Set<string>()
+  for (const provider of config.providers ?? []) {
+    if (!provider?.id?.trim()) continue
+    keys.add(createProviderTestKey(undefined, provider.id))
+  }
   for (const group of config.groups ?? []) {
     const providerIds = getScopedGroupProviders(group).providerIds
     for (const providerId of providerIds) {
@@ -739,17 +747,19 @@ export const stopServerAction = action<void, Promise<void>>(async store => {
 })
 
 export const testProviderModelAction = action<
-  { groupId: string; providerId: string },
+  { groupId?: string; providerId: string },
   Promise<ProviderModelTestResult>
 >(async (store, payload) => {
   const request = requirePayload(payload, "testProviderModelAction")
+  const testGroupId = request.groupId
+  const healthGroupId = resolveProviderTestGroupId(testGroupId)
   try {
-    const result = await bridge.testProviderModel(request.groupId, request.providerId)
-    const key = createProviderTestKey(request.groupId, request.providerId)
+    const result = await bridge.testProviderModel(testGroupId, request.providerId)
+    const key = createProviderTestKey(testGroupId, request.providerId)
     store.set(providerModelHealthByProviderKeyState, {
       ...store.get(providerModelHealthByProviderKeyState),
       [key]: buildProviderModelHealthSnapshot({
-        groupId: request.groupId,
+        groupId: healthGroupId,
         providerId: request.providerId,
         ok: result.ok,
         latencyMs: result.responseTimeMs,
@@ -760,11 +770,11 @@ export const testProviderModelAction = action<
     })
     return result
   } catch (error) {
-    const key = createProviderTestKey(request.groupId, request.providerId)
+    const key = createProviderTestKey(testGroupId, request.providerId)
     store.set(providerModelHealthByProviderKeyState, {
       ...store.get(providerModelHealthByProviderKeyState),
       [key]: buildProviderModelHealthSnapshot({
-        groupId: request.groupId,
+        groupId: healthGroupId,
         providerId: request.providerId,
         ok: false,
         message: getErrorMessage(error, "Provider model test failed"),

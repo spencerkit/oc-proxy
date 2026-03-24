@@ -211,9 +211,12 @@ export const ipc = {
     })
   },
 
-  testProviderModel(groupId: string, providerId: string): Promise<ProviderModelTestResult> {
+  testProviderModel(
+    groupId: string | undefined,
+    providerId: string
+  ): Promise<ProviderModelTestResult> {
     return getInvoke()<ProviderModelTestResult>("provider_test_model", {
-      groupId,
+      groupId: groupId ?? null,
       providerId,
     })
   },
