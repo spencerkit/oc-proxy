@@ -229,6 +229,25 @@ function parseMacUpdater(fileName, inferredArch) {
   }
 }
 
+function normalizeGitHubAssetName(fileName) {
+  return fileName.replace(/ /g, ".")
+}
+
+function extractAssetNameFromUrl(assetUrl) {
+  let parsed
+  try {
+    parsed = new URL(assetUrl)
+  } catch {
+    throw new Error(`Invalid updater asset URL: ${assetUrl}`)
+  }
+
+  const fileName = decodeURIComponent(path.basename(parsed.pathname))
+  if (!fileName) {
+    throw new Error(`Updater asset URL does not include a file name: ${assetUrl}`)
+  }
+  return fileName
+}
+
 function buildAssetUrl(repo, tag, fileName) {
   if (!repo.trim()) {
     throw new Error("Missing GitHub repository. Pass --repo when synthesizing latest.json")
@@ -237,7 +256,31 @@ function buildAssetUrl(repo, tag, fileName) {
     throw new Error("Missing GitHub tag. Pass --tag when synthesizing latest.json")
   }
 
-  return `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(fileName)}`
+  const normalizedFileName = normalizeGitHubAssetName(fileName)
+  return `https://github.com/${repo}/releases/download/${tag}/${encodeURIComponent(normalizedFileName)}`
+}
+
+function normalizeManifestAssetUrls(manifest, repo, tag) {
+  const platforms = {}
+
+  for (const [platform, value] of Object.entries(manifest.platforms)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error(`Updater platform entry must be an object: ${platform}`)
+    }
+
+    platforms[platform] = {
+      ...value,
+      url:
+        typeof value.url === "string" && value.url.trim()
+          ? buildAssetUrl(repo, tag, extractAssetNameFromUrl(value.url))
+          : value.url,
+    }
+  }
+
+  return {
+    ...manifest,
+    platforms,
+  }
 }
 
 function synthesizeManifest({ inputDir, repo, tag, version, pubDate }) {
@@ -352,9 +395,20 @@ function main() {
     merged = synthesizeManifest({ inputDir, repo, tag, version, pubDate })
   }
 
+  merged = normalizeManifestAssetUrls(merged, repo, tag)
+
   fs.mkdirSync(path.dirname(outputPath), { recursive: true })
   fs.writeFileSync(outputPath, `${JSON.stringify(merged, null, 2)}\n`)
   console.log(`Prepared updater manifest: ${outputPath}`)
 }
 
-main()
+if (require.main === module) {
+  main()
+}
+
+module.exports = {
+  buildAssetUrl,
+  extractAssetNameFromUrl,
+  normalizeGitHubAssetName,
+  normalizeManifestAssetUrls,
+}
