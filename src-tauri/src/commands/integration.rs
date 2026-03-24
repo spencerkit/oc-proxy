@@ -65,12 +65,9 @@ fn resolve_starting_directory(
 
     let home = user_home_dir()?;
     let candidate = match kind {
-        Some(IntegrationClientKind::Claude) => Some(home.join(".claude")),
-        Some(IntegrationClientKind::Codex) => Some(home.join(".codex")),
-        Some(IntegrationClientKind::Openclaw) => Some(home.join(".openclaw")),
-        Some(IntegrationClientKind::Opencode) => {
-            Some(integration_service::preferred_opencode_config_dir(&home))
-        }
+        Some(kind) => Some(integration_service::preferred_client_config_dir(
+            &kind, &home,
+        )),
         None => None,
     };
     match candidate {

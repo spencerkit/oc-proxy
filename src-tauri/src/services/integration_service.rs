@@ -55,6 +55,45 @@ fn user_home_dir() -> Option<PathBuf> {
     }
 }
 
+fn root_hidden_config_fallback(home: &Path, dir_name: &str, root_base: &Path) -> Option<PathBuf> {
+    if home != Path::new("/root") {
+        return None;
+    }
+
+    let root_level_dir = root_base.join(dir_name);
+    if root_level_dir.exists() {
+        Some(root_level_dir)
+    } else {
+        None
+    }
+}
+
+fn preferred_hidden_config_dir_with_root_base(
+    home: &Path,
+    dir_name: &str,
+    root_base: &Path,
+) -> PathBuf {
+    let home_candidate = home.join(dir_name);
+    if home_candidate.exists() {
+        return home_candidate;
+    }
+
+    root_hidden_config_fallback(home, dir_name, root_base).unwrap_or(home_candidate)
+}
+
+pub(crate) fn preferred_hidden_config_dir(home: &Path, dir_name: &str) -> PathBuf {
+    preferred_hidden_config_dir_with_root_base(home, dir_name, Path::new("/"))
+}
+
+pub(crate) fn preferred_client_config_dir(kind: &IntegrationClientKind, home: &Path) -> PathBuf {
+    match kind {
+        IntegrationClientKind::Claude => preferred_hidden_config_dir(home, ".claude"),
+        IntegrationClientKind::Codex => preferred_hidden_config_dir(home, ".codex"),
+        IntegrationClientKind::Openclaw => preferred_hidden_config_dir(home, ".openclaw"),
+        IntegrationClientKind::Opencode => preferred_opencode_config_dir(home),
+    }
+}
+
 fn headless_default_id(kind: &IntegrationClientKind) -> String {
     let label = match kind {
         IntegrationClientKind::Claude => "claude",
@@ -101,12 +140,21 @@ pub fn list_default_targets() -> Vec<IntegrationTarget> {
     };
 
     vec![
-        build_default_target(IntegrationClientKind::Claude, home.join(".claude")),
-        build_default_target(IntegrationClientKind::Codex, home.join(".codex")),
-        build_default_target(IntegrationClientKind::Openclaw, home.join(".openclaw")),
+        build_default_target(
+            IntegrationClientKind::Claude,
+            preferred_client_config_dir(&IntegrationClientKind::Claude, &home),
+        ),
+        build_default_target(
+            IntegrationClientKind::Codex,
+            preferred_client_config_dir(&IntegrationClientKind::Codex, &home),
+        ),
+        build_default_target(
+            IntegrationClientKind::Openclaw,
+            preferred_client_config_dir(&IntegrationClientKind::Openclaw, &home),
+        ),
         build_default_target(
             IntegrationClientKind::Opencode,
-            preferred_opencode_config_dir(&home),
+            preferred_client_config_dir(&IntegrationClientKind::Opencode, &home),
         ),
     ]
 }
@@ -1524,6 +1572,44 @@ base_url = "http://should-not-change"
         std::fs::create_dir_all(&config_dir).expect("config dir should be created");
         std::fs::write(config_dir.join("opencode.jsonc"), "{}").expect("seed config jsonc");
         assert_eq!(preferred_opencode_config_dir(&home_dir), config_dir);
+
+        let _ = std::fs::remove_dir_all(&home_dir);
+    }
+
+    #[test]
+    fn preferred_hidden_config_dir_falls_back_to_root_level_for_root_home() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let sandbox_root = std::env::temp_dir().join(format!("oc-proxy-root-fallback-{unique_id}"));
+        let fake_root_base = sandbox_root.join("fs-root");
+        let fake_root_home = PathBuf::from("/root");
+        let root_level = fake_root_base.join(".claude");
+
+        std::fs::create_dir_all(&fake_root_base).expect("fake root base should be created");
+        std::fs::create_dir_all(&root_level).expect("root-level claude dir should be created");
+
+        let preferred =
+            preferred_hidden_config_dir_with_root_base(&fake_root_home, ".claude", &fake_root_base);
+        assert_eq!(preferred, root_level);
+
+        let _ = std::fs::remove_dir_all(&sandbox_root);
+    }
+
+    #[test]
+    fn preferred_hidden_config_dir_prefers_home_candidate_when_present() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let home_dir = std::env::temp_dir().join(format!("oc-proxy-home-hidden-{unique_id}"));
+        let home_candidate = home_dir.join(".openclaw");
+
+        std::fs::create_dir_all(&home_candidate).expect("home hidden dir should be created");
+
+        let preferred = preferred_hidden_config_dir(&home_dir, ".openclaw");
+        assert_eq!(preferred, home_candidate);
 
         let _ = std::fs::remove_dir_all(&home_dir);
     }
