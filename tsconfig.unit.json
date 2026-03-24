@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": ".tmp/unit-tests"
+  },
+  "include": [
+    "tests/unit/**/*.ts",
+    "src/renderer/utils/providerTesting.ts",
+    "src/renderer/utils/serverAddress.ts"
+  ]
+}

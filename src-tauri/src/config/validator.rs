@@ -158,6 +158,7 @@ mod tests {
                 protocol: RuleProtocol::Anthropic,
                 token: "t1".to_string(),
                 api_address: "https://api.example.com".to_string(),
+                website: String::new(),
                 default_model: "m1".to_string(),
                 model_mappings: HashMap::new(),
                 quota: default_rule_quota_config(),

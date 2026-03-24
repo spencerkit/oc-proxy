@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.14 - 2026-03-23
+### Features
+- feat: redesign provider cards and harden remote admin (b513d17)
+### Fixes
+- fix: apply rustfmt for tauri backend (b26a09f)
+
 ## v0.2.12 - 2026-03-22
 ### Features
 - feat: add remote auth and openclaw integration (94ad54d)

@@ -9,7 +9,7 @@ use crate::services::{AppError, AppResult};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Client, StatusCode};
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MODEL_TEST_TIMEOUT_SECONDS: u64 = 20;
 const MODEL_TEST_MAX_OUTPUT_TOKENS: u64 = 64;
@@ -50,6 +50,7 @@ pub async fn test_model(
         .timeout(Duration::from_secs(MODEL_TEST_TIMEOUT_SECONDS))
         .build()
         .map_err(|error| AppError::internal(format!("create model test client failed: {error}")))?;
+    let started_at = Instant::now();
 
     let response = match client
         .post(upstream_url)
@@ -63,7 +64,8 @@ pub async fn test_model(
             return Ok(failure_result(format!(
                 "request to upstream failed: {}",
                 clip_text(&error.to_string(), MODEL_TEST_MESSAGE_MAX_CHARS)
-            )));
+            ))
+            .with_response_time(started_at.elapsed()));
         }
     };
 
@@ -85,9 +87,10 @@ pub async fn test_model(
                 .iter()
                 .find(|event| extract_error_message(event).is_some())
         });
-        return Ok(failure_result(describe_error_response(
-            status, error_body, &raw_body,
-        )));
+        return Ok(
+            failure_result(describe_error_response(status, error_body, &raw_body))
+                .with_response_time(started_at.elapsed()),
+        );
     }
 
     let raw_text = extract_response_text(
@@ -106,13 +109,15 @@ pub async fn test_model(
     if resolved_model.is_none() && raw_text.is_none() {
         return Ok(failure_result(
             "model test succeeded but upstream did not return a readable model name".to_string(),
-        ));
+        )
+        .with_response_time(started_at.elapsed()));
     }
 
     Ok(ProviderModelTestResult {
         ok: true,
         resolved_model,
         raw_text,
+        response_time_ms: Some(duration_to_ms(started_at.elapsed())),
         message: None,
     })
 }
@@ -206,8 +211,24 @@ fn failure_result(message: String) -> ProviderModelTestResult {
         ok: false,
         resolved_model: None,
         raw_text: None,
+        response_time_ms: None,
         message: Some(message),
     }
+}
+
+impl ProviderModelTestResult {
+    fn with_response_time(mut self, elapsed: Duration) -> Self {
+        self.response_time_ms = Some(duration_to_ms(elapsed));
+        self
+    }
+}
+
+fn duration_to_ms(elapsed: Duration) -> u64 {
+    elapsed
+        .as_millis()
+        .min(u128::from(u64::MAX))
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 /// Extracts top-level response model field when available.
@@ -528,6 +549,7 @@ mod tests {
             protocol: RuleProtocol::Openai,
             token: "token".to_string(),
             api_address: "https://example.com".to_string(),
+            website: String::new(),
             default_model: "gpt-5-mini".to_string(),
             model_mappings: Default::default(),
             quota: crate::domain::entities::default_rule_quota_config(),

@@ -5,6 +5,7 @@ import type {
   Group,
   GroupBackupExportResult,
   GroupBackupImportResult,
+  ProviderModelHealthSnapshot,
   ProviderModelTestResult,
   ProxyConfig,
   RemoteRulesPullResult,
@@ -14,6 +15,7 @@ import type {
   StatsDimension,
 } from "@/types"
 import { bridge } from "@/utils/bridge"
+import { buildProviderModelHealthSnapshot, createProviderTestKey } from "@/utils/providerTesting"
 import {
   activeGroupIdState,
   bootstrapErrorState,
@@ -26,6 +28,7 @@ import {
   logsState,
   logsStatsState,
   providerCardStatsByProviderKeyState,
+  providerModelHealthByProviderKeyState,
   providerQuotasState,
   quotaErrorState,
   quotaLoadingProviderKeysState,
@@ -229,6 +232,25 @@ function buildSaveConfigPayload(config: ProxyConfig): ProxyConfig {
   }
 }
 
+function collectValidProviderKeys(config: ProxyConfig): Set<string> {
+  const keys = new Set<string>()
+  for (const group of config.groups ?? []) {
+    const providerIds = getScopedGroupProviders(group).providerIds
+    for (const providerId of providerIds) {
+      keys.add(createProviderTestKey(group.id, providerId))
+    }
+  }
+  return keys
+}
+
+function pruneProviderModelHealthSnapshots(
+  current: Record<string, ProviderModelHealthSnapshot>,
+  config: ProxyConfig
+): Record<string, ProviderModelHealthSnapshot> {
+  const validKeys = collectValidProviderKeys(config)
+  return Object.fromEntries(Object.entries(current).filter(([key]) => validKeys.has(key)))
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message
@@ -274,6 +296,10 @@ export const initAction = action<void, Promise<void>>(async store => {
     store.set(configState, config)
     store.set(statusState, status)
     store.set(logsStatsState, logsStats)
+    store.set(
+      providerModelHealthByProviderKeyState,
+      pruneProviderModelHealthSnapshots(store.get(providerModelHealthByProviderKeyState), config)
+    )
     store.set(loadingState, false)
     store.set(bootstrappingState, false)
     store.set(bootstrapErrorState, null)
@@ -356,8 +382,16 @@ export const saveConfigAction = action<ProxyConfig, Promise<void>>(async (store,
 
     const result = await bridge.saveConfig(buildSaveConfigPayload(normalizeConfig(nextConfig)))
 
-    store.set(configState, normalizeConfig(result.config))
+    const normalizedConfig = normalizeConfig(result.config)
+    store.set(configState, normalizedConfig)
     store.set(statusState, result.status)
+    store.set(
+      providerModelHealthByProviderKeyState,
+      pruneProviderModelHealthSnapshots(
+        store.get(providerModelHealthByProviderKeyState),
+        normalizedConfig
+      )
+    )
     store.set(savingConfigState, false)
     store.set(lastOperationErrorState, null)
   } catch (error) {
@@ -415,8 +449,16 @@ export const importGroupsBackupAction = action<void, Promise<GroupBackupImportRe
       const result = await bridge.importGroupsBackup()
 
       if (!result.canceled && result.config && result.status) {
-        store.set(configState, normalizeConfig(result.config))
+        const normalizedConfig = normalizeConfig(result.config)
+        store.set(configState, normalizedConfig)
         store.set(statusState, result.status)
+        store.set(
+          providerModelHealthByProviderKeyState,
+          pruneProviderModelHealthSnapshots(
+            store.get(providerModelHealthByProviderKeyState),
+            normalizedConfig
+          )
+        )
         store.set(savingConfigState, false)
       } else {
         store.set(savingConfigState, false)
@@ -443,8 +485,16 @@ export const importGroupsFromJsonAction = action<
     const result = await bridge.importGroupsFromJson(request.jsonText)
 
     if (!result.canceled && result.config && result.status) {
-      store.set(configState, normalizeConfig(result.config))
+      const normalizedConfig = normalizeConfig(result.config)
+      store.set(configState, normalizedConfig)
       store.set(statusState, result.status)
+      store.set(
+        providerModelHealthByProviderKeyState,
+        pruneProviderModelHealthSnapshots(
+          store.get(providerModelHealthByProviderKeyState),
+          normalizedConfig
+        )
+      )
       store.set(savingConfigState, false)
     } else {
       store.set(savingConfigState, false)
@@ -481,8 +531,16 @@ export const remoteRulesPullAction = action<{ force?: boolean }, Promise<RemoteR
       store.set(lastOperationErrorState, null)
       const result = await bridge.remoteRulesPull(request.force)
       if (result.config && result.status) {
-        store.set(configState, normalizeConfig(result.config))
+        const normalizedConfig = normalizeConfig(result.config)
+        store.set(configState, normalizedConfig)
         store.set(statusState, result.status)
+        store.set(
+          providerModelHealthByProviderKeyState,
+          pruneProviderModelHealthSnapshots(
+            store.get(providerModelHealthByProviderKeyState),
+            normalizedConfig
+          )
+        )
       }
       return result
     } catch (error) {
@@ -683,9 +741,37 @@ export const stopServerAction = action<void, Promise<void>>(async store => {
 export const testProviderModelAction = action<
   { groupId: string; providerId: string },
   Promise<ProviderModelTestResult>
->(async (_store, payload) => {
+>(async (store, payload) => {
   const request = requirePayload(payload, "testProviderModelAction")
-  return await bridge.testProviderModel(request.groupId, request.providerId)
+  try {
+    const result = await bridge.testProviderModel(request.groupId, request.providerId)
+    const key = createProviderTestKey(request.groupId, request.providerId)
+    store.set(providerModelHealthByProviderKeyState, {
+      ...store.get(providerModelHealthByProviderKeyState),
+      [key]: buildProviderModelHealthSnapshot({
+        groupId: request.groupId,
+        providerId: request.providerId,
+        ok: result.ok,
+        latencyMs: result.responseTimeMs,
+        resolvedModel: result.resolvedModel,
+        rawText: result.rawText,
+        message: result.message,
+      }),
+    })
+    return result
+  } catch (error) {
+    const key = createProviderTestKey(request.groupId, request.providerId)
+    store.set(providerModelHealthByProviderKeyState, {
+      ...store.get(providerModelHealthByProviderKeyState),
+      [key]: buildProviderModelHealthSnapshot({
+        groupId: request.groupId,
+        providerId: request.providerId,
+        ok: false,
+        message: getErrorMessage(error, "Provider model test failed"),
+      }),
+    })
+    throw error
+  }
 })
 
 export const testRuleQuotaDraftAction = action<

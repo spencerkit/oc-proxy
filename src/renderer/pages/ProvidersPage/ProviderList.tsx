@@ -1,9 +1,25 @@
-import { Copy, FlaskConical, Loader2, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react"
+import {
+  Copy,
+  ExternalLink,
+  FlaskConical,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+} from "lucide-react"
 import type React from "react"
 import { memo } from "react"
 import { Button } from "@/components"
 import { useTranslation } from "@/hooks"
-import type { Group, RuleCardStatsItem, RuleQuotaSnapshot } from "@/types"
+import type {
+  Group,
+  ProviderModelHealthSnapshot,
+  RuleCardStatsItem,
+  RuleQuotaSnapshot,
+} from "@/types"
+import { formatProviderLatency } from "@/utils/providerTesting"
+import { resolveProviderWebsiteHref } from "@/utils/providerWebsite"
 import { formatTokenMillions } from "@/utils/tokenFormat"
 import sharedStyles from "../ServicePage/ServicePage.module.css"
 
@@ -17,6 +33,7 @@ type CatalogProviderCardProps = {
   provider: Group["providers"][number]
   testing: boolean
   quotaLoading: boolean
+  healthSnapshot?: ProviderModelHealthSnapshot | null
   deleteActionLabel: string
   badge: RuleQuotaBadge
   cardStats?: RuleCardStatsItem
@@ -27,6 +44,48 @@ type CatalogProviderCardProps = {
   onRefreshQuota?: (providerId: string) => void | Promise<void>
   formatCostConsumed: (value: number, currency?: string) => string
   formatCompactRequest: (value: number) => string
+}
+
+type ProviderHealthPresentation = {
+  statusLabel: string
+  statusClassName: string
+  latencyLabel: string | null
+}
+
+function resolveProviderHealthPresentation(
+  snapshot: ProviderModelHealthSnapshot | null | undefined,
+  testing: boolean,
+  t: ReturnType<typeof useTranslation>["t"]
+): ProviderHealthPresentation {
+  if (testing) {
+    return {
+      statusLabel: t("servicePage.testingModel"),
+      statusClassName: sharedStyles.providerHealthStatusTesting,
+      latencyLabel: null,
+    }
+  }
+
+  if (!snapshot) {
+    return {
+      statusLabel: t("servicePage.availabilityUntested"),
+      statusClassName: sharedStyles.providerHealthStatusUntested,
+      latencyLabel: null,
+    }
+  }
+
+  if (snapshot.status === "available") {
+    return {
+      statusLabel: t("servicePage.availabilityAvailable"),
+      statusClassName: sharedStyles.providerHealthStatusAvailable,
+      latencyLabel: formatProviderLatency(snapshot.latencyMs),
+    }
+  }
+
+  return {
+    statusLabel: t("servicePage.availabilityUnavailable"),
+    statusClassName: sharedStyles.providerHealthStatusUnavailable,
+    latencyLabel: formatProviderLatency(snapshot.latencyMs),
+  }
 }
 
 /** Resolves currency prefix. */
@@ -59,6 +118,7 @@ const MemoCatalogProviderCard = memo<CatalogProviderCardProps>(
     provider,
     testing,
     quotaLoading,
+    healthSnapshot,
     deleteActionLabel,
     badge,
     cardStats,
@@ -71,91 +131,149 @@ const MemoCatalogProviderCard = memo<CatalogProviderCardProps>(
     formatCompactRequest,
   }) => {
     const { t } = useTranslation()
+    const websiteHref = resolveProviderWebsiteHref(provider.website)
+    const health = resolveProviderHealthPresentation(healthSnapshot, testing, t)
+    const formattedCostConsumed = formatCostConsumed(
+      cardStats?.totalCost ?? 0,
+      provider.cost?.currency || "USD"
+    )
+    const aggregatedInputTokens = (cardStats?.inputTokens ?? 0) + (cardStats?.cacheReadTokens ?? 0)
+    const aggregatedOutputTokens =
+      (cardStats?.outputTokens ?? 0) + (cardStats?.cacheWriteTokens ?? 0)
 
     return (
       <li className={`${sharedStyles.ruleItemContainer} ${sharedStyles.ruleItemContainerCatalog}`}>
-        <div className={sharedStyles.ruleCardTop}>
-          <div className={sharedStyles.ruleItem}>
-            <div className={sharedStyles.ruleTitleLine}>
-              <span className={sharedStyles.ruleModel}>{provider.name}</span>
-              <span className={sharedStyles.ruleDirection}>
-                {t(`ruleProtocol.${provider.protocol}`)}
-              </span>
+        <div className={`${sharedStyles.ruleCardTop} ${sharedStyles.providerCatalogCardTop}`}>
+          <div className={sharedStyles.providerCatalogCardHeader}>
+            <div className={sharedStyles.providerCatalogLead}>
+              <div className={sharedStyles.ruleTitleLine}>
+                <span className={sharedStyles.ruleModel}>{provider.name}</span>
+                {websiteHref ? (
+                  <a
+                    className={sharedStyles.ruleTitleExternalLink}
+                    href={websiteHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={t("ruleForm.officialWebsite")}
+                    aria-label={`${t("ruleForm.officialWebsite")}: ${provider.name}`}
+                  >
+                    <ExternalLink size={13} />
+                  </a>
+                ) : null}
+                <span className={sharedStyles.ruleDirection}>
+                  {t(`ruleProtocol.${provider.protocol}`)}
+                </span>
+              </div>
+              <div className={sharedStyles.providerCatalogSignalRow}>
+                <span className={`${sharedStyles.providerHealthStatus} ${health.statusClassName}`}>
+                  {health.statusLabel}
+                </span>
+                {health.latencyLabel ? (
+                  <span className={sharedStyles.providerHealthMetric}>{health.latencyLabel}</span>
+                ) : null}
+              </div>
             </div>
-            <div className={sharedStyles.ruleCatalogMeta}>
-              <span
-                className={sharedStyles.ruleCatalogMetaItem}
-                title={provider.defaultModel?.trim() || "-"}
-              >
-                <span className={sharedStyles.ruleCatalogMetaLabel}>
-                  {t("servicePage.defaultModel")}
-                </span>
-                <span className={sharedStyles.ruleCatalogMetaValue}>
-                  {provider.defaultModel?.trim() || "-"}
-                </span>
-              </span>
-              <span
-                className={sharedStyles.ruleCatalogMetaItem}
-                title={provider.apiAddress?.trim() || "-"}
-              >
-                <span className={sharedStyles.ruleCatalogMetaLabel}>
-                  {t("servicePage.apiAddress")}
-                </span>
-                <span className={sharedStyles.ruleCatalogMetaValue}>
-                  {provider.apiAddress?.trim() || "-"}
-                </span>
-              </span>
-            </div>
-          </div>
-          <div className={sharedStyles.ruleHeaderRight}>
-            <div className={sharedStyles.ruleActionButtons}>
-              <button
-                type="button"
-                className={sharedStyles.editButton}
-                onClick={() => onEdit(provider.id)}
-                data-tooltip={t("servicePage.editRule")}
-                aria-label={`${t("servicePage.editRule")}: ${provider.name}`}
-              >
-                <Pencil size={14} />
-              </button>
-              {onDuplicate && (
+            <div className={sharedStyles.ruleHeaderRight}>
+              <div className={sharedStyles.ruleActionButtons}>
                 <button
                   type="button"
                   className={sharedStyles.editButton}
-                  onClick={() => onDuplicate(provider.id)}
-                  data-tooltip={t("providersPage.duplicateProvider")}
-                  aria-label={`${t("providersPage.duplicateProvider")}: ${provider.name}`}
+                  onClick={() => onEdit(provider.id)}
+                  data-tooltip={t("servicePage.editRule")}
+                  aria-label={`${t("servicePage.editRule")}: ${provider.name}`}
                 >
-                  <Copy size={14} />
+                  <Pencil size={14} />
                 </button>
-              )}
-              <button
-                type="button"
-                className={sharedStyles.deleteButton}
-                onClick={() => onDelete(provider.id)}
-                data-tooltip={deleteActionLabel}
-                aria-label={`${deleteActionLabel}: ${provider.name}`}
-              >
-                <Trash2 size={14} />
-              </button>
-              {onTestModel && (
+                {onDuplicate && (
+                  <button
+                    type="button"
+                    className={sharedStyles.editButton}
+                    onClick={() => onDuplicate(provider.id)}
+                    data-tooltip={t("providersPage.duplicateProvider")}
+                    aria-label={`${t("providersPage.duplicateProvider")}: ${provider.name}`}
+                  >
+                    <Copy size={14} />
+                  </button>
+                )}
                 <button
                   type="button"
-                  className={sharedStyles.testIconButton}
-                  onClick={() => onTestModel(provider.id)}
-                  data-tooltip={
-                    testing ? t("servicePage.testingModel") : t("servicePage.testModel")
-                  }
-                  aria-label={`${t("servicePage.testModel")}: ${provider.name}`}
-                  disabled={testing}
+                  className={sharedStyles.deleteButton}
+                  onClick={() => onDelete(provider.id)}
+                  data-tooltip={deleteActionLabel}
+                  aria-label={`${deleteActionLabel}: ${provider.name}`}
                 >
-                  {testing ? (
-                    <Loader2 size={14} className={sharedStyles.spinner} />
-                  ) : (
-                    <FlaskConical size={14} />
-                  )}
+                  <Trash2 size={14} />
                 </button>
-              )}
+                {onTestModel && (
+                  <button
+                    type="button"
+                    className={sharedStyles.testIconButton}
+                    onClick={() => onTestModel(provider.id)}
+                    data-tooltip={
+                      testing ? t("servicePage.testingModel") : t("servicePage.testModel")
+                    }
+                    aria-label={`${t("servicePage.testModel")}: ${provider.name}`}
+                    disabled={testing}
+                  >
+                    {testing ? (
+                      <Loader2 size={14} className={sharedStyles.spinner} />
+                    ) : (
+                      <FlaskConical size={14} />
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className={sharedStyles.providerCatalogSummaryRow}>
+            <div className={sharedStyles.providerCatalogModelPanel}>
+              <span className={sharedStyles.providerPanelEyebrow}>
+                {t("servicePage.defaultModel")}
+              </span>
+              <span
+                className={sharedStyles.providerCatalogModelValue}
+                title={provider.defaultModel?.trim() || "-"}
+              >
+                {provider.defaultModel?.trim() || "-"}
+              </span>
+            </div>
+            <div className={sharedStyles.providerCatalogUsagePanel}>
+              <div className={sharedStyles.providerCatalogUsageRow}>
+                <span className={sharedStyles.providerCatalogUsageItem}>
+                  <span className={sharedStyles.providerCatalogUsageLabel}>
+                    {t("servicePage.providerCost")}
+                  </span>
+                  <span className={sharedStyles.providerCatalogUsageValue}>
+                    {formattedCostConsumed}
+                  </span>
+                </span>
+                <span className={sharedStyles.providerCatalogUsageItem}>
+                  <span className={sharedStyles.providerCatalogUsageLabel}>
+                    {t("servicePage.miniRequests")}
+                  </span>
+                  <span className={sharedStyles.providerCatalogUsageValue}>
+                    {formatCompactRequest(cardStats?.requests ?? 0)}
+                  </span>
+                </span>
+              </div>
+              <div className={sharedStyles.providerCatalogUsageRow}>
+                <span className={sharedStyles.providerCatalogUsageItem}>
+                  <span className={sharedStyles.providerCatalogUsageLabel}>
+                    {t("servicePage.miniInputTokens")}
+                  </span>
+                  <span className={sharedStyles.providerCatalogUsageValue}>
+                    {formatTokenMillions(aggregatedInputTokens)}
+                  </span>
+                </span>
+                <span className={sharedStyles.providerCatalogUsageItem}>
+                  <span className={sharedStyles.providerCatalogUsageLabel}>
+                    {t("servicePage.miniOutputTokens")}
+                  </span>
+                  <span className={sharedStyles.providerCatalogUsageValue}>
+                    {formatTokenMillions(aggregatedOutputTokens)}
+                  </span>
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -188,39 +306,6 @@ const MemoCatalogProviderCard = memo<CatalogProviderCardProps>(
               )}
             </div>
           </div>
-          <div className={`${sharedStyles.ruleTrendWrap} ${sharedStyles.ruleTrendWrapCatalog}`}>
-            <div
-              className={`${sharedStyles.ruleTrendInlineMeta} ${sharedStyles.ruleTrendInlineMetaCatalog}`}
-            >
-              <span>
-                {t("servicePage.miniCostConsumed", {
-                  value: formatCostConsumed(
-                    cardStats?.totalCost ?? 0,
-                    provider.cost?.currency || "USD"
-                  ),
-                })}
-              </span>
-              <span>
-                {t("servicePage.miniRequests")}: {formatCompactRequest(cardStats?.requests ?? 0)}
-              </span>
-              <span>
-                {t("servicePage.miniInputTokens")}:{" "}
-                {formatTokenMillions(cardStats?.inputTokens ?? 0)}
-              </span>
-              <span>
-                {t("servicePage.miniOutputTokens")}:{" "}
-                {formatTokenMillions(cardStats?.outputTokens ?? 0)}
-              </span>
-              <span>
-                {t("servicePage.miniCacheInputTokens")}:{" "}
-                {formatTokenMillions(cardStats?.cacheReadTokens ?? 0)}
-              </span>
-              <span>
-                {t("servicePage.miniCacheOutputTokens")}:{" "}
-                {formatTokenMillions(cardStats?.cacheWriteTokens ?? 0)}
-              </span>
-            </div>
-          </div>
         </div>
       </li>
     )
@@ -231,11 +316,15 @@ const MemoCatalogProviderCard = memo<CatalogProviderCardProps>(
       prev.provider.name === next.provider.name &&
       prev.provider.protocol === next.provider.protocol &&
       prev.provider.defaultModel === next.provider.defaultModel &&
-      prev.provider.apiAddress === next.provider.apiAddress &&
+      prev.provider.website === next.provider.website &&
       Boolean(prev.provider.quota?.enabled) === Boolean(next.provider.quota?.enabled) &&
       (prev.provider.cost?.currency || "USD") === (next.provider.cost?.currency || "USD") &&
       prev.testing === next.testing &&
       prev.quotaLoading === next.quotaLoading &&
+      prev.healthSnapshot?.status === next.healthSnapshot?.status &&
+      prev.healthSnapshot?.latencyMs === next.healthSnapshot?.latencyMs &&
+      prev.healthSnapshot?.resolvedModel === next.healthSnapshot?.resolvedModel &&
+      prev.healthSnapshot?.testedAt === next.healthSnapshot?.testedAt &&
       prev.deleteActionLabel === next.deleteActionLabel &&
       prev.badge.className === next.badge.className &&
       prev.badge.text === next.badge.text &&
@@ -254,8 +343,11 @@ export const ProviderList: React.FC<{
   quotaByProviderId?: Record<string, RuleQuotaSnapshot | undefined>
   quotaLoadingByProviderId?: Record<string, boolean | undefined>
   cardStatsByProviderId?: Record<string, RuleCardStatsItem | undefined>
+  providerHealthByProviderId?: Record<string, ProviderModelHealthSnapshot | null | undefined>
   onRefreshQuota?: (providerId: string) => void | Promise<void>
   onTestModel?: (providerId: string) => void | Promise<void>
+  onTestAll?: () => void | Promise<void>
+  testingAll?: boolean
   testingProviderIds?: Record<string, boolean | undefined>
   onDuplicate?: (providerId: string) => void | Promise<void>
   onDelete: (providerId: string) => void
@@ -270,8 +362,11 @@ export const ProviderList: React.FC<{
   quotaByProviderId,
   quotaLoadingByProviderId,
   cardStatsByProviderId,
+  providerHealthByProviderId,
   onRefreshQuota,
   onTestModel,
+  onTestAll,
+  testingAll = false,
   testingProviderIds,
   onDuplicate,
   onDelete,
@@ -469,25 +564,54 @@ export const ProviderList: React.FC<{
           <h3>{t("servicePage.ruleName")}</h3>
           <span className={sharedStyles.countBadge}>{providers.length}</span>
         </div>
-        <Button
-          variant="ghost"
-          size="small"
-          icon={Plus}
-          onClick={onAdd}
-          title={addButtonTitle || addButtonLabel || t("providersPage.addProvider")}
-        />
+        <div className={sharedStyles.ruleHeaderActions}>
+          {onTestAll ? (
+            <button
+              type="button"
+              className={sharedStyles.headerIconButton}
+              onClick={() => void onTestAll()}
+              data-tooltip={
+                testingAll
+                  ? t("servicePage.testingAllProviders")
+                  : t("servicePage.testAllProviders")
+              }
+              aria-label={
+                testingAll
+                  ? t("servicePage.testingAllProviders")
+                  : t("servicePage.testAllProviders")
+              }
+              disabled={providers.length === 0 || testingAll}
+            >
+              {testingAll ? (
+                <Loader2 size={14} className={sharedStyles.spinner} />
+              ) : (
+                <FlaskConical size={14} />
+              )}
+            </button>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="small"
+            icon={Plus}
+            onClick={onAdd}
+            title={addButtonTitle || addButtonLabel || t("providersPage.addProvider")}
+          />
+        </div>
       </div>
       <div className={`${sharedStyles.ruleListContent} ${sharedStyles.ruleListContentCatalog}`}>
         {providers.length === 0 ? (
           <p className={sharedStyles.emptyHint}>{emptyMessage || t("providersPage.empty")}</p>
         ) : (
-          <ul className={`${sharedStyles.ruleItems} ${sharedStyles.ruleItemsCatalog}`}>
+          <ul
+            className={`${sharedStyles.ruleItems} ${sharedStyles.ruleItemsCatalog} ${sharedStyles.ruleItemsTwoColumn}`}
+          >
             {providers.map(provider => (
               <MemoCatalogProviderCard
                 key={provider.id}
                 provider={provider}
                 testing={Boolean(testingProviderIds?.[provider.id])}
                 quotaLoading={Boolean(quotaLoadingByProviderId?.[provider.id])}
+                healthSnapshot={providerHealthByProviderId?.[provider.id]}
                 deleteActionLabel={resolvedDeleteActionLabel}
                 badge={resolveQuotaBadge(provider)}
                 cardStats={cardStatsByProviderId?.[provider.id]}

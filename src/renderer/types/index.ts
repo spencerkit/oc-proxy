@@ -25,6 +25,7 @@ export type {
   LogEntryPhase,
   LogEntryStatus,
   Provider,
+  ProviderModelHealthSnapshot,
   ProviderModelTestResult,
   ProxyMetrics,
   ProxyStatus,

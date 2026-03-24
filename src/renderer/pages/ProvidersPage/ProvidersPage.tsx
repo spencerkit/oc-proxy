@@ -9,6 +9,7 @@ import {
   fetchGroupQuotasAction,
   fetchProviderQuotaAction,
   providerCardStatsByProviderKeyState,
+  providerModelHealthByProviderKeyState,
   providerQuotasState,
   quotaLoadingProviderKeysState,
   saveConfigAction,
@@ -16,6 +17,10 @@ import {
 } from "@/store"
 import type { ProxyConfig, RuleCardStatsItem, RuleQuotaSnapshot } from "@/types"
 import { createStableId } from "@/utils/id"
+import {
+  formatProviderLatency,
+  pickLatestProviderModelHealthSnapshot,
+} from "@/utils/providerTesting"
 import { useActions, useRelaxValue } from "@/utils/relax"
 import { ProviderList } from "./ProviderList"
 import styles from "./ProvidersPage.module.css"
@@ -140,6 +145,7 @@ export const ProvidersPage: React.FC = () => {
   const { t } = useTranslation()
   const { showToast } = useLogs()
   const config = useRelaxValue(configState)
+  const providerModelHealthByProviderKey = useRelaxValue(providerModelHealthByProviderKeyState)
   const providerQuotas = useRelaxValue(providerQuotasState)
   const quotaLoadingProviderKeys = useRelaxValue(quotaLoadingProviderKeysState)
   const providerCardStatsByProviderKey = useRelaxValue(providerCardStatsByProviderKeyState)
@@ -154,6 +160,7 @@ export const ProvidersPage: React.FC = () => {
   const [searchValue, setSearchValue] = useState("")
   const [pendingDeleteProviderId, setPendingDeleteProviderId] = useState<string | null>(null)
   const [testingProviderIds, setTestingProviderIds] = useState<Record<string, boolean>>({})
+  const [testingAllProviders, setTestingAllProviders] = useState(false)
   const quotaRefreshCursorRef = useRef(0)
 
   const providers = config?.providers ?? []
@@ -190,9 +197,13 @@ export const ProvidersPage: React.FC = () => {
     const normalized = searchValue.trim().toLowerCase()
     if (!normalized) return providers
     return providers.filter(provider => {
-      return [provider.id, provider.name, provider.apiAddress].some(value =>
-        value?.toLowerCase().includes(normalized)
-      )
+      return [
+        provider.id,
+        provider.name,
+        provider.apiAddress,
+        provider.defaultModel,
+        provider.website,
+      ].some(value => value?.toLowerCase().includes(normalized))
     })
   }, [providers, searchValue])
 
@@ -232,6 +243,21 @@ export const ProvidersPage: React.FC = () => {
     }
     return result
   }, [filteredProviders, associatedGroupIdsByProviderId, providerCardStatsByProviderKey])
+  const providerHealthByProviderId = useMemo(() => {
+    const result: Record<string, ReturnType<typeof pickLatestProviderModelHealthSnapshot>> = {}
+    for (const provider of filteredProviders) {
+      const groupIds = associatedGroupIdsByProviderId[provider.id] ?? []
+      const snapshot = pickLatestProviderModelHealthSnapshot(
+        groupIds.map(
+          groupId => providerModelHealthByProviderKey[providerQuotaKey(groupId, provider.id)]
+        )
+      )
+      if (snapshot) {
+        result[provider.id] = snapshot
+      }
+    }
+    return result
+  }, [filteredProviders, associatedGroupIdsByProviderId, providerModelHealthByProviderKey])
 
   const affectedGroups = useMemo(() => {
     if (!pendingDeleteProviderId || !config) return []
@@ -404,11 +430,13 @@ export const ProvidersPage: React.FC = () => {
         result.rawText?.trim() ||
         provider.defaultModel.trim() ||
         provider.name
+      const latencyLabel = formatProviderLatency(result.responseTimeMs)
 
       showToast(
         t("toast.providerModelTestSuccess", {
           provider: provider.name,
           model: modelName,
+          latency: latencyLabel || "-",
         }),
         "success"
       )
@@ -427,6 +455,71 @@ export const ProvidersPage: React.FC = () => {
         return next
       })
     }
+  }
+
+  const handleTestAllProviders = async () => {
+    if (!config || testingAllProviders || filteredProviders.length === 0) return
+
+    const testableProviders = filteredProviders
+      .map(provider => {
+        const groupId = associatedGroupIdsByProviderId[provider.id]?.[0]
+        return groupId ? { provider, groupId } : null
+      })
+      .filter(
+        (
+          item
+        ): item is {
+          provider: (typeof filteredProviders)[number]
+          groupId: string
+        } => Boolean(item)
+      )
+
+    if (testableProviders.length === 0) {
+      showToast(t("providersPage.providerTestRequiresAssociation"), "error")
+      return
+    }
+
+    setTestingAllProviders(true)
+    setTestingProviderIds(prev => ({
+      ...prev,
+      ...Object.fromEntries(testableProviders.map(item => [item.provider.id, true])),
+    }))
+
+    let available = 0
+    let unavailable = 0
+    const skipped = filteredProviders.length - testableProviders.length
+
+    for (const item of testableProviders) {
+      try {
+        const result = await testProviderModel({
+          groupId: item.groupId,
+          providerId: item.provider.id,
+        })
+        if (result.ok) {
+          available += 1
+        } else {
+          unavailable += 1
+        }
+      } catch {
+        unavailable += 1
+      } finally {
+        setTestingProviderIds(prev => {
+          const next = { ...prev }
+          delete next[item.provider.id]
+          return next
+        })
+      }
+    }
+
+    setTestingAllProviders(false)
+    showToast(
+      t("toast.providerBatchTestSummary", {
+        available,
+        unavailable,
+        skipped,
+      }),
+      unavailable > 0 ? "error" : "success"
+    )
   }
 
   const handleRefreshProviderQuota = async (providerId: string) => {
@@ -471,8 +564,11 @@ export const ProvidersPage: React.FC = () => {
         quotaByProviderId={quotaByProviderId}
         quotaLoadingByProviderId={quotaLoadingByProviderId}
         cardStatsByProviderId={cardStatsByProviderId}
+        providerHealthByProviderId={providerHealthByProviderId}
         onRefreshQuota={handleRefreshProviderQuota}
         onTestModel={handleTestProviderModel}
+        onTestAll={() => void handleTestAllProviders()}
+        testingAll={testingAllProviders}
         testingProviderIds={testingProviderIds}
         onDuplicate={providerId => void handleDuplicateProvider(providerId)}
         onDelete={providerId => setPendingDeleteProviderId(providerId)}
