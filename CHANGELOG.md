@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.15 - 2026-03-24
+### Fixes
+- fix: normalize updater release asset urls (ec0ffb7)
+
 ## v0.2.14 - 2026-03-23
 ### Features
 - feat: redesign provider cards and harden remote admin (b513d17)
