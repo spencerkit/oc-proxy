@@ -134,7 +134,9 @@ fn resolve_provider_for_test(
             .find(|provider| provider.id == normalized_provider_id)
             .cloned()
             .ok_or_else(|| {
-                AppError::not_found(format!("provider not found in group {group_id}: {provider_id}"))
+                AppError::not_found(format!(
+                    "provider not found in group {group_id}: {provider_id}"
+                ))
             });
     }
 
@@ -595,7 +597,9 @@ mod tests {
                 strict_mode: false,
                 text_tool_call_fallback_enabled: true,
             },
-            logging: LoggingConfig { capture_body: false },
+            logging: LoggingConfig {
+                capture_body: false,
+            },
             ui: UiConfig {
                 theme: "light".to_string(),
                 locale: "en-US".to_string(),
