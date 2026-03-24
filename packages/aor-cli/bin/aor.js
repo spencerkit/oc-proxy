@@ -18,10 +18,13 @@ const DEFAULT_PORT = 8899
 
 function printHelp() {
   console.log(`aor commands:
-  aor start [--port <port>]   Start service in background
-  aor stop                    Stop background service
-  aor restart [--port <port>] Restart background service
-  aor status                  Show service status`)
+  aor start [--port <port>]                     Start service in background
+  aor stop                                      Stop background service
+  aor restart [--port <port>]                   Restart background service
+  aor status                                    Show service status
+  aor admin-password set <password>             Set remote management password
+  aor admin-password set --password-stdin       Read password from stdin
+  aor admin-password clear                      Clear remote management password`)
 }
 
 function ensureBinary() {
@@ -78,6 +81,14 @@ function validatePort(port) {
   }
 }
 
+function formatManagementUrl(port) {
+  return `http://127.0.0.1:${port}/management`
+}
+
+function buildApiUrl(port, pathname) {
+  return `http://127.0.0.1:${port}${pathname}`
+}
+
 function isProcessAlive(pid) {
   if (!pid || typeof pid !== "number") return false
   try {
@@ -98,7 +109,7 @@ async function checkHealth(port, timeoutMs = 1200) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+    const response = await fetch(buildApiUrl(port, "/api/health"), {
       signal: controller.signal,
     })
     return response.ok
@@ -160,6 +171,155 @@ function applyStartupPort(port) {
   writeJsonFile(configFilePath, next)
 }
 
+function resolveRuntimePort() {
+  const state = readState()
+  const statePort = state?.port
+  if (Number.isInteger(statePort) && statePort >= 1 && statePort <= 65535) {
+    return statePort
+  }
+  return readConfiguredPort()
+}
+
+function parseAdminPasswordSetArgs(argv) {
+  let password = null
+  let passwordFromStdin = false
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i]
+    if (token === "--password-stdin") {
+      if (password !== null || passwordFromStdin) {
+        throw new Error("Use either a positional password or --password-stdin, not both.")
+      }
+      passwordFromStdin = true
+      continue
+    }
+    if (token === "--password") {
+      const next = argv[i + 1]
+      if (!next) throw new Error("Missing value for --password")
+      if (password !== null || passwordFromStdin) {
+        throw new Error("Use either a positional password or --password, not both.")
+      }
+      password = next
+      i += 1
+      continue
+    }
+    if (token.startsWith("--password=")) {
+      if (password !== null || passwordFromStdin) {
+        throw new Error("Use either a positional password or --password, not both.")
+      }
+      password = token.slice("--password=".length)
+      continue
+    }
+    if (token.startsWith("-")) {
+      throw new Error(`Unknown argument for admin-password set: ${token}`)
+    }
+    if (password !== null) {
+      throw new Error("Too many arguments for admin-password set")
+    }
+    password = token
+  }
+
+  return { password, passwordFromStdin }
+}
+
+async function readPasswordFromStdin(stdin = process.stdin) {
+  if (stdin.isTTY) {
+    throw new Error(
+      "Missing password. Pass `aor admin-password set <password>` or pipe one with --password-stdin."
+    )
+  }
+
+  const chunks = []
+  for await (const chunk of stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+  }
+  const password = Buffer.concat(chunks)
+    .toString("utf8")
+    .replace(/\r?\n$/, "")
+  if (!password.trim()) {
+    throw new Error("Remote management password must not be empty.")
+  }
+  return password
+}
+
+async function resolveAdminPasswordInput(argv, stdin = process.stdin) {
+  const { password, passwordFromStdin } = parseAdminPasswordSetArgs(argv)
+  if (password !== null) {
+    if (!password.trim()) {
+      throw new Error("Remote management password must not be empty.")
+    }
+    return password
+  }
+  if (passwordFromStdin || !stdin.isTTY) {
+    return readPasswordFromStdin(stdin)
+  }
+
+  throw new Error(
+    "Missing password. Pass `aor admin-password set <password>` or pipe one with --password-stdin."
+  )
+}
+
+function extractApiErrorMessage(payload) {
+  if (!payload || typeof payload !== "object") return null
+  const error = payload.error
+  if (!error || typeof error !== "object") return null
+  if (typeof error.message === "string" && error.message.trim()) {
+    return error.message.trim()
+  }
+  return null
+}
+
+async function ensureServiceRunning(port, healthCheck = checkHealth) {
+  const healthy = await healthCheck(port, 1000)
+  if (healthy) return
+
+  const portHint = port === DEFAULT_PORT ? "" : ` --port ${port}`
+  throw new Error(
+    `aor is not running on port ${port}. Start it first with \`aor start${portHint}\`.`
+  )
+}
+
+async function requestLocalApi(port, pathname, options = {}, fetchImpl = fetch) {
+  const method = options.method || "GET"
+  const headers = {
+    Accept: "application/json",
+    ...(options.headers || {}),
+  }
+  const init = {
+    method,
+    headers,
+  }
+
+  if (options.json !== undefined) {
+    headers["Content-Type"] = "application/json"
+    init.body = JSON.stringify(options.json)
+  }
+
+  let response
+  try {
+    response = await fetchImpl(buildApiUrl(port, pathname), init)
+  } catch (error) {
+    throw new Error(`request to local aor service failed: ${error.message || error}`)
+  }
+
+  const rawText = await response.text()
+  let payload = null
+  if (rawText.trim()) {
+    try {
+      payload = JSON.parse(rawText)
+    } catch {
+      payload = rawText
+    }
+  }
+
+  if (!response.ok) {
+    const apiMessage = extractApiErrorMessage(payload)
+    throw new Error(apiMessage || `${method} ${pathname} failed with status ${response.status}`)
+  }
+
+  return payload
+}
+
 async function commandStart(argv) {
   ensureBinary()
   ensureDirectories()
@@ -176,7 +336,7 @@ async function commandStart(argv) {
     const healthy = await checkHealth(state.port || port)
     if (healthy) {
       console.log(`aor is already running (pid=${state.pid})`)
-      console.log(`Management: http://127.0.0.1:${state.port || port}/management`)
+      console.log(`Management: ${formatManagementUrl(state.port || port)}`)
       return
     }
   }
@@ -210,7 +370,7 @@ async function commandStart(argv) {
   }
 
   console.log(`aor started (pid=${child.pid})`)
-  console.log(`Management: http://127.0.0.1:${port}/management`)
+  console.log(`Management: ${formatManagementUrl(port)}`)
 }
 
 async function commandStop() {
@@ -248,7 +408,7 @@ async function commandStatus() {
   console.log(`running: ${healthy ? "yes" : "no"}`)
   console.log(`pid: ${pid ?? "-"}`)
   console.log(`port: ${port}`)
-  console.log(`management: http://127.0.0.1:${port}/management`)
+  console.log(`management: ${formatManagementUrl(port)}`)
   if (state?.logFilePath) {
     console.log(`log: ${state.logFilePath}`)
   }
@@ -263,15 +423,65 @@ async function commandRestart(argv) {
   await commandStart(argv)
 }
 
-async function main() {
-  const argv = process.argv.slice(2)
+async function commandAdminPasswordSet(argv, deps = {}) {
+  const port = deps.port ?? resolveRuntimePort()
+  const healthCheck = deps.checkHealth ?? checkHealth
+  const stdin = deps.stdin ?? process.stdin
+  const log = deps.log ?? console.log
+  const request =
+    deps.requestLocalApi ??
+    ((targetPort, pathname, options) => requestLocalApi(targetPort, pathname, options, deps.fetch))
+
+  await ensureServiceRunning(port, healthCheck)
+  const password = await resolveAdminPasswordInput(argv, stdin)
+  await request(port, "/api/config/remote-admin-password", {
+    method: "PUT",
+    json: { password },
+  })
+  log(`Remote management password configured. Management: ${formatManagementUrl(port)}`)
+}
+
+async function commandAdminPasswordClear(deps = {}) {
+  const port = deps.port ?? resolveRuntimePort()
+  const healthCheck = deps.checkHealth ?? checkHealth
+  const log = deps.log ?? console.log
+  const request =
+    deps.requestLocalApi ??
+    ((targetPort, pathname, options) => requestLocalApi(targetPort, pathname, options, deps.fetch))
+
+  await ensureServiceRunning(port, healthCheck)
+  await request(port, "/api/config/remote-admin-password", {
+    method: "DELETE",
+  })
+  log(`Remote management password cleared. Management: ${formatManagementUrl(port)}`)
+}
+
+async function commandAdminPassword(argv, deps = {}) {
+  const subcommand = argv[0]
+  const rest = argv.slice(1)
+
+  switch (subcommand) {
+    case "set":
+      await commandAdminPasswordSet(rest, deps)
+      break
+    case "clear":
+      await commandAdminPasswordClear(deps)
+      break
+    default:
+      throw new Error("Unknown admin-password command. Use `set` or `clear`.")
+  }
+}
+
+async function main(argvInput = process.argv.slice(2), deps = {}) {
+  const argv = argvInput
   if (argv.includes("--help") || argv.includes("-h")) {
     printHelp()
     return
   }
 
-  const command = argv[0] && !argv[0].startsWith("-") ? argv[0] : "start"
-  const rest = command === "start" ? argv.slice(command === argv[0] ? 1 : 0) : argv.slice(1)
+  const explicitCommand = argv[0] && !argv[0].startsWith("-") ? argv[0] : null
+  const command = explicitCommand || "start"
+  const rest = explicitCommand ? argv.slice(1) : argv
 
   switch (command) {
     case "start":
@@ -286,12 +496,28 @@ async function main() {
     case "status":
       await commandStatus()
       break
+    case "admin-password":
+      await commandAdminPassword(rest, deps)
+      break
     default:
       throw new Error(`Unknown command: ${command}`)
   }
 }
 
-main().catch(error => {
-  console.error(error.message || error)
-  process.exit(1)
-})
+if (require.main === module) {
+  main().catch(error => {
+    console.error(error.message || error)
+    process.exit(1)
+  })
+}
+
+module.exports = {
+  commandAdminPasswordClear,
+  commandAdminPasswordSet,
+  extractApiErrorMessage,
+  main,
+  parseAdminPasswordSetArgs,
+  readPasswordFromStdin,
+  requestLocalApi,
+  resolveAdminPasswordInput,
+}

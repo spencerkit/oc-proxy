@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "ai-open-router-tauri"
-version = "0.2.14"
+version = "0.2.16"
 dependencies = [
  "argon2",
  "axum",
@@ -67,6 +67,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml_edit 0.22.27",
+ "tower",
  "url",
  "uuid",
 ]

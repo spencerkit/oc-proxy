@@ -172,6 +172,16 @@ English documentation: [../../README.md](../../README.md)
 
 会。导入或远端拉取都会覆盖当前分组与 Provider，建议先导出本地备份。
 
+### 为什么 Linux root 环境下识别不到 Claude / OpenClaw 配置？
+
+从 `v0.2.15` 开始，如果应用运行在 `HOME=/root` 环境下，而常规 home 目录里没有对应配置，会自动回退检测 root 根目录下的隐藏配置目录：
+
+- 当 `/root/.claude` 不存在时，自动尝试 `/.claude`
+- 当 `/root/.openclaw` 不存在时，自动尝试 `/.openclaw`
+- 当 `/root/.codex` 不存在时，自动尝试 `/.codex`
+
+如果你的配置实际放在别的位置，仍然可以手动添加自定义集成目录。
+
 ### Token 和 Git Token 安全性如何？
 
 当前会保存在本地配置中（明文），请使用最小权限凭证，并仅在可信环境使用。

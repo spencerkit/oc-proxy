@@ -7,7 +7,7 @@ use crate::models::{IntegrationClientKind, IntegrationTarget, IntegrationWriteRe
 use crate::services::integration_service;
 use crate::wsl;
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -52,6 +52,23 @@ fn resolve_starting_directory(
     initial_dir: Option<String>,
     kind: Option<IntegrationClientKind>,
 ) -> Option<PathBuf> {
+    let home = user_home_dir()?;
+    resolve_starting_directory_with_root_paths(
+        initial_dir,
+        kind,
+        &home,
+        Path::new("/root"),
+        Path::new("/"),
+    )
+}
+
+fn resolve_starting_directory_with_root_paths(
+    initial_dir: Option<String>,
+    kind: Option<IntegrationClientKind>,
+    home: &Path,
+    root_home: &Path,
+    root_base: &Path,
+) -> Option<PathBuf> {
     if let Some(dir) = initial_dir {
         let path = PathBuf::from(dir.trim());
         if wsl::is_wsl_path(&path) {
@@ -63,19 +80,17 @@ fn resolve_starting_directory(
         }
     }
 
-    let home = user_home_dir()?;
     let candidate = match kind {
-        Some(IntegrationClientKind::Claude) => Some(home.join(".claude")),
-        Some(IntegrationClientKind::Codex) => Some(home.join(".codex")),
-        Some(IntegrationClientKind::Openclaw) => Some(home.join(".openclaw")),
-        Some(IntegrationClientKind::Opencode) => {
-            Some(integration_service::preferred_opencode_config_dir(&home))
-        }
+        Some(kind) => Some(
+            integration_service::preferred_client_config_dir_with_root_paths(
+                &kind, home, root_home, root_base,
+            ),
+        ),
         None => None,
     };
     match candidate {
         Some(path) if path.exists() => Some(path),
-        _ => Some(home),
+        _ => Some(home.to_path_buf()),
     }
 }
 
@@ -169,4 +184,39 @@ pub async fn integration_write_agent_config_source(
         source_id.as_deref(),
     )
     .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_starting_directory_with_root_paths;
+    use crate::models::IntegrationClientKind;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn resolve_starting_directory_prefers_root_level_hidden_dir_for_root_home() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let sandbox_root =
+            std::env::temp_dir().join(format!("oc-proxy-picker-root-start-{unique_id}"));
+        let fake_root_home = sandbox_root.join("root-home");
+        let fake_root_base = sandbox_root.join("fs-root");
+        let root_level = fake_root_base.join(".openclaw");
+
+        std::fs::create_dir_all(&fake_root_home).expect("fake root home should be created");
+        std::fs::create_dir_all(&root_level).expect("root-level openclaw dir should be created");
+
+        let preferred = resolve_starting_directory_with_root_paths(
+            None,
+            Some(IntegrationClientKind::Openclaw),
+            &fake_root_home,
+            &fake_root_home,
+            &fake_root_base,
+        );
+        assert_eq!(preferred, Some(PathBuf::from(&root_level)));
+
+        let _ = std::fs::remove_dir_all(&sandbox_root);
+    }
 }

@@ -2,9 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.16 - 2026-03-24
+### Features
+- feat(cli): add admin password commands (fe28f51)
+### Fixes
+- fix(ci): skip ignored biome files and cover headless targets (46e83ff)
+- fix(integration): detect root-level config dirs for root users (a8652f0)
+- fix: allow provider model tests without group association (eecae87)
+### Maintenance
+- test: cover root config dir fallback and document it (073cfd6)
+
 ## v0.2.15 - 2026-03-24
+### Features
+- feat(cli): add admin password commands (fe28f51)
 ### Fixes
 - fix: normalize updater release asset urls (ec0ffb7)
+- fix: allow provider model tests without group association (eecae87)
+- fix(integration): detect root-level config dirs for root users (a8652f0)
 
 ## v0.2.14 - 2026-03-23
 ### Features

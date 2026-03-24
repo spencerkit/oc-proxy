@@ -160,6 +160,16 @@ Yes. A group can keep multiple providers, but only one is active at a time.
 
 Yes. Pull/import replaces current groups and providers, so export a local backup first.
 
+### Why can't Linux root mode find my Claude/OpenClaw config?
+
+From `v0.2.15`, when the app runs with `HOME=/root`, integration auto-detects root-level hidden config directories if the usual home path is missing:
+
+- `/.claude` when `/root/.claude` does not exist
+- `/.openclaw` when `/root/.openclaw` does not exist
+- `/.codex` when `/root/.codex` does not exist
+
+If your config still lives somewhere else, you can add a custom integration target manually.
+
 ### How are tokens stored?
 
 Provider tokens and Remote Git token are currently stored locally in plain text. Use minimum-scope credentials.

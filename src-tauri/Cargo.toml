@@ -1,6 +1,6 @@
 [package]
 name = "ai-open-router-tauri"
-version = "0.2.15"
+version = "0.2.16"
 description = "AI Open Router Tauri app"
 authors = ["AI Open Router"]
 license = "MIT"
@@ -36,6 +36,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 rust-embed = "8"
 mime_guess = "2"
 directories = "5"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 
 [[bin]]
 name = "ai-open-router"

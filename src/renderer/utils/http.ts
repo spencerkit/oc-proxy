@@ -453,7 +453,10 @@ export const httpApi = {
     })
   },
 
-  testProviderModel(groupId: string, providerId: string): Promise<ProviderModelTestResult> {
+  testProviderModel(
+    groupId: string | undefined,
+    providerId: string
+  ): Promise<ProviderModelTestResult> {
     return request<ProviderModelTestResult>("POST", "/api/provider/test-model", {
       groupId,
       providerId,

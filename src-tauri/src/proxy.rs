@@ -310,6 +310,82 @@ impl ProxyRuntime {
 }
 
 #[cfg(test)]
+pub(crate) fn headless_service_state_for_tests() -> ServiceState {
+    let unique_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time must move forward")
+        .as_nanos();
+    let base_dir = std::env::temp_dir().join(format!("oc-proxy-headless-state-{unique_id}"));
+    std::fs::create_dir_all(&base_dir).expect("test app data dir should be created");
+
+    let config_store = crate::config_store::ConfigStore::new(base_dir.join("config.json"));
+    config_store
+        .initialize()
+        .expect("test config store should initialize");
+    let integration_store =
+        crate::integration_store::IntegrationStore::new(base_dir.join("integrations.json"));
+    integration_store
+        .initialize()
+        .expect("test integration store should initialize");
+    let remote_admin_auth =
+        crate::auth::RemoteAdminAuthStore::new(base_dir.join("remote-admin-auth.json"));
+    remote_admin_auth
+        .initialize()
+        .expect("test remote admin auth should initialize");
+
+    let log_store = LogStore::new(16);
+    let stats_store = StatsStore::new(base_dir.join("stats.sqlite"));
+    stats_store
+        .initialize()
+        .expect("test stats store should initialize");
+
+    let runtime = ProxyRuntime::new(
+        config_store.shared_config(),
+        config_store.shared_revision(),
+        log_store.clone(),
+        stats_store.clone(),
+    )
+    .expect("test runtime should initialize");
+
+    let shared_state = std::sync::Arc::new(crate::app_state::AppState {
+        app_info: crate::models::AppInfo {
+            name: "test".to_string(),
+            version: "0.0.0".to_string(),
+        },
+        config_store: config_store.clone(),
+        integration_store,
+        remote_admin_auth,
+        runtime,
+        renderer_ready: std::sync::atomic::AtomicBool::new(false),
+    });
+
+    let config_value = config_store.get();
+    let route_index = Arc::new(RwLock::new(routing::build_route_index(&config_value)));
+    let config = config_store.shared_config();
+    let config_revision = config_store.shared_revision();
+    let route_index_revision = Arc::new(AtomicU64::new(0));
+    let client = Client::builder()
+        .connect_timeout(std::time::Duration::from_millis(
+            UPSTREAM_CONNECT_TIMEOUT_MS,
+        ))
+        .build()
+        .expect("test http client should be created");
+
+    ServiceState {
+        config,
+        config_revision,
+        route_index,
+        route_index_revision,
+        log_store,
+        stats_store,
+        metrics: Arc::new(observability::MetricsState::new()),
+        client,
+        shared_state: Some(shared_state),
+        app_handle: None,
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::observability::{extract_token_usage, StreamTokenAccumulator};
     use super::pipeline::resolve_request_timeout_ms;

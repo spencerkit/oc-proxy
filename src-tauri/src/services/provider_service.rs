@@ -3,7 +3,7 @@
 //! Sends a direct upstream request and normalizes the reported model identity for the renderer.
 
 use crate::app_state::SharedState;
-use crate::models::{ProviderModelTestResult, Rule, RuleProtocol};
+use crate::models::{ProviderModelTestResult, ProxyConfig, Rule, RuleProtocol};
 use crate::proxy::routing::{build_rule_headers, resolve_upstream_path, resolve_upstream_url};
 use crate::services::{AppError, AppResult};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -21,21 +21,11 @@ const MODEL_TEST_USER_PROMPT: &str =
 /// Tests upstream model identity with the saved provider configuration.
 pub async fn test_model(
     state: &SharedState,
-    group_id: String,
+    group_id: Option<String>,
     provider_id: String,
 ) -> AppResult<ProviderModelTestResult> {
     let config = state.config_store.get();
-    let group = config
-        .groups
-        .iter()
-        .find(|group| group.id == group_id)
-        .ok_or_else(|| AppError::not_found(format!("group not found: {group_id}")))?;
-    let provider = group
-        .providers
-        .iter()
-        .find(|provider| provider.id == provider_id)
-        .ok_or_else(|| AppError::not_found(format!("provider not found: {provider_id}")))?
-        .clone();
+    let provider = resolve_provider_for_test(&config, group_id.as_deref(), &provider_id)?;
 
     validate_provider(&provider)?;
 
@@ -120,6 +110,42 @@ pub async fn test_model(
         response_time_ms: Some(duration_to_ms(started_at.elapsed())),
         message: None,
     })
+}
+
+fn resolve_provider_for_test(
+    config: &ProxyConfig,
+    group_id: Option<&str>,
+    provider_id: &str,
+) -> AppResult<Rule> {
+    let normalized_provider_id = provider_id.trim();
+    if normalized_provider_id.is_empty() {
+        return Err(AppError::validation("provider id is required"));
+    }
+
+    if let Some(group_id) = group_id.map(str::trim).filter(|value| !value.is_empty()) {
+        let group = config
+            .groups
+            .iter()
+            .find(|group| group.id == group_id)
+            .ok_or_else(|| AppError::not_found(format!("group not found: {group_id}")))?;
+        return group
+            .providers
+            .iter()
+            .find(|provider| provider.id == normalized_provider_id)
+            .cloned()
+            .ok_or_else(|| {
+                AppError::not_found(format!(
+                    "provider not found in group {group_id}: {provider_id}"
+                ))
+            });
+    }
+
+    config
+        .providers
+        .iter()
+        .find(|provider| provider.id == normalized_provider_id)
+        .cloned()
+        .ok_or_else(|| AppError::not_found(format!("provider not found: {provider_id}")))
 }
 
 /// Validates provider fields required for direct upstream testing.
@@ -538,23 +564,74 @@ fn flush_sse_event_data(data_lines: &mut Vec<String>, events: &mut Vec<Value>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{
+        CompatConfig, Group, LoggingConfig, ProxyConfig, RemoteGitConfig, ServerConfig, UiConfig,
+    };
     use serde_json::json;
 
-    #[test]
-    /// Builds OpenAI responses payload with array-form input for stricter upstream compatibility.
-    fn build_request_payload_uses_array_input_for_openai_responses() {
-        let provider = Rule {
-            id: "provider-a".to_string(),
-            name: "Provider A".to_string(),
+    fn sample_provider(id: &str, token: &str) -> Rule {
+        Rule {
+            id: id.to_string(),
+            name: format!("Provider {id}"),
             protocol: RuleProtocol::Openai,
-            token: "token".to_string(),
+            token: token.to_string(),
             api_address: "https://example.com".to_string(),
             website: String::new(),
             default_model: "gpt-5-mini".to_string(),
             model_mappings: Default::default(),
             quota: crate::domain::entities::default_rule_quota_config(),
             cost: crate::domain::entities::default_rule_cost_config(),
-        };
+        }
+    }
+
+    fn sample_config() -> ProxyConfig {
+        ProxyConfig {
+            config_version: 4,
+            server: ServerConfig {
+                host: "127.0.0.1".to_string(),
+                port: 8899,
+                auth_enabled: false,
+                local_bearer_token: String::new(),
+            },
+            compat: CompatConfig {
+                strict_mode: false,
+                text_tool_call_fallback_enabled: true,
+            },
+            logging: LoggingConfig {
+                capture_body: false,
+            },
+            ui: UiConfig {
+                theme: "light".to_string(),
+                locale: "en-US".to_string(),
+                locale_mode: "auto".to_string(),
+                launch_on_startup: false,
+                auto_start_server: true,
+                close_to_tray: true,
+                quota_auto_refresh_minutes: 5,
+                auto_update_enabled: true,
+            },
+            remote_git: RemoteGitConfig {
+                enabled: false,
+                repo_url: String::new(),
+                token: String::new(),
+                branch: "main".to_string(),
+            },
+            providers: vec![sample_provider("global-provider", "global-token")],
+            groups: vec![Group {
+                id: "group-a".to_string(),
+                name: "Group A".to_string(),
+                models: vec![],
+                provider_ids: vec!["group-provider".to_string()],
+                active_provider_id: Some("group-provider".to_string()),
+                providers: vec![sample_provider("group-provider", "group-token")],
+            }],
+        }
+    }
+
+    #[test]
+    /// Builds OpenAI responses payload with array-form input for stricter upstream compatibility.
+    fn build_request_payload_uses_array_input_for_openai_responses() {
+        let provider = sample_provider("provider-a", "token");
 
         let payload = build_request_payload(&provider);
         let input = payload
@@ -567,6 +644,30 @@ mod tests {
         assert_eq!(input[0]["role"], "user");
         assert_eq!(input[0]["content"][0]["type"], "input_text");
         assert_eq!(input[0]["content"][0]["text"], MODEL_TEST_USER_PROMPT);
+    }
+
+    #[test]
+    /// Resolves unassociated providers from the global provider catalog when group id is omitted.
+    fn resolve_provider_for_test_reads_global_provider_without_group() {
+        let config = sample_config();
+
+        let provider = resolve_provider_for_test(&config, None, "global-provider")
+            .expect("global provider should resolve");
+
+        assert_eq!(provider.id, "global-provider");
+        assert_eq!(provider.token, "global-token");
+    }
+
+    #[test]
+    /// Keeps group-scoped model testing behavior when a group id is supplied.
+    fn resolve_provider_for_test_reads_provider_from_group_context() {
+        let config = sample_config();
+
+        let provider = resolve_provider_for_test(&config, Some("group-a"), "group-provider")
+            .expect("group provider should resolve");
+
+        assert_eq!(provider.id, "group-provider");
+        assert_eq!(provider.token, "group-token");
     }
 
     #[test]

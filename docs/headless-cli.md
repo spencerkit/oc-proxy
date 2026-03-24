@@ -44,6 +44,24 @@ aor stop
 aor restart --port 8899
 ```
 
+设置管理密码：
+
+```bash
+aor admin-password set your-secure-password
+```
+
+更推荐从标准输入读取，避免密码进入 shell history：
+
+```bash
+printf '%s\n' 'your-secure-password' | aor admin-password set --password-stdin
+```
+
+清除管理密码：
+
+```bash
+aor admin-password clear
+```
+
 CLI 会在后台启动 `ai-open-router` 进程，并将管理页面暴露在：
 
 ```
