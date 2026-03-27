@@ -309,21 +309,20 @@ export const LogsPage: React.FC = () => {
   useEffect(() => {
     const validIds = new Set(allGroupIds)
     setSelectedGroupIds(prev => {
+      if (!config) {
+        return []
+      }
+      if (allGroupIds.length === 0) {
+        hasInitializedGroupSelectionRef.current = true
+        return []
+      }
       if (!hasInitializedGroupSelectionRef.current) {
         hasInitializedGroupSelectionRef.current = true
         return [...allGroupIds]
       }
       return prev.filter(id => validIds.has(id))
     })
-  }, [allGroupIds])
-
-  useEffect(() => {
-    if (allGroupIds.length === 0) {
-      setSelectedGroupIds([])
-      return
-    }
-    setSelectedGroupIds([...allGroupIds])
-  }, [allGroupIds])
+  }, [allGroupIds, config])
 
   useEffect(() => {
     if (!hasInitializedGroupSelectionRef.current || !refreshPlan.pollStats) return

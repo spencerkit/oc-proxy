@@ -4,8 +4,8 @@
 
 use crate::app_state::SharedState;
 use crate::models::{
-    AuthSessionStatus, GroupBackupExportResult, GroupBackupImportResult, ProxyConfig,
-    SaveConfigResult,
+    AuthSessionStatus, GroupBackupExportResult, GroupBackupImportResult, GroupImportMode,
+    ProxyConfig, SaveConfigResult,
 };
 use crate::services::{config_service, group_backup_service};
 use serde_json::Value;
@@ -84,8 +84,9 @@ pub async fn config_export_groups_clipboard(
 pub async fn config_import_groups(
     state: State<'_, SharedState>,
     app: AppHandle,
+    mode: Option<GroupImportMode>,
 ) -> Result<GroupBackupImportResult, String> {
-    group_backup_service::import_groups_from_file(&state, &app)
+    group_backup_service::import_groups_from_file(&state, &app, mode)
         .await
         .map_err(|e| e.to_string())
 }
@@ -95,8 +96,9 @@ pub async fn config_import_groups(
 pub async fn config_import_groups_json(
     state: State<'_, SharedState>,
     json_text: String,
+    mode: Option<GroupImportMode>,
 ) -> Result<GroupBackupImportResult, String> {
-    group_backup_service::import_groups_from_json_text(&state, json_text)
+    group_backup_service::import_groups_from_json_text(&state, json_text, mode)
         .await
         .map_err(|e| e.to_string())
 }

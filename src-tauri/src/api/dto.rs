@@ -61,6 +61,20 @@ pub struct GroupBackupImportResult {
     pub status: Option<ProxyStatus>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum GroupImportMode {
+    Incremental,
+    Overwrite,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportGroupsRequest {
+    pub json_text: String,
+    pub mode: Option<GroupImportMode>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteRulesUploadResult {

@@ -410,7 +410,7 @@ export const enUS = {
     backupExport: "Export JSON",
     backupImport: "Import JSON",
     backupHint:
-      "Import replaces all current groups with the groups/providers from the backup file.",
+      "Import groups/providers from JSON. You can choose incremental merge or full overwrite in the next step.",
     remoteTitle: "Remote Git Repository",
     remoteRepoUrl: "Repository URL",
     remoteRepoUrlPlaceholder: "https://github.com/owner/repo.git",
@@ -420,10 +420,10 @@ export const enUS = {
     remoteBranchHint: "Defaults to main. Change if needed.",
     remoteSyncEnabled: "Enable Cloud Sync",
     remoteSyncEnabledHint: "When enabled, cloud sync settings and upload/update actions are shown.",
-    remoteRulesUpload: "Upload Providers",
-    remoteRulesUpdate: "Update Providers",
+    remoteRulesUpload: "Upload Groups & Providers",
+    remoteRulesUpdate: "Update Groups & Providers",
     remoteHint:
-      "Upload pushes current groups/providers to remote git. Update pulls remote providers and overwrites local groups.",
+      "Upload pushes current groups/providers to remote git. Update pulls remote groups/providers with incremental merge semantics: matching groups/providers update from remote, while existing local group failover settings stay local.",
     autoUpdateEnabled: "Auto Update",
     autoUpdateEnabledHint:
       "When enabled, the app will check GitHub Releases and automatically install updates.",
@@ -452,12 +452,12 @@ export const enUS = {
       "Choose how incoming groups and providers should be applied before starting the import.",
     importModeLabel: "Import Mode",
     importModeHint:
-      "Incremental keeps current groups and merges imported entries. Overwrite replaces all current groups and providers with the imported snapshot.",
+      "Incremental keeps current groups and merges imported entries. Matching groups/providers update from the import, while existing group failover settings stay local. Overwrite replaces all current groups and providers with the imported snapshot.",
     importModeIncremental: "Incremental Merge",
     importModeIncrementalHint:
       "Keep current groups/providers and merge matching entries from the import.",
     importModeIncrementalWarning:
-      "Incremental import keeps current groups/providers and only updates matching imported entries.",
+      "Incremental import keeps current groups/providers, updates matching imported entries, and preserves existing group failover settings.",
     importModeOverwrite: "Full Overwrite",
     importModeOverwriteHint:
       "Replace current groups/providers with the imported groups/providers only.",
@@ -486,17 +486,18 @@ export const enUS = {
     cancel: "Cancel",
     saveSuccess: "Settings saved",
     portSaveSuccess: "Port settings saved",
-    remoteUploadSuccess: "Providers uploaded to remote repository",
-    remoteUploadNoChange: "Remote providers are already up to date",
-    remotePullSuccess: "Updated {{count}} groups from remote",
+    remoteUploadSuccess: "Groups and providers uploaded to remote repository",
+    remoteUploadNoChange: "Remote groups and providers are already up to date",
+    remotePullSuccess:
+      "Applied remote snapshot containing {{count}} groups with incremental merge semantics; existing local group failover settings were kept.",
     remoteNotConfigured: "Please configure remote repository info first",
     remoteUploadConflict:
-      "Remote providers are newer (remote: {{remote}}, local: {{local}}). Continue upload to overwrite remote?",
+      "Remote groups/providers snapshot is newer (remote: {{remote}}, local: {{local}}). Continue upload to overwrite remote?",
     remotePullConflict:
-      "Local providers are newer (local: {{local}}, remote: {{remote}}). Continue update to overwrite local?",
+      "Local groups/providers snapshot is newer (local: {{local}}, remote: {{remote}}). Continue update to incrementally merge the remote snapshot into local groups while keeping existing local failover settings?",
     remoteConflictTitle: "Confirm Force Sync",
     remoteConflictConfirmUpload: "Overwrite Remote",
-    remoteConflictConfirmPull: "Overwrite Local",
+    remoteConflictConfirmPull: "Apply Remote Snapshot",
     backupExportSuccess: "Exported {{count}} groups",
     backupExportFolderSuccess: "Exported {{count}} groups to folder",
     backupExportClipboardSuccess: "Copied {{count}} groups to clipboard",

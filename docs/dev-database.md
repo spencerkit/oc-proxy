@@ -12,7 +12,7 @@
 
 ## 存储拆分
 
-当前采用“配置 / Provider / 统计”分库设计：
+当前采用“配置 / Provider / 统计”分库设计，并配合少量 JSON 文件保存其他本地状态：
 
 - `config.json`
   - 保存基础配置（`server`、`compat`、`logging`、`ui`、`remoteGit` 等）。
@@ -21,6 +21,10 @@
   - 保存分组与 Provider（原 rule）配置。
 - `request-stats.sqlite`
   - 保存逐请求统计事件，用于日志页统计、趋势图、规则卡片轻量图。
+- `client-integrations.json`
+  - 保存已接入客户端目标与对应本地配置目录。
+- `remote-admin-auth.json`
+  - 保存远程管理密码哈希与认证状态快照。
 
 ## `providers.sqlite` 结构
 
@@ -31,19 +35,20 @@
 - `models_json TEXT NOT NULL`
 - `active_provider_id TEXT`
 - `provider_ids_json TEXT NOT NULL`
+- `group_json TEXT`
 - `updated_at INTEGER NOT NULL`
 
 ### 表：`provider_records`
 
-- `group_id TEXT NOT NULL`
-- `provider_id TEXT NOT NULL`
+- `provider_id TEXT PRIMARY KEY`
 - `provider_json TEXT NOT NULL`
 - `updated_at INTEGER NOT NULL`
-- `PRIMARY KEY (group_id, provider_id)`
 
 说明：
-- `group_records` 只保存 Provider ID 列表，不保存 Provider 详细信息。
-- Provider 详情按 `(group_id, provider_id)` 存在 `provider_records`。
+- `group_records` 保存分组基础字段，以及用于兼容/迁移的 `group_json` 快照。
+- `provider_records` 以 `provider_id` 为主键保存 Provider 详情，不按 `(group_id, provider_id)` 分表。
+- 分组级 failover 配置包含在 `group_json` 中持久化，不单独拆成 `failover_json` 列。
+- 运行时当前生效 provider / failover 激活状态不落盘，只存在内存运行态中，并通过状态接口返回给前端显示。
 
 ## `request-stats.sqlite` 结构
 

@@ -16,6 +16,8 @@ type CssModuleExports = Record<string, string>
 type UnknownProps = Record<string, unknown>
 type EffectCallback = () => undefined | (() => void)
 type LogsTab = "stats" | "logs"
+type MockProvider = { id: string; name?: string }
+type MockGroup = { id: string; name?: string; providers?: MockProvider[] }
 
 type HarnessWindow = {
   addEventListener: (event: string, handler: (...args: unknown[]) => void) => void
@@ -42,6 +44,9 @@ let currentPathname = "/logs"
 let currentActiveTab: LogsTab = "stats"
 let stateIndex = 0
 let stateValues: unknown[] = []
+let stateSetters: Array<((value: unknown) => void) | undefined> = []
+let refIndex = 0
+let refValues: unknown[] = []
 let effectCallbacks: EffectCallback[] = []
 let refreshLogsCalls = 0
 let refreshLogsStatsCalls: Array<{
@@ -52,6 +57,7 @@ let refreshLogsStatsCalls: Array<{
 }> = []
 let intervalCalls: number[] = []
 let intervalId = 0
+let mockConfigGroups: MockGroup[] | null = []
 
 function resolveCompiledAlias(request: string): string | null {
   const aliasPrefixes = [
@@ -128,7 +134,14 @@ const reactExports = {
     effectCallbacks.push(callback)
   },
   useMemo: <T>(factory: () => T) => factory(),
-  useRef: <T>(value: T) => ({ current: value }),
+  useRef: <T>(value: T) => {
+    const currentIndex = refIndex
+    refIndex += 1
+    if (!(currentIndex in refValues)) {
+      refValues[currentIndex] = { current: value }
+    }
+    return refValues[currentIndex] as { current: T }
+  },
   useState: <T>(initialValue: T | (() => T)) => {
     const currentIndex = stateIndex
     stateIndex += 1
@@ -149,6 +162,8 @@ const reactExports = {
           ? (nextValue as (previousValue: T) => T)(previousValue)
           : nextValue
     }
+
+    stateSetters[currentIndex] = setValue as (value: unknown) => void
 
     return [stateValues[currentIndex] as T, setValue] as const
   },
@@ -239,9 +254,11 @@ require.cache["@/utils/relax"] = {
     ],
     useRelaxValue: (state: { key?: string }) => {
       if (state?.key === "configState") {
-        return {
-          groups: [],
-        }
+        return mockConfigGroups === null
+          ? null
+          : {
+              groups: mockConfigGroups,
+            }
       }
       if (state?.key === "logsState") {
         return []
@@ -312,11 +329,19 @@ function loadLogsPage() {
   return require("../../src/renderer/pages/LogsPage/LogsPage") as typeof import("../../src/renderer/pages/LogsPage/LogsPage")
 }
 
-function mountLogsPage(input: { pathname: string; activeTab: LogsTab }) {
+function mountLogsPage(input: {
+  pathname: string
+  activeTab: LogsTab
+  groups?: MockGroup[] | null
+}) {
   currentPathname = input.pathname
   currentActiveTab = input.activeTab
+  mockConfigGroups = input.groups === undefined ? [] : input.groups
   stateIndex = 0
   stateValues = []
+  stateSetters = []
+  refIndex = 0
+  refValues = []
   effectCallbacks = []
   refreshLogsCalls = 0
   refreshLogsStatsCalls = []
@@ -352,8 +377,89 @@ function mountLogsPage(input: { pathname: string; activeTab: LogsTab }) {
     refreshLogsCalls,
     refreshLogsStatsCalls,
     intervalCalls,
+    stateValues,
+    stateSetters,
   }
 }
+
+test("LogsPage initializes all groups after config loads asynchronously", () => {
+  mountLogsPage({ pathname: "/logs", activeTab: "stats", groups: null })
+  assert.deepEqual(stateValues[3], [])
+
+  mockConfigGroups = [
+    {
+      id: "group-a",
+      name: "Group A",
+      providers: [{ id: "provider-a", name: "Provider A" }],
+    },
+    {
+      id: "group-b",
+      name: "Group B",
+      providers: [{ id: "provider-b", name: "Provider B" }],
+    },
+  ]
+
+  stateIndex = 0
+  refIndex = 0
+  effectCallbacks = []
+  const { LogsPage } = loadLogsPage()
+  LogsPage({})
+  for (const callback of effectCallbacks) {
+    callback()
+  }
+
+  assert.deepEqual(stateValues[3], ["group-a", "group-b"])
+})
+
+test("LogsPage preserves explicit group selections when provider filtering changes options", () => {
+  const result = mountLogsPage({
+    pathname: "/logs",
+    activeTab: "stats",
+    groups: [
+      {
+        id: "group-a",
+        name: "Group A",
+        providers: [{ id: "provider-shared", name: "Shared" }],
+      },
+      {
+        id: "group-b",
+        name: "Group B",
+        providers: [{ id: "provider-shared", name: "Shared" }],
+      },
+      {
+        id: "group-c",
+        name: "Group C",
+        providers: [{ id: "provider-only-c", name: "Only C" }],
+      },
+    ],
+  })
+
+  assert.deepEqual(result.stateValues[3], ["group-a", "group-b", "group-c"])
+
+  const setSelectedProviderId = result.stateSetters[2] as
+    | ((value: string | ((previous: string) => string)) => void)
+    | undefined
+  const setSelectedGroupIds = result.stateSetters[3] as
+    | ((value: string[] | ((previous: string[]) => string[])) => void)
+    | undefined
+
+  assert.equal(typeof setSelectedProviderId, "function")
+  assert.equal(typeof setSelectedGroupIds, "function")
+
+  setSelectedGroupIds?.(["group-a"])
+  setSelectedProviderId?.("provider-shared")
+
+  stateIndex = 0
+  refIndex = 0
+  effectCallbacks = []
+  const { LogsPage } = loadLogsPage()
+  LogsPage({})
+  for (const callback of effectCallbacks) {
+    callback()
+  }
+
+  assert.deepEqual(stateValues[3], ["group-a"])
+})
 
 test("LogsPage only starts stats refresh on the stats tab", () => {
   const result = mountLogsPage({ pathname: "/logs", activeTab: "stats" })

@@ -1644,7 +1644,19 @@ fn classify_provider_side_failure(
         }
     }
 
-    error_message.is_some()
+    let normalized = error_message
+        .map(|message| message.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    normalized.contains("timeout")
+        || normalized.contains("timed out")
+        || normalized.contains("network")
+        || normalized.contains("connection")
+        || normalized.contains("upstream request failed")
+        || normalized.contains("failed to read upstream response")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2816,6 +2828,18 @@ mod tests {
         assert!(classify_provider_side_failure(None, Some(500)));
         assert!(!classify_provider_side_failure(None, Some(400)));
         assert!(!classify_provider_side_failure(None, Some(422)));
+    }
+
+    #[test]
+    fn failover_classification_ignores_local_validation_errors_without_upstream_failure() {
+        assert!(!classify_provider_side_failure(
+            Some("invalid request payload"),
+            None
+        ));
+        assert!(!classify_provider_side_failure(
+            Some("unsupported model alias"),
+            Some(200)
+        ));
     }
 
     #[test]

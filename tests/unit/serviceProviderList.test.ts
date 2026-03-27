@@ -164,6 +164,10 @@ function loadProviderList() {
   return require("../../src/renderer/pages/ServicePage/ProviderList") as typeof import("../../src/renderer/pages/ServicePage/ProviderList")
 }
 
+function loadCatalogProviderList() {
+  return require("../../src/renderer/pages/ProvidersPage/ProviderList") as typeof import("../../src/renderer/pages/ProvidersPage/ProviderList")
+}
+
 function createProvider(overrides: Partial<Provider> = {}): Provider {
   return {
     id: overrides.id ?? "provider-1",
@@ -213,6 +217,22 @@ function renderProviderList(input: {
       testingProviderIds: input.testingProviderIds,
       providerHealthByProviderId: input.providerHealthByProviderId,
       testingAll: false,
+    })
+  )
+}
+
+function renderCatalogProviderList(input: {
+  providers: Provider[]
+  providerHealthByProviderId?: Record<string, ProviderModelHealthSnapshot | null | undefined>
+}) {
+  const { ProviderList } = loadCatalogProviderList()
+  return renderToStaticMarkup(
+    React.createElement(ProviderList, {
+      providers: input.providers,
+      providerHealthByProviderId: input.providerHealthByProviderId,
+      onDelete: () => {},
+      onEdit: () => {},
+      onAdd: () => {},
     })
   )
 }
@@ -294,6 +314,37 @@ test("keeps provider name, protocol, status, and compact metadata visible in ser
   assert.match(markup, />api\.openai\.com</)
   assert.match(markup, /Edit Provider: Provider A/)
   assert.match(markup, /Delete: Provider A/)
+})
+
+test("keeps provider name, protocol, status, default model, and compact API address visible in catalog cards", () => {
+  const markup = renderCatalogProviderList({
+    providers: [
+      createProvider({
+        id: "provider-a",
+        name: "Provider A",
+        protocol: "openai",
+        apiAddress: "https://api.openai.com/v1/responses?foo=bar",
+        defaultModel: "gpt-4.1-mini",
+      }),
+    ],
+    providerHealthByProviderId: {
+      "provider-a": {
+        groupId: "dev",
+        providerId: "provider-a",
+        status: "available",
+        latencyMs: 42,
+        testedAt: "2026-03-27T10:00:00.000Z",
+      },
+    },
+  })
+
+  assert.match(markup, /Provider A/)
+  assert.match(markup, />OpenAI</)
+  assert.match(markup, />Available</)
+  assert.match(markup, />Default Model</)
+  assert.match(markup, />gpt-4\.1-mini</)
+  assert.match(markup, />API Address</)
+  assert.match(markup, />api\.openai\.com</)
 })
 
 test("shows testing badge while a provider test is in progress", () => {

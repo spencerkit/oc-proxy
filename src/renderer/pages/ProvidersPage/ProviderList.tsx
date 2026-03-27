@@ -20,6 +20,7 @@ import type {
 } from "@/types"
 import { formatProviderLatency } from "@/utils/providerTesting"
 import { resolveProviderWebsiteHref } from "@/utils/providerWebsite"
+import { formatCompactUrlForDisplay } from "@/utils/serverAddress"
 import { formatTokenMillions } from "@/utils/tokenFormat"
 import sharedStyles from "../ServicePage/ServicePage.module.css"
 
@@ -133,6 +134,7 @@ const MemoCatalogProviderCard = memo<CatalogProviderCardProps>(
     const { t } = useTranslation()
     const websiteHref = resolveProviderWebsiteHref(provider.website)
     const health = resolveProviderHealthPresentation(healthSnapshot, testing, t)
+    const compactApiAddress = formatCompactUrlForDisplay(provider.apiAddress)
     const formattedCostConsumed = formatCostConsumed(
       cardStats?.totalCost ?? 0,
       provider.cost?.currency || "USD"
@@ -227,15 +229,30 @@ const MemoCatalogProviderCard = memo<CatalogProviderCardProps>(
           </div>
           <div className={sharedStyles.providerCatalogSummaryRow}>
             <div className={sharedStyles.providerCatalogModelPanel}>
-              <span className={sharedStyles.providerPanelEyebrow}>
-                {t("servicePage.defaultModel")}
-              </span>
-              <span
-                className={sharedStyles.providerCatalogModelValue}
-                title={provider.defaultModel?.trim() || "-"}
-              >
-                {provider.defaultModel?.trim() || "-"}
-              </span>
+              <div className={sharedStyles.providerCatalogMetaRow}>
+                <span className={sharedStyles.providerInlineMetaItem}>
+                  <span className={sharedStyles.providerPanelEyebrow}>
+                    {t("servicePage.defaultModel")}
+                  </span>
+                  <span
+                    className={sharedStyles.providerCatalogModelValue}
+                    title={provider.defaultModel?.trim() || "-"}
+                  >
+                    {provider.defaultModel?.trim() || "-"}
+                  </span>
+                </span>
+                <span className={sharedStyles.providerInlineMetaItem}>
+                  <span className={sharedStyles.providerPanelEyebrow}>
+                    {t("servicePage.apiAddress")}
+                  </span>
+                  <span
+                    className={sharedStyles.providerCompactApiValue}
+                    title={provider.apiAddress}
+                  >
+                    {compactApiAddress}
+                  </span>
+                </span>
+              </div>
             </div>
             <div className={sharedStyles.providerCatalogUsagePanel}>
               <div className={sharedStyles.providerCatalogUsageRow}>
