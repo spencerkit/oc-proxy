@@ -1,6 +1,6 @@
 {
   "name": "ai-open-router",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "description": "Desktop OpenAI <-> Anthropic compatible protocol router",
   "type": "commonjs",
   "scripts": {
