@@ -43,6 +43,9 @@ jobs:
         run: |
           CURRENT_BRANCH="$(git symbolic-ref HEAD --short)"
           NORMALIZED_BRANCH="${CURRENT_BRANCH#heads/}"
+          if git rev-parse -q --verify "refs/tags/$NORMALIZED_BRANCH" >/dev/null; then
+            git tag -d "$NORMALIZED_BRANCH"
+          fi
           if [ "$CURRENT_BRANCH" != "$NORMALIZED_BRANCH" ]; then
             git switch "$NORMALIZED_BRANCH"
           fi

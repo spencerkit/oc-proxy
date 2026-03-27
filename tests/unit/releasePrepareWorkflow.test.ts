@@ -52,6 +52,13 @@ test("release-prepare normalizes the checked out base branch name before create-
   assert.match(command, /git switch "\$NORMALIZED_BRANCH"/)
 })
 
+test("release-prepare removes a conflicting local tag before create-pull-request", () => {
+  const command = extractStepBlock("Normalize checked out base branch")
+
+  assert.match(command, /git rev-parse -q --verify "refs\/tags\/\$NORMALIZED_BRANCH"/)
+  assert.match(command, /git tag -d "\$NORMALIZED_BRANCH"/)
+})
+
 test("release-prepare Read version command is shell-safe", () => {
   const outputDir = path.join(repoRoot, ".tmp")
   const outputPath = path.join(outputDir, "github-output-test.txt")
