@@ -536,9 +536,10 @@ mod tests {
             ]
         });
 
-        let (_, saved, _, _) = import_groups_payload(&state, parsed, Some(GroupImportMode::Incremental))
-            .await
-            .expect("incremental import should succeed");
+        let (_, saved, _, _) =
+            import_groups_payload(&state, parsed, Some(GroupImportMode::Incremental))
+                .await
+                .expect("incremental import should succeed");
 
         assert_eq!(saved.server.host, "127.0.0.1");
         assert_eq!(saved.ui.theme, "dark");
@@ -640,9 +641,10 @@ mod tests {
             ]
         });
 
-        let (_, saved, _, _) = import_groups_payload(&state, parsed, Some(GroupImportMode::Overwrite))
-            .await
-            .expect("overwrite import should succeed");
+        let (_, saved, _, _) =
+            import_groups_payload(&state, parsed, Some(GroupImportMode::Overwrite))
+                .await
+                .expect("overwrite import should succeed");
 
         assert_eq!(saved.server.host, "127.0.0.1");
         assert_eq!(saved.server.port, 9999);
@@ -653,6 +655,9 @@ mod tests {
         assert_eq!(saved.groups[0].providers[0].name, "beta");
         assert_eq!(saved.providers.len(), 1);
         assert_eq!(saved.providers[0].name, "beta");
-        assert!(!saved.providers.iter().any(|provider| provider.name == "stale"));
+        assert!(!saved
+            .providers
+            .iter()
+            .any(|provider| provider.name == "stale"));
     }
 }

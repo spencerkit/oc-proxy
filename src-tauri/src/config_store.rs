@@ -167,11 +167,8 @@ impl ConfigStore {
             return Ok(());
         }
 
-        conn.execute(
-            "ALTER TABLE group_records ADD COLUMN group_json TEXT",
-            [],
-        )
-        .map_err(|e| format!("migrate group_records schema failed: {e}"))?;
+        conn.execute("ALTER TABLE group_records ADD COLUMN group_json TEXT", [])
+            .map_err(|e| format!("migrate group_records schema failed: {e}"))?;
         Ok(())
     }
 

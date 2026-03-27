@@ -270,18 +270,19 @@ impl ProxyRuntime {
                         failure_threshold: group.failover.failure_threshold,
                         cooldown_seconds: group.failover.cooldown_seconds,
                     };
-                    let current_provider_id = preferred_provider_id.as_ref().and_then(
-                        |preferred_provider_id| {
-                            failover::runtime_current_provider_id(
-                                &failover_state,
-                                &group.id,
-                                preferred_provider_id,
-                                &provider_ids,
-                                &failover_config,
-                                chrono::Utc::now(),
-                            )
-                        },
-                    );
+                    let current_provider_id =
+                        preferred_provider_id
+                            .as_ref()
+                            .and_then(|preferred_provider_id| {
+                                failover::runtime_current_provider_id(
+                                    &failover_state,
+                                    &group.id,
+                                    preferred_provider_id,
+                                    &provider_ids,
+                                    &failover_config,
+                                    chrono::Utc::now(),
+                                )
+                            });
                     let failover_active_provider_id =
                         failover::active_failover_provider_id(&failover_state, &group.id);
                     let failover_active = failover_active_provider_id
@@ -449,7 +450,10 @@ mod tests {
     use super::observability::{extract_token_usage, StreamTokenAccumulator};
     use super::pipeline::resolve_request_timeout_ms;
     use super::routing::{detect_entry_protocol, resolve_target_model, resolve_upstream_path};
-    use super::{headless_service_state_for_tests, MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS, NON_STREAM_REQUEST_TIMEOUT_MS};
+    use super::{
+        headless_service_state_for_tests, MESSAGES_TO_RESPONSES_NON_STREAM_REQUEST_TIMEOUT_MS,
+        NON_STREAM_REQUEST_TIMEOUT_MS,
+    };
     use crate::models::{
         default_rule_cost_config, default_rule_quota_config, Group, Rule, RuleProtocol,
     };
@@ -648,7 +652,10 @@ mod tests {
             .expect("runtime group status should exist");
 
         assert_eq!(runtime_group.current_provider_id.as_deref(), Some("p1"));
-        assert_eq!(runtime_group.failover_active_provider_id.as_deref(), Some("p2"));
+        assert_eq!(
+            runtime_group.failover_active_provider_id.as_deref(),
+            Some("p2")
+        );
         assert!(!runtime_group.failover_active);
     }
 
@@ -740,7 +747,10 @@ mod tests {
 
         assert_eq!(group.active_provider_id.as_deref(), Some("p1"));
         assert_eq!(runtime_group.current_provider_id.as_deref(), Some("p2"));
-        assert_eq!(runtime_group.failover_active_provider_id.as_deref(), Some("p2"));
+        assert_eq!(
+            runtime_group.failover_active_provider_id.as_deref(),
+            Some("p2")
+        );
         assert!(runtime_group.failover_active);
     }
 

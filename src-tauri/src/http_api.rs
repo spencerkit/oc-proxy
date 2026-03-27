@@ -10,9 +10,9 @@ use crate::auth::{
 use crate::backup::{backup_default_file_name, create_groups_backup_payload};
 use crate::models::{
     AgentConfig, AgentConfigFile, AppInfo, AuthSessionStatus, ClipboardTextResult,
-    GroupBackupExportResult, GroupBackupImportResult, GroupsExportJsonResult,
-    ImportGroupsRequest, IntegrationClientKind, IntegrationTarget, IntegrationWriteResult,
-    LogEntry, ProviderModelTestResult, ProxyConfig, ProxyStatus, RemoteRulesPullResult,
+    GroupBackupExportResult, GroupBackupImportResult, GroupsExportJsonResult, ImportGroupsRequest,
+    IntegrationClientKind, IntegrationTarget, IntegrationWriteResult, LogEntry,
+    ProviderModelTestResult, ProxyConfig, ProxyStatus, RemoteRulesPullResult,
     RemoteRulesUploadResult, RuleCardStatsItem, RuleQuotaConfig, RuleQuotaSnapshot,
     RuleQuotaTestResult, SaveConfigResult, StatsSummaryResult, WriteAgentConfigResult,
 };
@@ -789,8 +789,8 @@ async fn config_import_groups_json(
         payload.json_text,
         payload.mode,
     )
-        .await
-        .map_err(ApiError::from)?;
+    .await
+    .map_err(ApiError::from)?;
     Ok(Json(result))
 }
 

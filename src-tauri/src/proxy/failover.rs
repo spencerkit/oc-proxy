@@ -333,14 +333,8 @@ mod tests {
         record_provider_failure(&mut state, "dev", "p1", &providers, &failover_config(), now);
         record_provider_failure(&mut state, "dev", "p1", &providers, &failover_config(), now);
 
-        let selected = select_provider_at(
-            &mut state,
-            "dev",
-            "p1",
-            &providers,
-            &failover_config(),
-            now,
-        );
+        let selected =
+            select_provider_at(&mut state, "dev", "p1", &providers, &failover_config(), now);
 
         assert_eq!(provider_failure_count(&state, "dev", "p1"), 3);
         assert_eq!(
@@ -414,7 +408,10 @@ mod tests {
             after_cooldown,
         );
         assert_eq!(selected.provider_id, "p1");
-        assert_eq!(active_failover_provider_id(&state, "dev"), Some("p2".to_string()));
+        assert_eq!(
+            active_failover_provider_id(&state, "dev"),
+            Some("p2".to_string())
+        );
 
         record_provider_success_at(&mut state, "dev", "p1", after_cooldown);
 
@@ -446,7 +443,10 @@ mod tests {
 
         assert_eq!(selected.provider_id, "p1");
         assert!(!selected.failover_active);
-        assert_eq!(active_failover_provider_id(&state, "dev"), Some("p2".to_string()));
+        assert_eq!(
+            active_failover_provider_id(&state, "dev"),
+            Some("p2".to_string())
+        );
     }
 
     #[test]
@@ -460,7 +460,11 @@ mod tests {
         record_provider_failure(&mut state, "dev", "p1", &providers, &failover_config(), now);
         record_provider_failure(&mut state, "dev", "p1", &providers, &failover_config(), now);
 
-        assert!(!is_failover_cooldown_expired(&state, "dev", before_cooldown));
+        assert!(!is_failover_cooldown_expired(
+            &state,
+            "dev",
+            before_cooldown
+        ));
 
         let selected = select_provider_at(
             &mut state,
@@ -473,7 +477,10 @@ mod tests {
 
         assert_eq!(selected.provider_id, "p2");
         assert!(selected.failover_active);
-        assert_eq!(active_failover_provider_id(&state, "dev"), Some("p2".to_string()));
+        assert_eq!(
+            active_failover_provider_id(&state, "dev"),
+            Some("p2".to_string())
+        );
     }
 
     #[test]

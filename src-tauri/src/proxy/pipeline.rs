@@ -2930,20 +2930,31 @@ mod tests {
         assert_eq!(failure_status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
         assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), Some("p2".to_string()));
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        let (success_status, success_payload) = send_messages_request(&service_state, request).await;
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, request).await;
         assert_eq!(success_status, StatusCode::OK);
-        assert_eq!(success_payload["content"][0]["text"].as_str(), Some("recovered"));
+        assert_eq!(
+            success_payload["content"][0]["text"].as_str(),
+            Some("recovered")
+        );
         assert_eq!(primary.hits.load(Ordering::SeqCst), 2);
         assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), None);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
     }
 
     #[tokio::test]
-    async fn local_errors_after_cooldown_do_not_clear_failover_before_preferred_provider_recovers() {
+    async fn local_errors_after_cooldown_do_not_clear_failover_before_preferred_provider_recovers()
+    {
         let primary = spawn_json_upstream(
             "/chat/completions",
             vec![(200, openai_chat_completion_response("recovered"))],
@@ -2993,7 +3004,10 @@ mod tests {
                 chrono::Utc::now() - chrono::Duration::seconds(2),
             );
         }
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), Some("p2".to_string()));
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
 
         let (error_status, _) = send_messages_request(
             &service_state,
@@ -3007,7 +3021,10 @@ mod tests {
         assert_eq!(error_status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(primary.hits.load(Ordering::SeqCst), 0);
         assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), Some("p2".to_string()));
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
 
         let (success_status, success_payload) = send_messages_request(
             &service_state,
@@ -3019,10 +3036,16 @@ mod tests {
         )
         .await;
         assert_eq!(success_status, StatusCode::OK);
-        assert_eq!(success_payload["content"][0]["text"].as_str(), Some("recovered"));
+        assert_eq!(
+            success_payload["content"][0]["text"].as_str(),
+            Some("recovered")
+        );
         assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
         assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), None);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
     }
 
     #[tokio::test]
@@ -3087,10 +3110,16 @@ mod tests {
         )
         .await;
         assert_eq!(failure_status, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(failure_payload["error"]["message"].as_str(), Some("still failing"));
+        assert_eq!(
+            failure_payload["error"]["message"].as_str(),
+            Some("still failing")
+        );
         assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
         assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), Some("p2".to_string()));
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
     }
 
     #[tokio::test]
@@ -3237,7 +3266,8 @@ mod tests {
             "messages": [{"role": "user", "content": "hello"}]
         });
 
-        let (failure_status, failure_payload) = send_messages_request(&service_state, request.clone()).await;
+        let (failure_status, failure_payload) =
+            send_messages_request(&service_state, request.clone()).await;
         assert_eq!(failure_status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(
             failure_payload["error"]["message"].as_str(),
@@ -3249,7 +3279,8 @@ mod tests {
             Some("p2".to_string())
         );
 
-        let (success_status, success_payload) = send_messages_request(&service_state, request).await;
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, request).await;
         assert_eq!(success_status, StatusCode::OK);
         assert_eq!(success_payload["content"][0]["text"].as_str(), Some("ok"));
         assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
@@ -3289,7 +3320,8 @@ mod tests {
             "messages": [{"role": "user", "content": "hello"}]
         });
 
-        let (failure_status, failure_payload) = send_messages_request(&service_state, request.clone()).await;
+        let (failure_status, failure_payload) =
+            send_messages_request(&service_state, request.clone()).await;
         assert_eq!(failure_status, StatusCode::BAD_GATEWAY);
         assert!(failure_payload["error"]["message"]
             .as_str()
@@ -3301,7 +3333,8 @@ mod tests {
             Some("p2".to_string())
         );
 
-        let (success_status, success_payload) = send_messages_request(&service_state, request).await;
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, request).await;
         assert_eq!(success_status, StatusCode::OK);
         assert_eq!(success_payload["content"][0]["text"].as_str(), Some("ok"));
         assert_eq!(secondary.hits.load(Ordering::SeqCst), 1);
@@ -3349,8 +3382,13 @@ mod tests {
             "messages": [{"role": "user", "content": "hello"}]
         });
 
-        let (stream_status, stream_body) = send_streaming_messages_request(&service_state, request.clone()).await;
-        assert_eq!(stream_status, StatusCode::OK, "unexpected stream body: {stream_body}");
+        let (stream_status, stream_body) =
+            send_streaming_messages_request(&service_state, request.clone()).await;
+        assert_eq!(
+            stream_status,
+            StatusCode::OK,
+            "unexpected stream body: {stream_body}"
+        );
         assert!(stream_body.contains("message_start"));
         assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 1);
         assert_eq!(
@@ -3431,31 +3469,59 @@ mod tests {
 
         let (first_status, first_body) =
             send_streaming_messages_request(&service_state, request.clone()).await;
-        assert_eq!(first_status, StatusCode::OK, "unexpected stream body: {first_body}");
+        assert_eq!(
+            first_status,
+            StatusCode::OK,
+            "unexpected stream body: {first_body}"
+        );
         assert!(first_body.contains("message_start"));
         assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 1);
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), None);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
 
         let (second_status, second_body) =
             send_streaming_messages_request(&service_state, request.clone()).await;
-        assert_eq!(second_status, StatusCode::OK, "unexpected stream body: {second_body}");
+        assert_eq!(
+            second_status,
+            StatusCode::OK,
+            "unexpected stream body: {second_body}"
+        );
         assert!(second_body.contains("message_start"));
         assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 0);
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), None);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
 
         let (third_status, third_body) =
             send_streaming_messages_request(&service_state, request.clone()).await;
-        assert_eq!(third_status, StatusCode::OK, "unexpected stream body: {third_body}");
+        assert_eq!(
+            third_status,
+            StatusCode::OK,
+            "unexpected stream body: {third_body}"
+        );
         assert!(third_body.contains("message_start"));
         assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 1);
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), None);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
 
         let (fourth_status, fourth_body) =
             send_streaming_messages_request(&service_state, request).await;
-        assert_eq!(fourth_status, StatusCode::OK, "unexpected stream body: {fourth_body}");
+        assert_eq!(
+            fourth_status,
+            StatusCode::OK,
+            "unexpected stream body: {fourth_body}"
+        );
         assert!(fourth_body.contains("message_start"));
         assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 0);
-        assert_eq!(runtime_active_failover_provider(&service_state, "dev"), None);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
         assert_eq!(primary.hits.load(Ordering::SeqCst), 4);
         assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
     }
@@ -3465,8 +3531,10 @@ mod tests {
         let primary = spawn_raw_json_upstream(
             "/chat/completions",
             vec![vec![
-                Ok(serde_json::to_vec(&openai_chat_completion_response("partial"))
-                    .expect("chat completion response should serialize")),
+                Ok(
+                    serde_json::to_vec(&openai_chat_completion_response("partial"))
+                        .expect("chat completion response should serialize"),
+                ),
                 Err("body read failed".to_string()),
             ]],
         )
@@ -3502,7 +3570,8 @@ mod tests {
             "messages": [{"role": "user", "content": "hello"}]
         });
 
-        let (failure_status, failure_payload) = send_messages_request(&service_state, request.clone()).await;
+        let (failure_status, failure_payload) =
+            send_messages_request(&service_state, request.clone()).await;
         assert_eq!(failure_status, StatusCode::BAD_GATEWAY);
         assert!(failure_payload["error"]["message"]
             .as_str()
@@ -3514,7 +3583,8 @@ mod tests {
             Some("p2".to_string())
         );
 
-        let (success_status, success_payload) = send_messages_request(&service_state, request).await;
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, request).await;
         assert_eq!(success_status, StatusCode::OK);
         assert_eq!(success_payload["content"][0]["text"].as_str(), Some("ok"));
         assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
