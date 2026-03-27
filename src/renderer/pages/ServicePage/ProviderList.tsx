@@ -3,15 +3,22 @@ import type React from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components"
 import { useTranslation } from "@/hooks"
-import type { Group, ProviderModelHealthSnapshot } from "@/types"
+import type { Group, GroupRuntimeStatus, ProviderModelHealthSnapshot } from "@/types"
 import { formatProviderLatency } from "@/utils/providerTesting"
 import { resolveProviderWebsiteHref } from "@/utils/providerWebsite"
+import { formatCompactUrlForDisplay } from "@/utils/serverAddress"
 import styles from "./ServicePage.module.css"
 
 type ProviderHealthPresentation = {
   statusLabel: string
   statusClassName: string
   latencyLabel: string | null
+}
+
+type ProviderStateBadgePresentation = {
+  key: string
+  label: string
+  className: string
 }
 
 function resolveProviderHealthPresentation(
@@ -50,6 +57,46 @@ function resolveProviderHealthPresentation(
   }
 }
 
+function resolveProviderStateBadges(
+  providerId: string,
+  activeProviderId: string | null,
+  groupRuntime: GroupRuntimeStatus | null | undefined,
+  t: ReturnType<typeof useTranslation>["t"]
+): ProviderStateBadgePresentation[] {
+  const badges: ProviderStateBadgePresentation[] = []
+  const currentProviderId = groupRuntime?.currentProviderId ?? null
+  const isPreferred = providerId === activeProviderId
+  const isCurrent = currentProviderId !== null && providerId === currentProviderId
+  const isFailoverTarget =
+    Boolean(groupRuntime?.failoverActive) && providerId === groupRuntime?.failoverActiveProviderId
+
+  if (isPreferred) {
+    badges.push({
+      key: "preferred",
+      label: t("servicePage.preferred"),
+      className: styles.providerStateBadgePreferred,
+    })
+  }
+
+  if (isCurrent) {
+    badges.push({
+      key: "current",
+      label: t("servicePage.current"),
+      className: styles.providerStateBadgeCurrent,
+    })
+  }
+
+  if (isFailoverTarget) {
+    badges.push({
+      key: "failover",
+      label: t("servicePage.failover"),
+      className: styles.providerStateBadgeFailover,
+    })
+  }
+
+  return badges
+}
+
 /**
  * ProviderList Component
  * Displays providers for a service group association view.
@@ -57,6 +104,7 @@ function resolveProviderHealthPresentation(
 export const ProviderList: React.FC<{
   providers: Group["providers"]
   activeProviderId: string | null
+  groupRuntime?: GroupRuntimeStatus | null
   onActivate: (providerId: string) => void | Promise<void>
   activatingProviderId?: string | null
   onDelete: (providerId: string) => void
@@ -77,6 +125,7 @@ export const ProviderList: React.FC<{
 }> = ({
   providers,
   activeProviderId,
+  groupRuntime,
   onActivate,
   activatingProviderId,
   onDelete,
@@ -172,6 +221,13 @@ export const ProviderList: React.FC<{
                 t
               )
               const websiteHref = resolveProviderWebsiteHref(provider.website)
+              const compactApiAddress = formatCompactUrlForDisplay(provider.apiAddress)
+              const stateBadges = resolveProviderStateBadges(
+                provider.id,
+                activeProviderId,
+                groupRuntime,
+                t
+              )
 
               return (
                 <li key={provider.id}>
@@ -197,11 +253,19 @@ export const ProviderList: React.FC<{
                           <span className={styles.ruleDirection}>
                             {t(`ruleProtocol.${provider.protocol}`)}
                           </span>
-                          {provider.id === activeProviderId && (
-                            <span className={styles.ruleCurrentBadgeInline}>
-                              {t("servicePage.current")}
+                          {stateBadges.map(badge => (
+                            <span
+                              key={badge.key}
+                              className={`${styles.ruleCurrentBadgeInline} ${styles.providerStateBadge} ${badge.className}`}
+                            >
+                              {badge.label}
                             </span>
-                          )}
+                          ))}
+                          <span
+                            className={`${styles.ruleCurrentBadgeInline} ${styles.providerHealthStatus} ${health.statusClassName}`}
+                          >
+                            {health.statusLabel}
+                          </span>
                         </div>
                         <div className={styles.ruleHeaderRight}>
                           <div
@@ -283,17 +347,16 @@ export const ProviderList: React.FC<{
                             {provider.defaultModel?.trim() || "-"}
                           </span>
                         </div>
-                        <div className={styles.providerCompactSignalPanel}>
-                          <span
-                            className={`${styles.providerHealthStatus} ${health.statusClassName}`}
-                          >
-                            {health.statusLabel}
+                        <div className={styles.providerCompactModelPanel}>
+                          <span className={styles.providerPanelEyebrow}>
+                            {t("servicePage.apiAddress")}
                           </span>
-                          {health.latencyLabel ? (
-                            <span className={styles.providerHealthMetric}>
-                              {health.latencyLabel}
-                            </span>
-                          ) : null}
+                          <span
+                            className={styles.providerCompactModelValue}
+                            title={provider.apiAddress}
+                          >
+                            {compactApiAddress}
+                          </span>
                         </div>
                       </div>
                     </div>

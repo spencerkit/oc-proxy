@@ -2,7 +2,9 @@
 //! Service-layer operations for external client integrations.
 //! Handles target persistence and one-click write for Claude/Codex/OpenCode configs.
 
-use crate::api::dto::{AgentConfig, AgentConfigFile, AgentSourceFile, WriteAgentConfigResult};
+use crate::api::dto::{
+    AgentConfig, AgentConfigFile, AgentSourceFile, OpenClawEditorConfigDto, WriteAgentConfigResult,
+};
 use crate::app_state::SharedState;
 use crate::models::{
     IntegrationClientKind, IntegrationTarget, IntegrationWriteItem, IntegrationWriteResult,
@@ -834,6 +836,211 @@ fn parse_string_array(value: Option<&Value>) -> Option<Vec<String>> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenClawEditorConfig {
+    agent_id: String,
+    provider_id: String,
+    primary_model: Option<String>,
+    fallback_models: Vec<String>,
+    api_format: Option<String>,
+    base_url: Option<String>,
+    api_key: Option<String>,
+}
+
+fn openclaw_editor_from_agent_config(config: &AgentConfig) -> OpenClawEditorConfig {
+    OpenClawEditorConfig {
+        agent_id: resolve_openclaw_agent_id_from_config(Some(config)),
+        provider_id: config
+            .provider_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(DEFAULT_OPENCLAW_PROVIDER_ID)
+            .to_string(),
+        primary_model: config.model.clone(),
+        fallback_models: config.fallback_models.clone().unwrap_or_default(),
+        api_format: config.api_format.clone(),
+        base_url: config.url.clone(),
+        api_key: config.api_token.clone(),
+    }
+}
+
+fn openclaw_editor_to_agent_config(editor: OpenClawEditorConfig) -> AgentConfig {
+    AgentConfig {
+        agent_id: Some(editor.agent_id),
+        provider_id: Some(editor.provider_id),
+        url: editor.base_url,
+        api_token: editor.api_key,
+        api_format: editor.api_format,
+        model: editor.primary_model,
+        fallback_models: if editor.fallback_models.is_empty() {
+            None
+        } else {
+            Some(editor.fallback_models)
+        },
+        timeout: None,
+        always_thinking_enabled: None,
+        include_coauthored_by: None,
+        skip_dangerous_mode_permission_prompt: None,
+    }
+}
+
+fn build_openclaw_provider_snapshot(
+    editor: &OpenClawEditorConfig,
+    include_api_key: bool,
+) -> Map<String, Value> {
+    let mut provider = Map::new();
+    let api_format = editor
+        .api_format
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_OPENCLAW_API_FORMAT);
+    provider.insert("api".to_string(), Value::String(api_format.to_string()));
+
+    if let Some(url) = editor
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        provider.insert("baseUrl".to_string(), Value::String(url.to_string()));
+    }
+
+    if include_api_key {
+        if let Some(token) = editor
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            provider.insert("apiKey".to_string(), Value::String(token.to_string()));
+        }
+    }
+
+    provider
+}
+
+fn openclaw_editor_to_dto(editor: OpenClawEditorConfig) -> OpenClawEditorConfigDto {
+    OpenClawEditorConfigDto {
+        agent_id: editor.agent_id,
+        provider_id: editor.provider_id,
+        primary_model: editor.primary_model,
+        fallback_models: editor.fallback_models,
+        api_format: editor.api_format,
+        base_url: editor.base_url,
+        api_key: editor.api_key,
+    }
+}
+
+fn parse_openclaw_editor_config(
+    primary_root: &Map<String, Value>,
+    models_root: Option<&Map<String, Value>>,
+    auth_profiles_root: Option<&Map<String, Value>>,
+    config: Option<&AgentConfig>,
+) -> AppResult<OpenClawEditorConfig> {
+    let parsed =
+        parse_openclaw_config_with_sources(primary_root, models_root, auth_profiles_root, config)?;
+    Ok(OpenClawEditorConfig {
+        agent_id: parsed
+            .agent_id
+            .unwrap_or_else(|| resolve_openclaw_agent_id_from_config(config)),
+        provider_id: parsed
+            .provider_id
+            .unwrap_or_else(|| resolve_openclaw_provider_name(primary_root, models_root, config)),
+        primary_model: parsed.model,
+        fallback_models: parsed.fallback_models.unwrap_or_default(),
+        api_format: parsed.api_format,
+        base_url: parsed.url,
+        api_key: parsed.api_token,
+    })
+}
+
+fn validate_openclaw_editor_config(
+    editor: &OpenClawEditorConfig,
+    primary_root: &Map<String, Value>,
+    models_root: Option<&Map<String, Value>>,
+    auth_profiles_root: Option<&Map<String, Value>>,
+) -> AppResult<()> {
+    let provider_id = editor.provider_id.trim();
+    if provider_id.is_empty() {
+        return Err(AppError::validation("openclaw provider is required"));
+    }
+    let provider_exists = get_openclaw_provider_object(primary_root, provider_id).is_some()
+        || models_root
+            .and_then(|root| get_openclaw_provider_object(root, provider_id))
+            .is_some();
+    if !provider_exists {
+        return Err(AppError::validation(format!(
+            "openclaw provider reference not found: {provider_id}"
+        )));
+    }
+
+    let provider = get_openclaw_provider_object(primary_root, provider_id)
+        .or_else(|| models_root.and_then(|root| get_openclaw_provider_object(root, provider_id)));
+    if let Some(profile_id) = provider.and_then(resolve_openclaw_auth_profile_id) {
+        if !openclaw_auth_profile_exists(auth_profiles_root, profile_id.as_str()) {
+            return Err(AppError::validation(format!(
+                "openclaw auth profile reference not found: {profile_id}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn format_openclaw_primary_source(
+    editor: &OpenClawEditorConfig,
+    primary_root: &mut Map<String, Value>,
+) -> AppResult<()> {
+    let provider_id = editor.provider_id.trim();
+    if provider_id.is_empty() {
+        return Err(AppError::validation("openclaw provider is required"));
+    }
+
+    let provider_snapshot = build_openclaw_provider_snapshot(editor, false);
+    let providers = ensure_openclaw_primary_provider_map(primary_root);
+    let provider = ensure_child_object(providers, provider_id);
+    *provider = provider_snapshot;
+
+    let agents = ensure_child_object(primary_root, "agents");
+    let defaults = ensure_child_object(agents, "defaults");
+    let model_config = ensure_child_object(defaults, "model");
+    match editor
+        .primary_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(model) => {
+            model_config.insert("primary".to_string(), Value::String(model.to_string()));
+        }
+        None => {
+            model_config.remove("primary");
+        }
+    }
+    if editor.fallback_models.is_empty() {
+        model_config.remove("fallbacks");
+    } else {
+        model_config.insert(
+            "fallbacks".to_string(),
+            Value::Array(
+                editor
+                    .fallback_models
+                    .iter()
+                    .map(|item| Value::String(item.trim().to_string()))
+                    .filter(|item| {
+                        item.as_str()
+                            .map(|value| !value.is_empty())
+                            .unwrap_or(false)
+                    })
+                    .collect(),
+            ),
+        );
+    }
+
+    Ok(())
+}
+
 fn lookup_openclaw_auth_profile_token(
     root: Option<&Map<String, Value>>,
     profile_id: &str,
@@ -862,20 +1069,8 @@ fn lookup_openclaw_auth_profile_token(
     None
 }
 
-fn extract_openclaw_api_token(
-    provider: &Map<String, Value>,
-    auth_profiles_root: Option<&Map<String, Value>>,
-) -> Option<String> {
-    for key in ["apiKey", "api_key", "key", "token"] {
-        if let Some(value) = provider.get(key).and_then(|item| item.as_str()) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-
-    let profile_id = provider
+fn resolve_openclaw_auth_profile_id(provider: &Map<String, Value>) -> Option<String> {
+    provider
         .get("authProfile")
         .and_then(|value| value.as_str())
         .or_else(|| {
@@ -890,9 +1085,45 @@ fn extract_openclaw_api_token(
                 .and_then(|value| value.as_object())
                 .and_then(|auth| auth.get("profile").or_else(|| auth.get("profileId")))
                 .and_then(|value| value.as_str())
-        });
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(String::from)
+}
 
-    profile_id.and_then(|value| lookup_openclaw_auth_profile_token(auth_profiles_root, value))
+fn openclaw_auth_profile_exists(root: Option<&Map<String, Value>>, profile_id: &str) -> bool {
+    let normalized_profile_id = profile_id.trim();
+    if normalized_profile_id.is_empty() {
+        return false;
+    }
+
+    let Some(root) = root else {
+        return false;
+    };
+    let profiles = root
+        .get("profiles")
+        .and_then(|value| value.as_object())
+        .unwrap_or(root);
+    profiles.contains_key(normalized_profile_id)
+}
+
+fn extract_openclaw_api_token(
+    provider: &Map<String, Value>,
+    auth_profiles_root: Option<&Map<String, Value>>,
+) -> Option<String> {
+    for key in ["apiKey", "api_key", "key", "token"] {
+        if let Some(value) = provider.get(key).and_then(|item| item.as_str()) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+
+    let profile_id = resolve_openclaw_auth_profile_id(provider);
+
+    profile_id
+        .and_then(|value| lookup_openclaw_auth_profile_token(auth_profiles_root, value.as_str()))
 }
 
 fn parse_openclaw_config_with_sources(
@@ -1028,27 +1259,16 @@ fn write_openclaw_config(
 ) -> AppResult<PathBuf> {
     let file_path = config_dir.join("openclaw.json");
     let mut root = read_json_like_object(&file_path)?;
-    let provider_id = resolve_openclaw_provider_name(&root, None, existing_config.as_ref());
-    let agent_id = resolve_openclaw_agent_id_from_config(existing_config.as_ref());
-    let providers = ensure_openclaw_primary_provider_map(&mut root);
-    let provider = ensure_child_object(providers, &provider_id);
-    if !provider.contains_key("api") {
-        provider.insert(
-            "api".to_string(),
-            Value::String(DEFAULT_OPENCLAW_API_FORMAT.to_string()),
-        );
-    }
-    provider.insert(
-        "baseUrl".to_string(),
-        Value::String(build_openclaw_entry_url(entry_url)),
-    );
-    let provider_snapshot = provider.clone();
+    let mut editor = parse_openclaw_editor_config(&root, None, None, existing_config.as_ref())?;
+    editor.base_url = Some(build_openclaw_entry_url(entry_url));
+    format_openclaw_primary_source(&editor, &mut root)?;
+    let provider_snapshot = build_openclaw_provider_snapshot(&editor, false);
 
     write_json_object(&file_path, &root)?;
     sync_openclaw_provider_to_models_file(
         config_dir,
-        &agent_id,
-        &provider_id,
+        &editor.agent_id,
+        &editor.provider_id,
         &provider_snapshot,
         true,
     )?;
@@ -1827,6 +2047,337 @@ base_url = "http://should-not-change"
     }
 
     #[test]
+    fn openclaw_validate_detects_missing_provider_reference() {
+        let editor = OpenClawEditorConfig {
+            agent_id: "workspace-alpha".to_string(),
+            provider_id: "missing-provider".to_string(),
+            primary_model: Some("gpt-4.1".to_string()),
+            fallback_models: vec!["gpt-4.1-mini".to_string()],
+            api_format: Some("openai-responses".to_string()),
+            base_url: Some("http://127.0.0.1:8899/oc/dev/v1".to_string()),
+            api_key: Some("secret".to_string()),
+        };
+        let primary_root = json!({
+            "models": {"providers": {"aor_shared": {"api": "openai-responses"}}}
+        })
+        .as_object()
+        .expect("primary root object")
+        .clone();
+
+        let err = validate_openclaw_editor_config(&editor, &primary_root, None, None)
+            .expect_err("validation should fail");
+        assert!(err.to_string().contains("provider"));
+    }
+
+    #[test]
+    fn write_openclaw_source_rejects_missing_provider_reference() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let temp_dir =
+            std::env::temp_dir().join(format!("oc-proxy-openclaw-source-write-{unique_id}"));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let target = IntegrationTarget {
+            id: "openclaw-target".to_string(),
+            kind: IntegrationClientKind::Openclaw,
+            config_dir: temp_dir.to_string_lossy().to_string(),
+            config: Some(AgentConfig {
+                agent_id: Some("workspace-alpha".to_string()),
+                provider_id: Some("missing-provider".to_string()),
+                url: None,
+                api_token: None,
+                api_format: None,
+                model: None,
+                fallback_models: None,
+                timeout: None,
+                always_thinking_enabled: None,
+                include_coauthored_by: None,
+                skip_dangerous_mode_permission_prompt: None,
+            }),
+            created_at: "2026-03-26T00:00:00Z".to_string(),
+            updated_at: "2026-03-26T00:00:00Z".to_string(),
+        };
+        let content = serde_json::to_string_pretty(&json!({
+            "models": {"providers": {"aor_shared": {"api": "openai-responses"}}}
+        }))
+        .expect("content should serialize");
+
+        let err = write_agent_config_source_with_targets(
+            None,
+            vec![target],
+            "openclaw-target",
+            &content,
+            Some(SOURCE_PRIMARY),
+        )
+        .expect_err("write should fail when provider reference is missing");
+
+        assert!(err.to_string().contains("provider"));
+        assert!(!temp_dir.join("openclaw.json").exists());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn write_openclaw_source_rejects_missing_auth_profile_reference() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let temp_dir =
+            std::env::temp_dir().join(format!("oc-proxy-openclaw-auth-profile-{unique_id}"));
+        let agent_dir = temp_dir
+            .join("agents")
+            .join("workspace-alpha")
+            .join("agent");
+        std::fs::create_dir_all(&agent_dir).expect("agent dir should be created");
+
+        std::fs::write(
+            temp_dir.join("openclaw.json"),
+            serde_json::to_string_pretty(&json!({
+                "models": {
+                    "providers": {
+                        "aor_shared": {
+                            "api": "openai-responses",
+                            "authProfile": "missing-profile"
+                        }
+                    }
+                }
+            }))
+            .expect("primary content should serialize"),
+        )
+        .expect("primary config should write");
+        std::fs::write(
+            agent_dir.join("models.json"),
+            serde_json::to_string_pretty(&json!({
+                "providers": {
+                    "aor_shared": {
+                        "baseUrl": "http://registry.local/v1"
+                    }
+                }
+            }))
+            .expect("models content should serialize"),
+        )
+        .expect("models config should write");
+
+        let target = IntegrationTarget {
+            id: "openclaw-target".to_string(),
+            kind: IntegrationClientKind::Openclaw,
+            config_dir: temp_dir.to_string_lossy().to_string(),
+            config: Some(AgentConfig {
+                agent_id: Some("workspace-alpha".to_string()),
+                provider_id: Some("aor_shared".to_string()),
+                url: None,
+                api_token: None,
+                api_format: None,
+                model: None,
+                fallback_models: None,
+                timeout: None,
+                always_thinking_enabled: None,
+                include_coauthored_by: None,
+                skip_dangerous_mode_permission_prompt: None,
+            }),
+            created_at: "2026-03-26T00:00:00Z".to_string(),
+            updated_at: "2026-03-26T00:00:00Z".to_string(),
+        };
+        let content = serde_json::to_string_pretty(&json!({"profiles": {}}))
+            .expect("auth profiles content should serialize");
+
+        let err = write_agent_config_source_with_targets(
+            None,
+            vec![target],
+            "openclaw-target",
+            &content,
+            Some(SOURCE_AUTH_PROFILES),
+        )
+        .expect_err("write should fail when auth profile reference is missing");
+
+        assert!(err.to_string().contains("auth profile"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn write_openclaw_source_surfaces_related_models_file_parse_errors() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let temp_dir =
+            std::env::temp_dir().join(format!("oc-proxy-openclaw-models-parse-{unique_id}"));
+        let agent_dir = temp_dir
+            .join("agents")
+            .join("workspace-alpha")
+            .join("agent");
+        std::fs::create_dir_all(&agent_dir).expect("agent dir should be created");
+
+        std::fs::write(
+            temp_dir.join("openclaw.json"),
+            serde_json::to_string_pretty(&json!({
+                "agents": {
+                    "defaults": {"model": {"primary": "gpt-4.1"}}
+                },
+                "models": {
+                    "providers": {
+                        "aor_shared": {
+                            "api": "openai-responses",
+                            "baseUrl": "http://127.0.0.1:8899/oc/dev/v1"
+                        }
+                    }
+                }
+            }))
+            .expect("primary content should serialize"),
+        )
+        .expect("primary config should write");
+        std::fs::write(agent_dir.join("models.json"), "{")
+            .expect("invalid models config should write");
+
+        let target = IntegrationTarget {
+            id: "openclaw-target".to_string(),
+            kind: IntegrationClientKind::Openclaw,
+            config_dir: temp_dir.to_string_lossy().to_string(),
+            config: Some(AgentConfig {
+                agent_id: Some("workspace-alpha".to_string()),
+                provider_id: Some("aor_shared".to_string()),
+                url: None,
+                api_token: None,
+                api_format: None,
+                model: None,
+                fallback_models: None,
+                timeout: None,
+                always_thinking_enabled: None,
+                include_coauthored_by: None,
+                skip_dangerous_mode_permission_prompt: None,
+            }),
+            created_at: "2026-03-26T00:00:00Z".to_string(),
+            updated_at: "2026-03-26T00:00:00Z".to_string(),
+        };
+        let content = serde_json::to_string_pretty(&json!({
+            "profiles": {
+                "workspace-profile": {
+                    "apiKey": "secret"
+                }
+            }
+        }))
+        .expect("auth profiles content should serialize");
+
+        let err = write_agent_config_source_with_targets(
+            None,
+            vec![target],
+            "openclaw-target",
+            &content,
+            Some(SOURCE_AUTH_PROFILES),
+        )
+        .expect_err("write should fail when related models file is invalid");
+
+        assert!(err.to_string().contains("models.json"));
+        assert!(err.to_string().contains("parse JSON config failed"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn openclaw_parse_editor_config_preserves_multifile_state() {
+        let primary_root = json!({
+            "agents": {
+                "defaults": {"model": {"primary": "gpt-4.1", "fallbacks": ["gpt-4.1-mini"]}}
+            },
+            "models": {
+                "providers": {
+                    "aor_shared": {
+                        "api": "openai-responses",
+                        "baseUrl": "http://127.0.0.1:8899/oc/dev/v1"
+                    }
+                }
+            }
+        })
+        .as_object()
+        .expect("primary root object")
+        .clone();
+        let models_root = json!({
+            "providers": {
+                "aor_shared": {
+                    "apiKey": "token-from-registry",
+                    "baseUrl": "http://override.local/v1"
+                }
+            }
+        })
+        .as_object()
+        .expect("models root object")
+        .clone();
+
+        let editor = parse_openclaw_editor_config(&primary_root, Some(&models_root), None, None)
+            .expect("openclaw editor parse should succeed");
+
+        assert_eq!(editor.provider_id, "aor_shared");
+        assert_eq!(editor.base_url.as_deref(), Some("http://override.local/v1"));
+        assert_eq!(editor.api_key.as_deref(), Some("token-from-registry"));
+        assert_eq!(editor.primary_model.as_deref(), Some("gpt-4.1"));
+        assert_eq!(editor.fallback_models, vec!["gpt-4.1-mini".to_string()]);
+    }
+
+    #[test]
+    fn openclaw_format_primary_source_updates_primary_file_only() {
+        let mut primary_root = json!({
+            "agents": {
+                "defaults": {"model": {"primary": "gpt-4.1", "fallbacks": ["gpt-4.1-mini"]}}
+            },
+            "models": {
+                "providers": {
+                    "aor_shared": {
+                        "api": "openai-responses",
+                        "baseUrl": "http://legacy.local/v1"
+                    }
+                }
+            }
+        })
+        .as_object()
+        .expect("primary root object")
+        .clone();
+        let models_root = json!({
+            "providers": {
+                "aor_shared": {
+                    "apiKey": "keep-me",
+                    "baseUrl": "http://registry.local/v1"
+                }
+            }
+        })
+        .as_object()
+        .expect("models root object")
+        .clone();
+        let editor = OpenClawEditorConfig {
+            agent_id: "workspace-alpha".to_string(),
+            provider_id: "aor_shared".to_string(),
+            primary_model: Some("gpt-4.1-updated".to_string()),
+            fallback_models: vec!["gpt-4.1-mini".to_string(), "gpt-4o-mini".to_string()],
+            api_format: Some("openai-responses".to_string()),
+            base_url: Some("http://127.0.0.1:8899/oc/dev/v1".to_string()),
+            api_key: Some("ignored-for-primary".to_string()),
+        };
+
+        format_openclaw_primary_source(&editor, &mut primary_root)
+            .expect("primary source formatting should succeed");
+
+        assert_eq!(
+            primary_root["models"]["providers"]["aor_shared"]["baseUrl"].as_str(),
+            Some("http://127.0.0.1:8899/oc/dev/v1")
+        );
+        assert_eq!(
+            primary_root["agents"]["defaults"]["model"]["primary"].as_str(),
+            Some("gpt-4.1-updated")
+        );
+        assert_eq!(
+            models_root["providers"]["aor_shared"]["apiKey"].as_str(),
+            Some("keep-me")
+        );
+        assert_eq!(
+            models_root["providers"]["aor_shared"]["baseUrl"].as_str(),
+            Some("http://registry.local/v1")
+        );
+    }
+
+    #[test]
     fn openclaw_config_merges_primary_and_agent_registry_sources() {
         let primary_root = json!({
             "agents": {
@@ -1902,6 +2453,178 @@ base_url = "http://should-not-change"
             parsed.fallback_models,
             Some(vec!["gpt-4.1-mini".to_string(), "gpt-4o-mini".to_string()])
         );
+    }
+
+    #[test]
+    fn read_openclaw_agent_config_includes_editor_payload_in_serialized_result() {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("oc-proxy-openclaw-read-{unique_id}"));
+        let agent_dir = temp_dir
+            .join("agents")
+            .join("workspace-alpha")
+            .join("agent");
+        std::fs::create_dir_all(&agent_dir).expect("agent dir should be created");
+
+        std::fs::write(
+            temp_dir.join("openclaw.json"),
+            serde_json::to_string_pretty(&json!({
+                "agents": {
+                    "defaults": {
+                        "model": {
+                            "primary": "gpt-4.1",
+                            "fallbacks": ["gpt-4.1-mini", "gpt-4o-mini"]
+                        }
+                    }
+                },
+                "models": {
+                    "providers": {
+                        "aor_shared": {
+                            "api": "openai-responses",
+                            "baseUrl": "http://127.0.0.1:8899/oc/dev/v1"
+                        }
+                    }
+                }
+            }))
+            .expect("openclaw primary config should serialize"),
+        )
+        .expect("openclaw primary config should be written");
+
+        std::fs::write(
+            agent_dir.join("models.json"),
+            serde_json::to_string_pretty(&json!({
+                "providers": {
+                    "aor_shared": {
+                        "apiKey": "registry-token",
+                        "baseUrl": "http://override.local/v1"
+                    }
+                }
+            }))
+            .expect("openclaw models registry should serialize"),
+        )
+        .expect("models registry should be written");
+
+        std::fs::write(
+            agent_dir.join("auth-profiles.json"),
+            serde_json::to_string_pretty(&json!({
+                "profiles": {
+                    "workspace-profile": {
+                        "apiKey": "profile-token"
+                    }
+                }
+            }))
+            .expect("openclaw auth profiles should serialize"),
+        )
+        .expect("auth profiles should be written");
+
+        let result = read_agent_config_with_targets(
+            vec![IntegrationTarget {
+                id: "openclaw-target".to_string(),
+                kind: IntegrationClientKind::Openclaw,
+                config_dir: temp_dir.to_string_lossy().to_string(),
+                config: Some(AgentConfig {
+                    agent_id: Some("workspace-alpha".to_string()),
+                    provider_id: Some("aor_shared".to_string()),
+                    url: None,
+                    api_token: None,
+                    api_format: None,
+                    model: None,
+                    fallback_models: None,
+                    timeout: None,
+                    always_thinking_enabled: None,
+                    include_coauthored_by: None,
+                    skip_dangerous_mode_permission_prompt: None,
+                }),
+                created_at: "2026-03-26T00:00:00Z".to_string(),
+                updated_at: "2026-03-26T00:00:00Z".to_string(),
+            }],
+            "openclaw-target",
+        )
+        .expect("openclaw config should read successfully");
+
+        assert_eq!(
+            result
+                .openclaw_editor
+                .as_ref()
+                .map(|value| value.agent_id.as_str()),
+            Some("workspace-alpha")
+        );
+        assert_eq!(
+            result
+                .openclaw_editor
+                .as_ref()
+                .map(|value| value.provider_id.as_str()),
+            Some("aor_shared")
+        );
+        assert_eq!(
+            result
+                .openclaw_editor
+                .as_ref()
+                .and_then(|value| value.primary_model.as_deref()),
+            Some("gpt-4.1")
+        );
+        assert_eq!(
+            result
+                .openclaw_editor
+                .as_ref()
+                .map(|value| value.fallback_models.clone()),
+            Some(vec!["gpt-4.1-mini".to_string(), "gpt-4o-mini".to_string()])
+        );
+        assert_eq!(
+            result
+                .openclaw_editor
+                .as_ref()
+                .and_then(|value| value.api_format.as_deref()),
+            Some("openai-responses")
+        );
+        assert_eq!(
+            result
+                .openclaw_editor
+                .as_ref()
+                .and_then(|value| value.base_url.as_deref()),
+            Some("http://override.local/v1")
+        );
+        assert_eq!(
+            result
+                .openclaw_editor
+                .as_ref()
+                .and_then(|value| value.api_key.as_deref()),
+            Some("registry-token")
+        );
+
+        let serialized = serde_json::to_value(&result).expect("agent config file should serialize");
+        assert_eq!(
+            serialized["openclawEditor"]["agentId"].as_str(),
+            Some("workspace-alpha")
+        );
+        assert_eq!(
+            serialized["openclawEditor"]["providerId"].as_str(),
+            Some("aor_shared")
+        );
+        assert_eq!(
+            serialized["openclawEditor"]["primaryModel"].as_str(),
+            Some("gpt-4.1")
+        );
+        assert_eq!(
+            serialized["openclawEditor"]["fallbackModels"][0].as_str(),
+            Some("gpt-4.1-mini")
+        );
+        assert_eq!(
+            serialized["openclawEditor"]["apiFormat"].as_str(),
+            Some("openai-responses")
+        );
+        assert_eq!(
+            serialized["openclawEditor"]["baseUrl"].as_str(),
+            Some("http://override.local/v1")
+        );
+        assert_eq!(
+            serialized["openclawEditor"]["apiKey"].as_str(),
+            Some("registry-token")
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -2112,13 +2835,14 @@ pub fn read_agent_config_with_targets(
                 parse_json_like_content(&auth_profiles_content, &auth_profiles_file_path).ok();
 
             if let Some(root) = parsed_root.as_ref() {
-                parse_openclaw_config_with_sources(
+                parse_openclaw_editor_config(
                     root,
                     models_root.as_ref(),
                     auth_profiles_root.as_ref(),
                     target.config.as_ref(),
                 )
                 .ok()
+                .map(openclaw_editor_to_agent_config)
             } else {
                 None
             }
@@ -2126,6 +2850,33 @@ pub fn read_agent_config_with_targets(
         _ => parsed_root
             .as_ref()
             .and_then(|root| parse_agent_config(&target.kind, root).ok()),
+    };
+
+    let openclaw_editor = match target.kind {
+        IntegrationClientKind::Openclaw => {
+            let agent_id = resolve_openclaw_agent_id(&target);
+            let models_file_path = resolve_openclaw_models_file_path(&config_dir, &agent_id)?;
+            let models_content = read_file_content(&models_file_path)?.unwrap_or_default();
+            let models_root = parse_json_like_content(&models_content, &models_file_path).ok();
+            let auth_profiles_file_path =
+                resolve_openclaw_auth_profiles_file_path(&config_dir, &agent_id)?;
+            let auth_profiles_content =
+                read_file_content(&auth_profiles_file_path)?.unwrap_or_default();
+            let auth_profiles_root =
+                parse_json_like_content(&auth_profiles_content, &auth_profiles_file_path).ok();
+
+            parsed_root.as_ref().and_then(|root| {
+                parse_openclaw_editor_config(
+                    root,
+                    models_root.as_ref(),
+                    auth_profiles_root.as_ref(),
+                    target.config.as_ref(),
+                )
+                .ok()
+                .map(openclaw_editor_to_dto)
+            })
+        }
+        _ => None,
     };
 
     Ok(AgentConfigFile {
@@ -2137,6 +2888,7 @@ pub fn read_agent_config_with_targets(
         source_files,
         updated_at: Some(target.updated_at),
         parsed_config,
+        openclaw_editor,
     })
 }
 
@@ -2549,7 +3301,9 @@ pub fn write_agent_config_source_with_targets(
     } else {
         parse_agent_config_content(&target.kind, content, &file_path)?
     };
-    write_file_content(&file_path, content)?;
+    if !matches!(target.kind, IntegrationClientKind::Openclaw) {
+        write_file_content(&file_path, content)?;
+    }
 
     let parsed_config = match target.kind {
         IntegrationClientKind::Codex => {
@@ -2573,40 +3327,54 @@ pub fn write_agent_config_source_with_targets(
         IntegrationClientKind::Openclaw => {
             let config_file_path = resolve_agent_config_file_path(&target.kind, &config_dir)?;
             let config_root = if normalized_source_id == Some(SOURCE_PRIMARY) {
-                Some(parsed_root.clone())
+                parsed_root.clone()
             } else {
                 let config_content = read_file_content(&config_file_path)?.unwrap_or_default();
-                parse_agent_config_content(&target.kind, &config_content, &config_file_path).ok()
+                parse_agent_config_content(&target.kind, &config_content, &config_file_path)?
             };
 
             let agent_id = resolve_openclaw_agent_id(&target);
             let models_file_path = resolve_openclaw_models_file_path(&config_dir, &agent_id)?;
             let models_root = if normalized_source_id == Some(SOURCE_MODELS) {
-                Some(parsed_root.clone())
+                parsed_root.clone()
             } else {
                 let models_content = read_file_content(&models_file_path)?.unwrap_or_default();
-                parse_json_like_content(&models_content, &models_file_path).ok()
+                parse_json_like_content(&models_content, &models_file_path)?
             };
 
             let auth_profiles_file_path =
                 resolve_openclaw_auth_profiles_file_path(&config_dir, &agent_id)?;
             let auth_profiles_root = if normalized_source_id == Some(SOURCE_AUTH_PROFILES) {
-                Some(parsed_root)
+                parsed_root
             } else {
                 let auth_profiles_content =
                     read_file_content(&auth_profiles_file_path)?.unwrap_or_default();
-                parse_json_like_content(&auth_profiles_content, &auth_profiles_file_path).ok()
+                parse_json_like_content(&auth_profiles_content, &auth_profiles_file_path)?
             };
 
-            config_root.as_ref().and_then(|root| {
-                parse_openclaw_config_with_sources(
-                    root,
-                    models_root.as_ref(),
-                    auth_profiles_root.as_ref(),
-                    target.config.as_ref(),
-                )
-                .ok()
-            })
+            let editor = parse_openclaw_editor_config(
+                &config_root,
+                Some(&models_root),
+                Some(&auth_profiles_root),
+                target.config.as_ref(),
+            )?;
+            validate_openclaw_editor_config(
+                &editor,
+                &config_root,
+                Some(&models_root),
+                Some(&auth_profiles_root),
+            )?;
+
+            write_file_content(&file_path, content)?;
+
+            parse_openclaw_editor_config(
+                &config_root,
+                Some(&models_root),
+                Some(&auth_profiles_root),
+                target.config.as_ref(),
+            )
+            .ok()
+            .map(openclaw_editor_to_agent_config)
         }
         _ => parse_agent_config(&target.kind, &parsed_root).ok(),
     };
@@ -2713,102 +3481,26 @@ fn write_opencode_full_config(config_dir: &Path, config: &AgentConfig) -> AppRes
 fn write_openclaw_full_config(config_dir: &Path, config: &AgentConfig) -> AppResult<PathBuf> {
     let file_path = config_dir.join("openclaw.json");
     let mut root = read_json_like_object(&file_path)?;
-    let agent_id = resolve_openclaw_agent_id_from_config(Some(config));
-    let provider_id = resolve_openclaw_provider_name(&root, None, Some(config));
-    let provider_snapshot = {
-        let providers = ensure_openclaw_primary_provider_map(&mut root);
-        let provider = ensure_child_object(providers, &provider_id);
-        let api_format = config
-            .api_format
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(DEFAULT_OPENCLAW_API_FORMAT);
-
-        provider.insert("api".to_string(), Value::String(api_format.to_string()));
-        match config
-            .url
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            Some(url) => {
-                provider.insert("baseUrl".to_string(), Value::String(url.to_string()));
-                provider.remove("baseURL");
-            }
-            None => {
-                provider.remove("baseUrl");
-                provider.remove("baseURL");
-            }
-        }
-        match config
-            .api_token
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            Some(token) => {
-                provider.insert("apiKey".to_string(), Value::String(token.to_string()));
-                provider.remove("api_key");
-            }
-            None => {
-                provider.remove("apiKey");
-                provider.remove("api_key");
-            }
-        }
-
-        provider.clone()
-    };
-
-    let agents = ensure_child_object(&mut root, "agents");
-    let defaults = ensure_child_object(agents, "defaults");
-    let model_config = ensure_child_object(defaults, "model");
-    match config
-        .model
+    let editor = openclaw_editor_from_agent_config(config);
+    format_openclaw_primary_source(&editor, &mut root)?;
+    if let Some(token) = editor
+        .api_key
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        Some(model) => {
-            model_config.insert("primary".to_string(), Value::String(model.to_string()));
-        }
-        None => {
-            model_config.remove("primary");
-        }
+        let providers = ensure_openclaw_primary_provider_map(&mut root);
+        let provider = ensure_child_object(providers, &editor.provider_id);
+        provider.insert("apiKey".to_string(), Value::String(token.to_string()));
+        provider.remove("api_key");
     }
-    let normalized_fallbacks = config.fallback_models.as_ref().map(|items| {
-        items
-            .iter()
-            .map(|item| item.trim())
-            .filter(|value| !value.is_empty())
-            .map(String::from)
-            .collect::<Vec<_>>()
-    });
-    match normalized_fallbacks
-        .as_ref()
-        .filter(|items| !items.is_empty())
-    {
-        Some(items) => {
-            model_config.insert(
-                "fallbacks".to_string(),
-                Value::Array(
-                    items
-                        .iter()
-                        .map(|item| Value::String(item.clone()))
-                        .collect(),
-                ),
-            );
-        }
-        None => {
-            model_config.remove("fallbacks");
-        }
-    }
+    let provider_snapshot = build_openclaw_provider_snapshot(&editor, true);
 
     write_json_object(&file_path, &root)?;
     sync_openclaw_provider_to_models_file(
         config_dir,
-        &agent_id,
-        &provider_id,
+        &editor.agent_id,
+        &editor.provider_id,
         &provider_snapshot,
         false,
     )?;

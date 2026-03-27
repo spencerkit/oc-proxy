@@ -6,10 +6,10 @@
 
 // Logs hooks
 export {
+  resolveLogsRefreshPlan,
   useFilteredLogs,
   useLogCount,
   useLogs,
-  useLogsAutoRefresh,
   useLogsValue,
 } from "./useLogs"
 // Proxy configuration hooks

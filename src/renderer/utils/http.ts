@@ -6,6 +6,7 @@ import type {
   ClipboardTextResult,
   GroupBackupExportResult,
   GroupBackupImportResult,
+  GroupImportMode,
   GroupsExportJsonResult,
   IntegrationClientKind,
   IntegrationTarget,
@@ -364,7 +365,7 @@ export const httpApi = {
     }
   },
 
-  async importGroupsBackup(): Promise<GroupBackupImportResult> {
+  async importGroupsBackup(mode?: GroupImportMode): Promise<GroupBackupImportResult> {
     const jsonText = await pickJsonFileText()
     if (jsonText === null) {
       return {
@@ -374,11 +375,17 @@ export const httpApi = {
         importedGroupCount: undefined,
       }
     }
-    return request<GroupBackupImportResult>("POST", "/api/config/groups/import-json", { jsonText })
+    return request<GroupBackupImportResult>("POST", "/api/config/groups/import-json", {
+      jsonText,
+      mode,
+    })
   },
 
-  importGroupsFromJson(jsonText: string): Promise<GroupBackupImportResult> {
-    return request<GroupBackupImportResult>("POST", "/api/config/groups/import-json", { jsonText })
+  importGroupsFromJson(jsonText: string, mode?: GroupImportMode): Promise<GroupBackupImportResult> {
+    return request<GroupBackupImportResult>("POST", "/api/config/groups/import-json", {
+      jsonText,
+      mode,
+    })
   },
 
   remoteRulesUpload(force?: boolean): Promise<RemoteRulesUploadResult> {

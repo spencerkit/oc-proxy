@@ -1,7 +1,7 @@
-import { ArrowLeft, Bot, Braces, Code2, Eye, EyeOff, FileCode2, Save, Workflow } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { ArrowLeft, Bot, Braces, Code2, Save, Workflow } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { Button, Input, Switch } from "@/components"
+import { Button } from "@/components/common/Button"
 import { useTranslation } from "@/hooks"
 import {
   readAgentConfigAction,
@@ -9,8 +9,16 @@ import {
   writeAgentConfigSourceAction,
 } from "@/store"
 import type { AgentConfig, AgentConfigFile, AgentSourceFile, IntegrationClientKind } from "@/types"
+import {
+  formatAgentSourceDraft,
+  getDirtySourceIds,
+  mergeReloadedFormDraftState,
+  mergeReloadedSourceDrafts,
+} from "@/utils/agentSourceFormat"
 import { useActions } from "@/utils/relax"
+import { AgentEditContent } from "./AgentEditContent"
 import styles from "./AgentEditPage.module.css"
+import { buildAgentEditFormState } from "./agentEditPageSections"
 
 const AGENT_EDIT_ACTIONS = [
   readAgentConfigAction,
@@ -18,7 +26,7 @@ const AGENT_EDIT_ACTIONS = [
   writeAgentConfigSourceAction,
 ] as const
 
-const DEFAULT_TIMEOUT_MS = "300000"
+const _DEFAULT_TIMEOUT_MS = "300000"
 const DEFAULT_OPENCLAW_AGENT_ID = "default"
 const DEFAULT_OPENCLAW_PROVIDER_ID = "aor_shared"
 const DEFAULT_OPENCLAW_API_FORMAT = "openai-responses"
@@ -48,20 +56,12 @@ const AGENT_META: Record<
   },
 }
 
-function buildFormState(parsed?: AgentConfig | null): AgentConfig {
-  return {
-    agentId: parsed?.agentId ?? "",
-    providerId: parsed?.providerId ?? "",
-    url: parsed?.url ?? "",
-    apiToken: parsed?.apiToken ?? "",
-    apiFormat: parsed?.apiFormat ?? "",
-    model: parsed?.model ?? "",
-    fallbackModels: parsed?.fallbackModels ?? [],
-    timeout: parsed?.timeout,
-    alwaysThinkingEnabled: parsed?.alwaysThinkingEnabled ?? false,
-    includeCoAuthoredBy: parsed?.includeCoAuthoredBy ?? false,
-    skipDangerousModePermissionPrompt: parsed?.skipDangerousModePermissionPrompt ?? false,
-  }
+function buildFormState(
+  kind: IntegrationClientKind,
+  parsed?: AgentConfig | null,
+  openclawEditor?: AgentConfigFile["openclawEditor"] | null
+): AgentConfig {
+  return buildAgentEditFormState(kind, parsed, openclawEditor)
 }
 
 function normalizeFormConfig(config: AgentConfig): AgentConfig {
@@ -155,43 +155,74 @@ export const AgentEditPage: React.FC = () => {
   const [saveMode, setSaveMode] = useState<"form" | "source" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [formData, setFormData] = useState<AgentConfig>(buildFormState())
+  const [formData, setFormData] = useState<AgentConfig>(buildFormState("claude"))
   const [timeoutText, setTimeoutText] = useState("")
   const [fallbackModelsText, setFallbackModelsText] = useState("")
   const [showApiToken, setShowApiToken] = useState(false)
   const [activeSourceId, setActiveSourceId] = useState("primary")
   const [sourceDrafts, setSourceDrafts] = useState<Record<string, string>>({})
 
-  const loadConfig = useCallback(async () => {
-    if (!targetId) return
+  const sourceFiles = useMemo(() => buildSourceFiles(configFile), [configFile])
+  const sourceFilesRef = useRef<AgentSourceFile[]>([])
 
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await readAgentConfig({ targetId })
-      setConfigFile(result)
+  useEffect(() => {
+    sourceFilesRef.current = sourceFiles
+  }, [sourceFiles])
 
-      const nextFormState = buildFormState(result.parsedConfig)
-      setFormData(nextFormState)
-      setTimeoutText(
-        result.parsedConfig?.timeout !== undefined ? String(result.parsedConfig.timeout) : ""
-      )
-      setFallbackModelsText(result.parsedConfig?.fallbackModels?.join(", ") ?? "")
-      const nextSourceFiles = buildSourceFiles(result)
-      setActiveSourceId(current =>
-        nextSourceFiles.some(file => file.sourceId === current)
-          ? current
-          : (nextSourceFiles[0]?.sourceId ?? "primary")
-      )
-      setSourceDrafts(
-        Object.fromEntries(nextSourceFiles.map(file => [file.sourceId, file.content]))
-      )
-    } catch (err) {
-      setError(String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [targetId, readAgentConfig])
+  const loadConfig = useCallback(
+    async (options?: { savedSourceId?: string; preserveFormDrafts?: boolean }) => {
+      if (!targetId) return
+
+      setLoading(true)
+      setError(null)
+      try {
+        const result = await readAgentConfig({ targetId })
+        setConfigFile(result)
+
+        const nextFormState = buildFormState(
+          result.kind,
+          result.parsedConfig,
+          result.openclawEditor
+        )
+        const mergedFormState = mergeReloadedFormDraftState(
+          {
+            formData,
+            timeoutText,
+            fallbackModelsText,
+          },
+          {
+            formData: nextFormState,
+            timeoutText:
+              result.parsedConfig?.timeout !== undefined ? String(result.parsedConfig.timeout) : "",
+            fallbackModelsText: nextFormState.fallbackModels?.join(", ") ?? "",
+          },
+          options?.preserveFormDrafts ?? false
+        )
+        setFormData(mergedFormState.formData)
+        setTimeoutText(mergedFormState.timeoutText)
+        setFallbackModelsText(mergedFormState.fallbackModelsText)
+        const nextSourceFiles = buildSourceFiles(result)
+        setActiveSourceId(current =>
+          nextSourceFiles.some(file => file.sourceId === current)
+            ? current
+            : (nextSourceFiles[0]?.sourceId ?? "primary")
+        )
+        setSourceDrafts(current =>
+          mergeReloadedSourceDrafts(
+            sourceFilesRef.current,
+            current,
+            nextSourceFiles,
+            options?.savedSourceId
+          )
+        )
+      } catch (err) {
+        setError(String(err))
+      } finally {
+        setLoading(false)
+      }
+    },
+    [fallbackModelsText, formData, readAgentConfig, targetId, timeoutText]
+  )
 
   useEffect(() => {
     void loadConfig()
@@ -207,13 +238,13 @@ export const AgentEditPage: React.FC = () => {
   const supportsTimeout = kind === "claude" || kind === "opencode"
   const meta = AGENT_META[kind]
   const KindIcon = meta.icon
-  const sourceFiles = useMemo(() => buildSourceFiles(configFile), [configFile])
   const activeSourceFile = useMemo(
     () => sourceFiles.find(file => file.sourceId === activeSourceId) ?? sourceFiles[0],
     [activeSourceId, sourceFiles]
   )
   const sourceContent = activeSourceFile ? (sourceDrafts[activeSourceFile.sourceId] ?? "") : ""
   const initialSourceContent = activeSourceFile?.content ?? ""
+  const isActiveSourceDirty = sourceContent !== initialSourceContent
   const sourcePlaceholder = buildSourcePlaceholder(kind, activeSourceFile?.sourceId ?? "primary")
   const timeoutError =
     timeoutText.trim().length > 0 && !/^\d+$/.test(timeoutText.trim())
@@ -230,11 +261,12 @@ export const AgentEditPage: React.FC = () => {
     [fallbackModelsText, formData, kind, supportsTimeout, timeoutText]
   )
   const initialFormConfig = useMemo(
-    () => buildFormState(configFile?.parsedConfig),
-    [configFile?.parsedConfig]
+    () => buildFormState(kind, configFile?.parsedConfig, configFile?.openclawEditor),
+    [configFile?.openclawEditor, configFile?.parsedConfig, kind]
   )
   const isFormDirty = serializeConfig(currentFormConfig) !== serializeConfig(initialFormConfig)
-  const isSourceDirty = sourceContent !== initialSourceContent
+  const dirtySourceIds = getDirtySourceIds(sourceFiles, sourceDrafts)
+  const isSourceDirty = dirtySourceIds.length > 0
   const statusMessage =
     editMode === "form"
       ? isFormDirty
@@ -262,7 +294,7 @@ export const AgentEditPage: React.FC = () => {
   }
 
   const handleSaveSource = async () => {
-    if (!targetId || !activeSourceFile || !isSourceDirty) return
+    if (!targetId || !activeSourceFile || !isActiveSourceDirty) return
 
     setSaveMode("source")
     setError(null)
@@ -273,7 +305,10 @@ export const AgentEditPage: React.FC = () => {
         content: sourceContent,
         sourceId: activeSourceFile.sourceId,
       })
-      await loadConfig()
+      await loadConfig({
+        savedSourceId: activeSourceFile.sourceId,
+        preserveFormDrafts: true,
+      })
       setSuccess(t("agentManagement.saveSuccess"))
     } catch (err) {
       setError(String(err))
@@ -363,276 +398,46 @@ export const AgentEditPage: React.FC = () => {
         {error && <div className={styles.error}>{error}</div>}
         {success && <div className={styles.success}>{success}</div>}
 
-        {editMode === "form" ? (
-          <div className={styles.formLayout}>
-            {kind === "openclaw" && (
-              <section className={styles.formSection}>
-                <div className={styles.sectionHeading}>
-                  <h2>{t("agentManagement.openclawScopeSection")}</h2>
-                  <p>{t("agentManagement.openclawScopeHint")}</p>
-                </div>
-
-                <div className={styles.fieldGrid}>
-                  <Input
-                    label={t("agentManagement.openclawAgentId")}
-                    value={formData.agentId}
-                    hint={t("agentManagement.openclawAgentIdHint")}
-                    onChange={event =>
-                      setFormData(current => ({ ...current, agentId: event.target.value }))
-                    }
-                    placeholder={DEFAULT_OPENCLAW_AGENT_ID}
-                    fullWidth
-                  />
-                  <Input
-                    label={t("agentManagement.openclawProviderId")}
-                    value={formData.providerId}
-                    hint={t("agentManagement.openclawProviderIdHint")}
-                    onChange={event =>
-                      setFormData(current => ({ ...current, providerId: event.target.value }))
-                    }
-                    placeholder={DEFAULT_OPENCLAW_PROVIDER_ID}
-                    fullWidth
-                  />
-                </div>
-              </section>
-            )}
-
-            <section className={styles.formSection}>
-              <div className={styles.sectionHeading}>
-                <h2>{t("agentManagement.connectionSection")}</h2>
-                <p>{t(`integration.${kind}.hint`)}</p>
-              </div>
-
-              <div className={styles.fieldGrid}>
-                <Input
-                  label={t("agentManagement.url")}
-                  value={formData.url}
-                  onChange={event =>
-                    setFormData(current => ({ ...current, url: event.target.value }))
-                  }
-                  placeholder={
-                    kind === "openclaw"
-                      ? "http://localhost:8080/oc/group/v1"
-                      : "http://localhost:8080/oc/group"
-                  }
-                  fullWidth
-                />
-                <Input
-                  label={t("agentManagement.apiToken")}
-                  type={showApiToken ? "text" : "password"}
-                  value={formData.apiToken}
-                  hint={
-                    kind === "codex"
-                      ? t("agentManagement.codexTokenHint")
-                      : kind === "openclaw"
-                        ? t("agentManagement.openclawTokenHint")
-                        : undefined
-                  }
-                  onChange={event =>
-                    setFormData(current => ({ ...current, apiToken: event.target.value }))
-                  }
-                  placeholder="sk-..."
-                  endAdornment={
-                    <button
-                      type="button"
-                      className={styles.tokenVisibilityButton}
-                      onClick={() => setShowApiToken(current => !current)}
-                      aria-label={
-                        showApiToken
-                          ? t("agentManagement.hideToken")
-                          : t("agentManagement.showToken")
-                      }
-                      title={
-                        showApiToken
-                          ? t("agentManagement.hideToken")
-                          : t("agentManagement.showToken")
-                      }
-                    >
-                      {showApiToken ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  }
-                  fullWidth
-                />
-              </div>
-            </section>
-
-            <section className={styles.formSection}>
-              <div className={styles.sectionHeading}>
-                <h2>{t("agentManagement.runtimeSection")}</h2>
-                <p>{t("agentManagement.runtimeHint")}</p>
-              </div>
-
-              <div className={styles.fieldGrid}>
-                <Input
-                  label={t("agentManagement.model")}
-                  value={formData.model}
-                  onChange={event =>
-                    setFormData(current => ({ ...current, model: event.target.value }))
-                  }
-                  placeholder={kind === "openclaw" ? "gpt-4.1" : "claude-sonnet-4-5-20250929"}
-                  fullWidth
-                />
-                {kind === "openclaw" && (
-                  <Input
-                    label={t("agentManagement.openclawApiFormat")}
-                    value={formData.apiFormat}
-                    hint={t("agentManagement.openclawApiFormatHint")}
-                    onChange={event =>
-                      setFormData(current => ({ ...current, apiFormat: event.target.value }))
-                    }
-                    placeholder={DEFAULT_OPENCLAW_API_FORMAT}
-                    fullWidth
-                  />
-                )}
-                {supportsTimeout && (
-                  <Input
-                    label={t("agentManagement.timeout")}
-                    type="number"
-                    value={timeoutText}
-                    error={timeoutError || undefined}
-                    onChange={event => setTimeoutText(event.target.value)}
-                    placeholder={DEFAULT_TIMEOUT_MS}
-                    fullWidth
-                  />
-                )}
-              </div>
-            </section>
-
-            {kind === "openclaw" && (
-              <section className={styles.formSection}>
-                <div className={styles.sectionHeading}>
-                  <h2>{t("agentManagement.openclawFallbackModels")}</h2>
-                  <p>{t("agentManagement.openclawFallbackModelsHint")}</p>
-                </div>
-
-                <Input
-                  label={t("agentManagement.openclawFallbackModels")}
-                  value={fallbackModelsText}
-                  onChange={event => setFallbackModelsText(event.target.value)}
-                  placeholder="gpt-4.1-mini, gpt-4o-mini"
-                  fullWidth
-                />
-              </section>
-            )}
-
-            {kind === "claude" && (
-              <section className={styles.formSection}>
-                <div className={styles.sectionHeading}>
-                  <h2>{t("agentManagement.behaviorOptions")}</h2>
-                  <p>{t("agentManagement.behaviorHint")}</p>
-                </div>
-
-                <div className={styles.switchGroup}>
-                  <div className={styles.switchRow}>
-                    <div className={styles.switchCopy}>
-                      <strong>{t("agentManagement.alwaysThinkingEnabled")}</strong>
-                      <span>{t("agentManagement.alwaysThinkingHint")}</span>
-                    </div>
-                    <Switch
-                      checked={!!formData.alwaysThinkingEnabled}
-                      onChange={checked =>
-                        setFormData(current => ({ ...current, alwaysThinkingEnabled: checked }))
-                      }
-                    />
-                  </div>
-
-                  <div className={styles.switchRow}>
-                    <div className={styles.switchCopy}>
-                      <strong>{t("agentManagement.includeCoAuthoredBy")}</strong>
-                      <span>{t("agentManagement.coAuthoredByHint")}</span>
-                    </div>
-                    <Switch
-                      checked={!!formData.includeCoAuthoredBy}
-                      onChange={checked =>
-                        setFormData(current => ({ ...current, includeCoAuthoredBy: checked }))
-                      }
-                    />
-                  </div>
-
-                  <div className={styles.switchRow}>
-                    <div className={styles.switchCopy}>
-                      <strong>{t("agentManagement.skipDangerousModePermissionPrompt")}</strong>
-                      <span>{t("agentManagement.skipPermissionHint")}</span>
-                    </div>
-                    <Switch
-                      checked={!!formData.skipDangerousModePermissionPrompt}
-                      onChange={checked =>
-                        setFormData(current => ({
-                          ...current,
-                          skipDangerousModePermissionPrompt: checked,
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-              </section>
-            )}
-          </div>
-        ) : (
-          <div className={styles.sourceLayout}>
-            <div className={styles.sectionHeading}>
-              <h2>{t("agentManagement.sourceEditor")}</h2>
-              <p>
-                {t("agentManagement.sourceHint", {
-                  format: activeSourceFile?.label ?? meta.format,
-                })}
-              </p>
-            </div>
-
-            {sourceFiles.length > 1 && (
-              <div className={styles.sourceFileTabs}>
-                {sourceFiles.map(file => (
-                  <button
-                    key={file.sourceId}
-                    type="button"
-                    className={`${styles.sourceFileTab} ${activeSourceFile?.sourceId === file.sourceId ? styles.sourceFileTabActive : ""}`}
-                    onClick={() => setActiveSourceId(file.sourceId)}
-                  >
-                    {file.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className={styles.sourceMeta}>
-              <FileCode2 size={16} strokeWidth={2} />
-              <span>{activeSourceFile?.filePath ?? meta.format}</span>
-            </div>
-
-            {kind === "codex" && activeSourceFile?.sourceId === "primary" && (
-              <p className={styles.sourceHintText}>{t("agentManagement.codexConfigSourceHint")}</p>
-            )}
-            {kind === "codex" && activeSourceFile?.sourceId === "auth" && (
-              <p className={styles.sourceHintText}>{t("agentManagement.codexAuthSourceHint")}</p>
-            )}
-            {kind === "openclaw" && activeSourceFile?.sourceId === "primary" && (
-              <p className={styles.sourceHintText}>
-                {t("agentManagement.openclawPrimarySourceHint")}
-              </p>
-            )}
-            {kind === "openclaw" && activeSourceFile?.sourceId === "auth-profiles" && (
-              <p className={styles.sourceHintText}>{t("agentManagement.openclawAuthSourceHint")}</p>
-            )}
-            {kind === "openclaw" && activeSourceFile?.sourceId === "models" && (
-              <p className={styles.sourceHintText}>
-                {t("agentManagement.openclawModelsSourceHint")}
-              </p>
-            )}
-
-            <textarea
-              className={styles.sourceTextarea}
-              value={sourceContent}
-              onChange={event =>
-                setSourceDrafts(current => ({
-                  ...current,
-                  [activeSourceFile?.sourceId ?? "primary"]: event.target.value,
-                }))
-              }
-              placeholder={sourcePlaceholder}
-              spellCheck={false}
-            />
-          </div>
-        )}
+        <AgentEditContent
+          kind={kind}
+          editMode={editMode}
+          formData={formData}
+          fallbackModelsText={fallbackModelsText}
+          showApiToken={showApiToken}
+          supportsTimeout={supportsTimeout}
+          timeoutText={timeoutText}
+          timeoutError={timeoutError}
+          sourceFiles={sourceFiles}
+          activeSourceFile={activeSourceFile}
+          sourceContent={sourceContent}
+          sourcePlaceholder={sourcePlaceholder}
+          metaFormat={meta.format}
+          dirtySourceIds={dirtySourceIds}
+          t={t}
+          onFormDataChange={setFormData}
+          onFallbackModelsTextChange={setFallbackModelsText}
+          onToggleApiTokenVisibility={() => setShowApiToken(current => !current)}
+          onTimeoutTextChange={setTimeoutText}
+          onSourceSelect={setActiveSourceId}
+          onSourceChange={value =>
+            setSourceDrafts(current => ({
+              ...current,
+              [activeSourceFile?.sourceId ?? "primary"]: value,
+            }))
+          }
+          onFormatCurrentFile={() =>
+            setSourceDrafts(current => ({
+              ...current,
+              [activeSourceFile?.sourceId ?? "primary"]: formatAgentSourceDraft(
+                kind,
+                current[activeSourceFile?.sourceId ?? "primary"] ?? ""
+              ),
+            }))
+          }
+          defaultOpenclawAgentId={DEFAULT_OPENCLAW_AGENT_ID}
+          defaultOpenclawProviderId={DEFAULT_OPENCLAW_PROVIDER_ID}
+          defaultOpenclawApiFormat={DEFAULT_OPENCLAW_API_FORMAT}
+        />
 
         <div className={styles.actions}>
           <Button variant="ghost" onClick={() => navigate("/agents")}>
@@ -653,7 +458,7 @@ export const AgentEditPage: React.FC = () => {
               variant="primary"
               icon={Save}
               loading={saveMode === "source"}
-              disabled={!isSourceDirty}
+              disabled={!isActiveSourceDirty}
               onClick={handleSaveSource}
             >
               {t("agentManagement.save")}

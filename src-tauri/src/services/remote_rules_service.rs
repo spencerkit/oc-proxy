@@ -18,7 +18,10 @@ use tauri::{AppHandle, Manager};
 
 /// Performs get local config updated at.
 fn get_local_config_updated_at(state: &SharedState) -> Option<String> {
-    let meta = std::fs::metadata(state.config_store.path()).ok()?;
+    let groups_db_path = state.config_store.path().with_file_name("providers.sqlite");
+    let meta = std::fs::metadata(&groups_db_path)
+        .or_else(|_| std::fs::metadata(state.config_store.path()))
+        .ok()?;
     let modified = meta.modified().ok()?;
     let dt: DateTime<Utc> = modified.into();
     Some(dt.to_rfc3339())
@@ -139,7 +142,7 @@ pub async fn pull_with_dir(
     }
 
     let (groups_len, saved, restarted, status) =
-        config_service::import_groups_payload(state, parsed).await?;
+        config_service::import_groups_payload(state, parsed, None).await?;
 
     Ok(RemoteRulesPullResult {
         ok: true,
@@ -154,4 +157,95 @@ pub async fn pull_with_dir(
         local_updated_at,
         remote_updated_at,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_state::AppState;
+    use crate::auth::RemoteAdminAuthStore;
+    use crate::integration_store::IntegrationStore;
+    use crate::log_store::LogStore;
+    use crate::models::AppInfo;
+    use crate::proxy::ProxyRuntime;
+    use crate::stats_store::StatsStore;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn test_shared_state() -> SharedState {
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let base_dir = std::env::temp_dir().join(format!("oc-proxy-remote-rules-{unique_id}"));
+        std::fs::create_dir_all(&base_dir).expect("temp dir should be created");
+
+        let config_store = crate::config_store::ConfigStore::new(base_dir.join("config.json"));
+        config_store
+            .initialize()
+            .expect("config store should initialize");
+
+        let integration_store = IntegrationStore::new(base_dir.join("integrations.json"));
+        integration_store
+            .initialize()
+            .expect("integration store should initialize");
+
+        let remote_admin_auth = RemoteAdminAuthStore::new(base_dir.join("remote-admin-auth.json"));
+        remote_admin_auth
+            .initialize()
+            .expect("remote admin auth should initialize");
+
+        let stats_store = StatsStore::new(base_dir.join("stats.sqlite"));
+        stats_store
+            .initialize()
+            .expect("stats store should initialize");
+
+        let runtime = ProxyRuntime::new(
+            config_store.shared_config(),
+            config_store.shared_revision(),
+            LogStore::new(64),
+            stats_store,
+        )
+        .expect("runtime should initialize");
+
+        Arc::new(AppState {
+            app_info: AppInfo {
+                name: "test".to_string(),
+                version: "0.0.0".to_string(),
+            },
+            config_store,
+            integration_store,
+            remote_admin_auth,
+            runtime,
+            renderer_ready: AtomicBool::new(false),
+        })
+    }
+
+    fn file_updated_at(path: &Path) -> String {
+        let meta = std::fs::metadata(path).expect("metadata should exist");
+        let modified = meta.modified().expect("mtime should exist");
+        let dt: DateTime<Utc> = modified.into();
+        dt.to_rfc3339()
+    }
+
+    #[test]
+    fn local_rules_timestamp_tracks_providers_db_not_config_json() {
+        let state = test_shared_state();
+        let config_path = state.config_store.path().to_path_buf();
+        let providers_db_path = config_path.with_file_name("providers.sqlite");
+        let config_raw = std::fs::read_to_string(&config_path).expect("config file should exist");
+
+        std::thread::sleep(Duration::from_millis(1200));
+        std::fs::write(&config_path, config_raw).expect("config file rewrite should succeed");
+
+        let config_updated_at = file_updated_at(&config_path);
+        let providers_updated_at = file_updated_at(&providers_db_path);
+        assert_ne!(config_updated_at, providers_updated_at);
+
+        assert_eq!(
+            get_local_config_updated_at(&state).expect("local timestamp should exist"),
+            providers_updated_at
+        );
+    }
 }

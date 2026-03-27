@@ -249,6 +249,14 @@
   outline-offset: 1px;
 }
 
+.sourceMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
 .sourceMeta {
   display: inline-flex;
   align-items: center;
@@ -300,6 +308,31 @@
   font-size: var(--text-xs);
   line-height: var(--leading-relaxed);
   color: var(--text-tertiary);
+}
+
+.sourceActionButton {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  padding: 6px 10px;
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.sourceActionButton:hover {
+  background: var(--surface-hover);
+  border-color: color-mix(in oklab, var(--accent) 30%, var(--border));
+}
+
+.sourceActionButton:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  outline-offset: 1px;
 }
 
 .sourceTextarea {

@@ -20,6 +20,9 @@ export type {
 // Proxy types
 export type {
   Group,
+  GroupFailoverConfig,
+  GroupImportMode,
+  GroupRuntimeStatus,
   LogEntry,
   LogEntryError,
   LogEntryPhase,
@@ -273,6 +276,16 @@ export interface IntegrationTarget {
   updatedAt: string
 }
 
+export interface OpenClawEditorConfig {
+  agentId: string
+  providerId: string
+  primaryModel?: string
+  fallbackModels: string[]
+  apiFormat?: string
+  baseUrl?: string
+  apiKey?: string
+}
+
 export interface AgentConfigFile {
   targetId: string
   kind: IntegrationClientKind
@@ -282,6 +295,7 @@ export interface AgentConfigFile {
   sourceFiles: AgentSourceFile[]
   updatedAt?: string
   parsedConfig?: AgentConfig
+  openclawEditor?: OpenClawEditorConfig
 }
 
 export interface AgentSourceFile {

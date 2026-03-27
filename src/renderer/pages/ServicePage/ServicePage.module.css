@@ -757,6 +757,28 @@
   background: color-mix(in oklab, var(--success) 18%, var(--surface));
 }
 
+.providerStateBadge {
+  max-width: 100%;
+}
+
+.providerStateBadgePreferred {
+  color: color-mix(in oklab, var(--accent) 82%, black);
+  border-color: color-mix(in oklab, var(--accent) 34%, transparent);
+  background: color-mix(in oklab, var(--accent) 14%, var(--surface));
+}
+
+.providerStateBadgeCurrent {
+  color: color-mix(in oklab, var(--success) 82%, black);
+  border-color: color-mix(in oklab, var(--success) 42%, transparent);
+  background: color-mix(in oklab, var(--success) 18%, var(--surface));
+}
+
+.providerStateBadgeFailover {
+  color: color-mix(in oklab, var(--warning) 88%, black);
+  border-color: color-mix(in oklab, var(--warning) 38%, transparent);
+  background: color-mix(in oklab, var(--warning) 18%, var(--surface));
+}
+
 .ruleItems li {
   display: flex;
   width: 100%;
@@ -1139,6 +1161,30 @@
   display: grid;
   align-content: start;
   gap: 6px;
+}
+
+.providerCatalogMetaRow {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.providerInlineMetaItem {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.providerCompactApiValue {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 .providerCatalogUsageRow {

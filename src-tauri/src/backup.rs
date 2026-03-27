@@ -76,6 +76,7 @@ mod tests {
                 quota: default_rule_quota_config(),
                 cost: default_rule_cost_config(),
             }],
+            failover: crate::models::default_group_failover_config(),
         }
     }
 

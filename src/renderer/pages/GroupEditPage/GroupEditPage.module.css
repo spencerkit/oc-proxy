@@ -34,6 +34,23 @@
   margin-bottom: var(--sp-2);
 }
 
+.checkboxRow {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.checkboxLabel input {
+  margin: 0;
+}
+
 .hint {
   margin-top: var(--sp-2);
   font-size: var(--text-xs);

@@ -14,6 +14,13 @@ export type RuleProtocol = "openai" | "openai_completion" | "anthropic"
 
 export type QuotaStatus = "ok" | "low" | "empty" | "unknown" | "unsupported" | "error"
 export type QuotaUnitType = "percentage" | "amount" | "tokens"
+export type GroupImportMode = "incremental" | "overwrite"
+
+export interface GroupFailoverConfig {
+  enabled: boolean
+  failureThreshold: number
+  cooldownSeconds: number
+}
 
 export interface QuotaMappingObject {
   path?: string
@@ -113,8 +120,16 @@ export interface Group {
   providerIds?: string[]
   activeProviderId: string | null
   providers: Provider[]
+  failover: GroupFailoverConfig
   activeRuleId?: string | null
   rules?: Provider[]
+}
+
+export interface GroupRuntimeStatus {
+  groupId: string
+  currentProviderId: string | null
+  failoverActiveProviderId: string | null
+  failoverActive: boolean
 }
 
 /**
@@ -126,6 +141,7 @@ export interface ProxyStatus {
   address: string | null
   lanAddress?: string | null
   metrics: ProxyMetrics
+  groupRuntime: GroupRuntimeStatus[]
 }
 
 export type { ProviderModelHealthSnapshot }

@@ -30,9 +30,19 @@ Debug 模式默认读取 `out/renderer`，可通过环境变量 `AOR_MANAGEMENT_
 - `POST /api/app/server/start`
 - `POST /api/app/server/stop`
 - `POST /api/app/renderer-ready`
-- `POST /api/app/renderer-error`  
+- `POST /api/app/renderer-error`
   Body: `{ kind, message, stack?, source? }`
 - `GET /api/app/clipboard-text`
+
+## 认证与远程管理
+
+- `GET /api/auth/session`
+- `POST /api/auth/login`
+  Body: `{ password }`
+- `POST /api/auth/logout`
+- `PUT /api/config/remote-admin-password`
+  Body: `{ password }`
+- `DELETE /api/config/remote-admin-password`
 
 ## 配置与备份
 
@@ -45,8 +55,12 @@ Debug 模式默认读取 `out/renderer`，可通过环境变量 `AOR_MANAGEMENT_
 - `GET /api/config/groups/export-json`  
   返回 `{ text, fileName, groupCount, charCount }`，用于浏览器下载/剪贴板场景。
 - `POST /api/config/groups/import`
-- `POST /api/config/groups/import-json`  
-  Body: `{ jsonText: string }`
+  - 与 `/api/config/groups/import-json` 使用相同请求体。
+  - Body: `{ jsonText: string, mode?: "incremental" | "overwrite" }`
+- `POST /api/config/groups/import-json`
+  Body: `{ jsonText: string, mode?: "incremental" | "overwrite" }`
+  - `incremental`：保留现有行为，按分组合并导入内容。
+  - `overwrite`：仅替换 `groups` 与派生出来的全局 `providers`；`server`、`compat`、`logging`、`ui`、`remoteGit` 等顶层配置保持不变。
 
 ## 远端规则同步
 
@@ -54,10 +68,11 @@ Debug 模式默认读取 `out/renderer`，可通过环境变量 `AOR_MANAGEMENT_
 
 - 在 headless 模式中，`/api/app/server/start` 与 `/api/app/server/stop` 会返回 400（不允许通过管理页面起停服务）。
 - 在 headless 模式中，不允许通过 `PUT /api/config` 修改 `server.port`（应在进程启动前指定端口）。
+- `POST /api/config/remote-rules/pull` 使用增量合并语义：命中的分组/Provider 会按远端内容更新，但现有本地分组的 failover 设置仍保留本地值。
 
-- `POST /api/config/remote-rules/upload`  
+- `POST /api/config/remote-rules/upload`
   Body: `{ force?: boolean }`
-- `POST /api/config/remote-rules/pull`  
+- `POST /api/config/remote-rules/pull`
   Body: `{ force?: boolean }`
 
 ## 日志与统计

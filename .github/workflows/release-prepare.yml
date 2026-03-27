@@ -36,8 +36,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.base_branch }}
+          ref: ${{ format('refs/heads/{0}', inputs.base_branch) }}
           fetch-depth: 0
+
+      - name: Normalize checked out base branch
+        run: |
+          CURRENT_BRANCH="$(git symbolic-ref HEAD --short)"
+          NORMALIZED_BRANCH="${CURRENT_BRANCH#heads/}"
+          if git rev-parse -q --verify "refs/tags/$NORMALIZED_BRANCH" >/dev/null; then
+            git tag -d "$NORMALIZED_BRANCH"
+          fi
+          if [ "$CURRENT_BRANCH" != "$NORMALIZED_BRANCH" ]; then
+            git switch "$NORMALIZED_BRANCH"
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -58,7 +69,9 @@ jobs:
 
       - name: Read version
         id: version
-        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Create release PR
         uses: peter-evans/create-pull-request@v6

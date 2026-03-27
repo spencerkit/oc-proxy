@@ -5,21 +5,36 @@
  * Provides logs selector and auto-refresh effect.
  */
 
-import { useCallback, useEffect } from "react"
+import { useCallback } from "react"
 import { useToast } from "@/contexts/ToastContext"
 import { clearLogsAction, logsErrorState, logsState, refreshLogsAction } from "@/store"
 import type { LogEntry } from "@/types"
 import { useActions, useRelaxValue } from "@/utils/relax"
 
 const LOGS_ACTIONS = [refreshLogsAction, clearLogsAction] as const
+const LOGS_ROUTE_PATH = "/logs"
+
+type LogsRefreshTab = "stats" | "logs"
 
 /**
- * Auto-refresh interval for logs (in milliseconds)
+ * Resolves whether logs and stats polling should run for the current route.
  */
-const LOGS_REFRESH_INTERVAL = 3000
+export function resolveLogsRefreshPlan(
+  pathname: string,
+  activeTab: LogsRefreshTab
+): {
+  pollLogs: boolean
+  pollStats: boolean
+} {
+  const isLogsRoute = pathname === LOGS_ROUTE_PATH
+  return {
+    pollLogs: isLogsRoute && activeTab === "logs",
+    pollStats: isLogsRoute,
+  }
+}
 
 /**
- * Hook for accessing server logs with auto-refresh
+ * Hook for accessing server logs
  *
  * @returns Object containing logs, refresh function, and clear function
  *
@@ -48,54 +63,6 @@ export function useLogs() {
     refreshLogs,
     clearLogs,
     error,
-    showToast: showToastMessage,
-  }
-}
-
-/**
- * Hook for accessing server logs with auto-refresh
- * Automatically refreshes logs at regular intervals
- *
- * @returns Object containing logs and clear function
- *
- * @example
- * const { logs, clearLogs } = useLogsAutoRefresh();
- *
- * // Logs automatically refresh every 3 seconds
- * return <LogList logs={logs} onClear={clearLogs} />;
- */
-export function useLogsAutoRefresh() {
-  const logs = useRelaxValue(logsState)
-  const [refreshLogs, clearLogs] = useActions(LOGS_ACTIONS)
-  const { showToast } = useToast()
-
-  // Auto-refresh effect
-  useEffect(() => {
-    // Initial refresh
-    refreshLogs()
-
-    // Set up interval for auto-refresh
-    const intervalId = setInterval(() => {
-      if (document.visibilityState !== "visible") return
-      refreshLogs()
-    }, LOGS_REFRESH_INTERVAL)
-
-    // Cleanup interval on unmount
-    return () => {
-      clearInterval(intervalId)
-    }
-  }, [refreshLogs])
-
-  const showToastMessage = useCallback(
-    (message: string, type?: "success" | "error" | "info" | "warning") => {
-      showToast(message, type)
-    },
-    [showToast]
-  )
-
-  return {
-    logs,
-    clearLogs,
     showToast: showToastMessage,
   }
 }

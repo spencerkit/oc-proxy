@@ -136,3 +136,17 @@ export function formatServerAddressForDisplay(baseUrl: string): string {
   const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80")
   return `${displayHost}:${port}`
 }
+
+/** Formats provider API address for compact inline metadata. */
+export function formatCompactUrlForDisplay(rawAddress: string): string {
+  const parsed = toHttpUrl(rawAddress)
+  if (!parsed) {
+    return rawAddress
+  }
+
+  const host = parsed.hostname.replace(/^\[|\]$/g, "")
+  const displayHost = host.includes(":") ? `[${host}]` : host
+  const defaultPort = parsed.protocol === "https:" ? "443" : "80"
+  const displayPort = parsed.port && parsed.port !== defaultPort ? `:${parsed.port}` : ""
+  return `${displayHost}${displayPort}`
+}

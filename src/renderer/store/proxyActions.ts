@@ -5,6 +5,7 @@ import type {
   Group,
   GroupBackupExportResult,
   GroupBackupImportResult,
+  GroupImportMode,
   ProviderModelHealthSnapshot,
   ProviderModelTestResult,
   ProxyConfig,
@@ -15,6 +16,7 @@ import type {
   StatsDimension,
 } from "@/types"
 import { bridge } from "@/utils/bridge"
+import { normalizeGroupFailoverConfig } from "@/utils/groupFailover"
 import {
   buildProviderModelHealthSnapshot,
   createProviderTestKey,
@@ -147,6 +149,7 @@ function normalizeGroup(
     rules: resolvedProviders,
     activeRuleId: activeProviderId,
     models: group.models ?? [],
+    failover: normalizeGroupFailoverConfig(group.failover),
   }
 }
 
@@ -231,6 +234,7 @@ function buildSaveConfigPayload(config: ProxyConfig): ProxyConfig {
         providerIds,
         providers: resolvedProviders,
         activeProviderId,
+        failover: normalizeGroupFailoverConfig(group.failover),
       } as Group
     }),
   }
@@ -449,48 +453,50 @@ export const exportGroupsToClipboardAction = action<void, Promise<GroupBackupExp
   }
 )
 
-export const importGroupsBackupAction = action<void, Promise<GroupBackupImportResult>>(
-  async store => {
-    try {
-      store.set(savingConfigState, true)
-      store.set(lastOperationErrorState, null)
-      const result = await bridge.importGroupsBackup()
+export const importGroupsBackupAction = action<
+  { mode?: GroupImportMode } | undefined,
+  Promise<GroupBackupImportResult>
+>(async (store, payload) => {
+  try {
+    const request = payload ?? {}
+    store.set(savingConfigState, true)
+    store.set(lastOperationErrorState, null)
+    const result = await bridge.importGroupsBackup(request.mode)
 
-      if (!result.canceled && result.config && result.status) {
-        const normalizedConfig = normalizeConfig(result.config)
-        store.set(configState, normalizedConfig)
-        store.set(statusState, result.status)
-        store.set(
-          providerModelHealthByProviderKeyState,
-          pruneProviderModelHealthSnapshots(
-            store.get(providerModelHealthByProviderKeyState),
-            normalizedConfig
-          )
+    if (!result.canceled && result.config && result.status) {
+      const normalizedConfig = normalizeConfig(result.config)
+      store.set(configState, normalizedConfig)
+      store.set(statusState, result.status)
+      store.set(
+        providerModelHealthByProviderKeyState,
+        pruneProviderModelHealthSnapshots(
+          store.get(providerModelHealthByProviderKeyState),
+          normalizedConfig
         )
-        store.set(savingConfigState, false)
-      } else {
-        store.set(savingConfigState, false)
-      }
-
-      return result
-    } catch (error) {
-      const errorMessage = getErrorMessage(error, "Failed to import group backup")
+      )
       store.set(savingConfigState, false)
-      store.set(lastOperationErrorState, errorMessage)
-      throw error
+    } else {
+      store.set(savingConfigState, false)
     }
+
+    return result
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, "Failed to import group backup")
+    store.set(savingConfigState, false)
+    store.set(lastOperationErrorState, errorMessage)
+    throw error
   }
-)
+})
 
 export const importGroupsFromJsonAction = action<
-  { jsonText: string },
+  { jsonText: string; mode?: GroupImportMode },
   Promise<GroupBackupImportResult>
 >(async (store, payload) => {
   try {
     const request = requirePayload(payload, "importGroupsFromJsonAction")
     store.set(savingConfigState, true)
     store.set(lastOperationErrorState, null)
-    const result = await bridge.importGroupsFromJson(request.jsonText)
+    const result = await bridge.importGroupsFromJson(request.jsonText, request.mode)
 
     if (!result.canceled && result.config && result.status) {
       const normalizedConfig = normalizeConfig(result.config)

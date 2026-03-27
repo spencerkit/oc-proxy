@@ -61,6 +61,20 @@ pub struct GroupBackupImportResult {
     pub status: Option<ProxyStatus>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum GroupImportMode {
+    Incremental,
+    Overwrite,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportGroupsRequest {
+    pub json_text: String,
+    pub mode: Option<GroupImportMode>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteRulesUploadResult {
@@ -139,6 +153,18 @@ pub struct AgentSourceFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OpenClawEditorConfigDto {
+    pub agent_id: String,
+    pub provider_id: String,
+    pub primary_model: Option<String>,
+    pub fallback_models: Vec<String>,
+    pub api_format: Option<String>,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentConfigFile {
     pub target_id: String,
     pub kind: IntegrationClientKind,
@@ -148,6 +174,7 @@ pub struct AgentConfigFile {
     pub source_files: Vec<AgentSourceFile>,
     pub updated_at: Option<String>,
     pub parsed_config: Option<AgentConfig>,
+    pub openclaw_editor: Option<OpenClawEditorConfigDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]

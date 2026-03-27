@@ -624,6 +624,7 @@ mod tests {
                 provider_ids: vec!["group-provider".to_string()],
                 active_provider_id: Some("group-provider".to_string()),
                 providers: vec![sample_provider("group-provider", "group-token")],
+                failover: crate::models::default_group_failover_config(),
             }],
         }
     }

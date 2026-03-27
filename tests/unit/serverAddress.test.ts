@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import {
+  formatCompactUrlForDisplay,
   formatServerAddressForDisplay,
   resolveReachableServerBaseUrl,
   resolveReachableServerBaseUrls,
@@ -46,4 +47,13 @@ test("resolveReachableServerBaseUrl falls back to config host and port", () => {
 
 test("formatServerAddressForDisplay keeps IPv6 brackets", () => {
   assert.equal(formatServerAddressForDisplay("http://[2001:db8::1]:8899"), "[2001:db8::1]:8899")
+})
+
+test("formatCompactUrlForDisplay strips protocol and path for provider card metadata", () => {
+  assert.equal(
+    formatCompactUrlForDisplay("https://api.openai.com/v1/responses?foo=bar"),
+    "api.openai.com"
+  )
+  assert.equal(formatCompactUrlForDisplay("http://localhost:8899/v1"), "localhost:8899")
+  assert.equal(formatCompactUrlForDisplay("bad url value"), "bad url value")
 })

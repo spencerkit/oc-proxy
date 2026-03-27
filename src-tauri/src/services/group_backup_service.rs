@@ -4,7 +4,7 @@
 
 use crate::app_state::SharedState;
 use crate::backup::{backup_default_file_name, create_groups_backup_payload};
-use crate::models::{GroupBackupExportResult, GroupBackupImportResult};
+use crate::models::{GroupBackupExportResult, GroupBackupImportResult, GroupImportMode};
 use crate::services::config_service;
 use crate::services::{AppError, AppResult};
 use serde_json::Value;
@@ -113,6 +113,7 @@ pub async fn export_groups_to_clipboard(
 pub async fn import_groups_from_file(
     state: &SharedState,
     app: &AppHandle,
+    mode: Option<GroupImportMode>,
 ) -> AppResult<GroupBackupImportResult> {
     let selected = app
         .dialog()
@@ -147,6 +148,7 @@ pub async fn import_groups_from_file(
         parsed,
         "file",
         Some(path_buf.to_string_lossy().to_string()),
+        mode,
     )
     .await
 }
@@ -155,11 +157,12 @@ pub async fn import_groups_from_file(
 pub async fn import_groups_from_json_text(
     state: &SharedState,
     json_text: String,
+    mode: Option<GroupImportMode>,
 ) -> AppResult<GroupBackupImportResult> {
     if json_text.trim().is_empty() {
         return Err(AppError::validation("Invalid JSON text"));
     }
     let parsed = serde_json::from_str::<Value>(&json_text)
         .map_err(|_| AppError::validation("Invalid JSON text"))?;
-    config_service::import_groups_with_source(state, parsed, "json", None).await
+    config_service::import_groups_with_source(state, parsed, "json", None, mode).await
 }

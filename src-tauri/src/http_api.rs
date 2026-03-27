@@ -10,7 +10,7 @@ use crate::auth::{
 use crate::backup::{backup_default_file_name, create_groups_backup_payload};
 use crate::models::{
     AgentConfig, AgentConfigFile, AppInfo, AuthSessionStatus, ClipboardTextResult,
-    GroupBackupExportResult, GroupBackupImportResult, GroupsExportJsonResult,
+    GroupBackupExportResult, GroupBackupImportResult, GroupsExportJsonResult, ImportGroupsRequest,
     IntegrationClientKind, IntegrationTarget, IntegrationWriteResult, LogEntry,
     ProviderModelTestResult, ProxyConfig, ProxyStatus, RemoteRulesPullResult,
     RemoteRulesUploadResult, RuleCardStatsItem, RuleQuotaConfig, RuleQuotaSnapshot,
@@ -766,29 +766,31 @@ async fn config_export_groups_json(
 
 async fn config_import_groups(
     State(state): State<ServiceState>,
+    Json(payload): Json<ImportGroupsRequest>,
 ) -> ApiResult<GroupBackupImportResult> {
     let shared = require_shared_state(&state)?;
-    let app = require_app_handle(&state)?;
-    let result = group_backup_service::import_groups_from_file(&shared, &app)
-        .await
-        .map_err(ApiError::from)?;
+    let result = group_backup_service::import_groups_from_json_text(
+        &shared,
+        payload.json_text,
+        payload.mode,
+    )
+    .await
+    .map_err(ApiError::from)?;
     Ok(Json(result))
-}
-
-#[derive(Debug, Deserialize)]
-struct ImportGroupsJsonRequest {
-    #[serde(rename = "jsonText")]
-    json_text: String,
 }
 
 async fn config_import_groups_json(
     State(state): State<ServiceState>,
-    Json(payload): Json<ImportGroupsJsonRequest>,
+    Json(payload): Json<ImportGroupsRequest>,
 ) -> ApiResult<GroupBackupImportResult> {
     let shared = require_shared_state(&state)?;
-    let result = group_backup_service::import_groups_from_json_text(&shared, payload.json_text)
-        .await
-        .map_err(ApiError::from)?;
+    let result = group_backup_service::import_groups_from_json_text(
+        &shared,
+        payload.json_text,
+        payload.mode,
+    )
+    .await
+    .map_err(ApiError::from)?;
     Ok(Json(result))
 }
 

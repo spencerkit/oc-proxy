@@ -22,6 +22,7 @@ import {
   writeGroupEntryAction,
 } from "@/store"
 import type { Group, IntegrationClientKind, IntegrationTarget, ProxyConfig } from "@/types"
+import { normalizeGroupFailoverConfig } from "@/utils/groupFailover"
 import { createProviderTestKey, formatProviderLatency } from "@/utils/providerTesting"
 import { useActions, useRelaxValue } from "@/utils/relax"
 import { isHeadlessHttpRuntime } from "@/utils/runtime"
@@ -135,6 +136,10 @@ export const ServicePage: React.FC = () => {
       })
     )
   }, [activeGroup, providerModelHealthByProviderKey])
+  const activeGroupRuntime = useMemo(() => {
+    if (!activeGroup) return null
+    return status?.groupRuntime.find(item => item.groupId === activeGroup.id) ?? null
+  }, [activeGroup, status])
   const associateCandidates = useMemo(() => {
     const normalized = associateProviderSearch.trim().toLowerCase()
     const candidates = globalProviders.filter(
@@ -252,6 +257,7 @@ export const ServicePage: React.FC = () => {
       providerIds: [],
       activeProviderId: null,
       providers: [],
+      failover: normalizeGroupFailoverConfig(),
     }
 
     const newConfig: ProxyConfig = {
@@ -966,6 +972,7 @@ export const ServicePage: React.FC = () => {
             <ProviderList
               providers={activeGroup.providers}
               activeProviderId={activeGroup.activeProviderId}
+              groupRuntime={activeGroupRuntime}
               onActivate={handleActivateProvider}
               activatingProviderId={activatingProviderId}
               onTestModel={handleTestProviderModel}

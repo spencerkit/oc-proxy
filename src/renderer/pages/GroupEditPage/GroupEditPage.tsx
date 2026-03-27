@@ -6,6 +6,7 @@ import { Button, Input } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { configState, saveConfigAction } from "@/store"
 import type { ProxyConfig } from "@/types"
+import { normalizeGroupFailoverConfig } from "@/utils/groupFailover"
 import { useActions, useRelaxValue } from "@/utils/relax"
 import styles from "./GroupEditPage.module.css"
 
@@ -22,6 +23,9 @@ export const GroupEditPage: React.FC = () => {
   const group = config?.groups.find(item => item.id === groupId)
 
   const [name, setName] = useState("")
+  const [failoverEnabled, setFailoverEnabled] = useState(false)
+  const [failoverFailureThreshold, setFailoverFailureThreshold] = useState("3")
+  const [failoverCooldownSeconds, setFailoverCooldownSeconds] = useState("300")
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -33,6 +37,10 @@ export const GroupEditPage: React.FC = () => {
       return
     }
     setName(group.name)
+    const failover = normalizeGroupFailoverConfig(group.failover)
+    setFailoverEnabled(failover.enabled)
+    setFailoverFailureThreshold(String(failover.failureThreshold))
+    setFailoverCooldownSeconds(String(failover.cooldownSeconds))
     setLoading(false)
   }, [group, config, navigate, showToast, t])
 
@@ -44,6 +52,32 @@ export const GroupEditPage: React.FC = () => {
       return
     }
 
+    const parsedFailureThreshold = Number.parseInt(failoverFailureThreshold, 10)
+    if (
+      !/^\d+$/.test(failoverFailureThreshold) ||
+      !Number.isInteger(parsedFailureThreshold) ||
+      parsedFailureThreshold < 1
+    ) {
+      showToast(
+        t("validation.invalidFormat", { field: t("groupEditPage.failoverFailureThreshold") }),
+        "error"
+      )
+      return
+    }
+
+    const parsedCooldownSeconds = Number.parseInt(failoverCooldownSeconds, 10)
+    if (
+      !/^\d+$/.test(failoverCooldownSeconds) ||
+      !Number.isInteger(parsedCooldownSeconds) ||
+      parsedCooldownSeconds < 0
+    ) {
+      showToast(
+        t("validation.invalidFormat", { field: t("groupEditPage.failoverCooldownSeconds") }),
+        "error"
+      )
+      return
+    }
+
     const nextConfig: ProxyConfig = {
       ...config,
       groups: config.groups.map(item => {
@@ -51,6 +85,11 @@ export const GroupEditPage: React.FC = () => {
         return {
           ...item,
           name: name.trim(),
+          failover: {
+            enabled: failoverEnabled,
+            failureThreshold: parsedFailureThreshold,
+            cooldownSeconds: parsedCooldownSeconds,
+          },
         }
       }),
     }
@@ -112,6 +151,49 @@ export const GroupEditPage: React.FC = () => {
               placeholder={t("modal.groupNamePlaceholder")}
             />
             <p className={styles.hint}>{t("groupEditPage.groupNameHint")}</p>
+          </div>
+        </div>
+
+        <div className={styles.section}>
+          <h2 className={styles.sectionTitle}>{t("groupEditPage.sectionFailover")}</h2>
+
+          <div className={styles.checkboxRow}>
+            <label className={styles.checkboxLabel} htmlFor="failoverEnabled">
+              <input
+                id="failoverEnabled"
+                type="checkbox"
+                checked={failoverEnabled}
+                onChange={e => setFailoverEnabled(e.target.checked)}
+              />
+              <span>{t("groupEditPage.failoverEnabled")}</span>
+            </label>
+            <p className={styles.hint}>{t("groupEditPage.failoverEnabledHint")}</p>
+          </div>
+
+          <div className={styles.formGroup}>
+            <label htmlFor="failoverFailureThreshold">
+              {t("groupEditPage.failoverFailureThreshold")}
+            </label>
+            <Input
+              id="failoverFailureThreshold"
+              type="number"
+              min={1}
+              value={failoverFailureThreshold}
+              onChange={e => setFailoverFailureThreshold(e.target.value)}
+            />
+          </div>
+
+          <div className={styles.formGroup}>
+            <label htmlFor="failoverCooldownSeconds">
+              {t("groupEditPage.failoverCooldownSeconds")}
+            </label>
+            <Input
+              id="failoverCooldownSeconds"
+              type="number"
+              min={0}
+              value={failoverCooldownSeconds}
+              onChange={e => setFailoverCooldownSeconds(e.target.value)}
+            />
           </div>
         </div>
 

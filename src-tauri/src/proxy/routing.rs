@@ -2,8 +2,9 @@
 //! Path and rule resolution helpers for proxy routing.
 //! Normalizes entry endpoints, selects upstream protocol paths, and computes final upstream URL.
 
+use super::failover::{self, FailoverConfigSnapshot, FailoverRouteDecision};
 use super::ServiceState;
-use crate::models::{ProxyConfig, Rule, RuleProtocol};
+use crate::models::{GroupFailoverConfig, ProxyConfig, Rule, RuleProtocol};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -34,8 +35,13 @@ pub(super) struct PathEntry {
 
 #[derive(Clone)]
 pub(super) struct ActiveRoute {
+    pub group_id: String,
     pub group_name: String,
     pub group_models: Vec<String>,
+    pub provider_ids: Vec<String>,
+    pub preferred_provider_id: String,
+    pub providers_by_id: HashMap<String, Rule>,
+    pub failover: GroupFailoverConfig,
     pub rule: Rule,
 }
 
@@ -188,6 +194,107 @@ pub(super) fn refresh_route_index_if_needed(state: &ServiceState) -> Result<(), 
     Ok(())
 }
 
+/// Select the current route provider for a group using runtime failover state.
+pub(super) fn select_route_provider(
+    state: &ServiceState,
+    group_id: &str,
+    preferred_provider_id: &str,
+    provider_ids: &[String],
+    config: &FailoverConfigSnapshot,
+) -> Result<FailoverRouteDecision, String> {
+    state
+        .failover_state
+        .write()
+        .map_err(|_| "failover state lock poisoned".to_string())
+        .map(|mut runtime| {
+            failover::select_provider(
+                &mut runtime,
+                group_id,
+                preferred_provider_id,
+                provider_ids,
+                config,
+            )
+        })
+}
+
+/// Record a provider-side failure for one group/provider pair.
+pub(super) fn record_route_provider_failure(
+    state: &ServiceState,
+    group_id: &str,
+    provider_id: &str,
+    provider_ids: &[String],
+    config: &FailoverConfigSnapshot,
+) -> Result<(), String> {
+    state
+        .failover_state
+        .write()
+        .map_err(|_| "failover state lock poisoned".to_string())
+        .map(|mut runtime| {
+            failover::record_provider_failure(
+                &mut runtime,
+                group_id,
+                provider_id,
+                provider_ids,
+                config,
+                chrono::Utc::now(),
+            )
+        })
+}
+
+/// Record a successful provider request and reset that provider's consecutive failures.
+pub(super) fn record_route_provider_success(
+    state: &ServiceState,
+    group_id: &str,
+    provider_id: &str,
+) -> Result<(), String> {
+    state
+        .failover_state
+        .write()
+        .map_err(|_| "failover state lock poisoned".to_string())
+        .map(|mut runtime| failover::record_provider_success(&mut runtime, group_id, provider_id))
+}
+
+/// Check whether the active failover cooldown has expired for a group.
+pub(super) fn failover_cooldown_expired(
+    state: &ServiceState,
+    group_id: &str,
+) -> Result<bool, String> {
+    state
+        .failover_state
+        .read()
+        .map_err(|_| "failover state lock poisoned".to_string())
+        .map(|runtime| {
+            failover::is_failover_cooldown_expired(&runtime, group_id, chrono::Utc::now())
+        })
+}
+
+pub(super) fn resolve_runtime_active_route(
+    state: &ServiceState,
+    route: &ActiveRoute,
+) -> Result<ActiveRoute, String> {
+    let failover_config = FailoverConfigSnapshot {
+        enabled: route.failover.enabled,
+        failure_threshold: route.failover.failure_threshold,
+        cooldown_seconds: route.failover.cooldown_seconds,
+    };
+    let decision = select_route_provider(
+        state,
+        &route.group_id,
+        &route.preferred_provider_id,
+        &route.provider_ids,
+        &failover_config,
+    )?;
+    let rule = route
+        .providers_by_id
+        .get(&decision.provider_id)
+        .cloned()
+        .ok_or_else(|| format!("Failover provider {} is missing", decision.provider_id))?;
+
+    let mut resolved = route.clone();
+    resolved.rule = rule;
+    Ok(resolved)
+}
+
 /// Build a fast lookup table `group_id -> active route resolution`.
 ///
 /// The index carries three states so request handling can distinguish:
@@ -205,8 +312,18 @@ pub(super) fn build_route_index(config: &ProxyConfig) -> RouteIndex {
                     .find(|rule| rule.id == *active_rule_id)
                 {
                     Some(rule) => RouteResolution::Ready(ActiveRoute {
+                        group_id: group.id.clone(),
                         group_name: group.name.clone(),
                         group_models: group.models.clone(),
+                        provider_ids: group.provider_ids.clone(),
+                        preferred_provider_id: active_rule_id.clone(),
+                        providers_by_id: group
+                            .providers
+                            .iter()
+                            .cloned()
+                            .map(|provider| (provider.id.clone(), provider))
+                            .collect(),
+                        failover: group.failover.clone(),
                         rule: rule.clone(),
                     }),
                     None => RouteResolution::MissingActiveRule {

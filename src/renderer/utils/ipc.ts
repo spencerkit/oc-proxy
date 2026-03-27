@@ -6,6 +6,7 @@ import type {
   ClipboardTextResult,
   GroupBackupExportResult,
   GroupBackupImportResult,
+  GroupImportMode,
   IntegrationClientKind,
   IntegrationTarget,
   IntegrationWriteResult,
@@ -126,12 +127,16 @@ export const ipc = {
     return getInvoke()<GroupBackupExportResult>("config_export_groups_clipboard")
   },
 
-  importGroupsBackup(): Promise<GroupBackupImportResult> {
-    return getInvoke()<GroupBackupImportResult>("config_import_groups")
+  importGroupsBackup(mode?: GroupImportMode): Promise<GroupBackupImportResult> {
+    const args: Record<string, unknown> = {}
+    if (mode) args.mode = mode
+    return getInvoke()<GroupBackupImportResult>("config_import_groups", args)
   },
 
-  importGroupsFromJson(jsonText: string): Promise<GroupBackupImportResult> {
-    return getInvoke()<GroupBackupImportResult>("config_import_groups_json", { jsonText })
+  importGroupsFromJson(jsonText: string, mode?: GroupImportMode): Promise<GroupBackupImportResult> {
+    const args: Record<string, unknown> = { jsonText }
+    if (mode) args.mode = mode
+    return getInvoke()<GroupBackupImportResult>("config_import_groups_json", args)
   },
 
   remoteRulesUpload(force?: boolean): Promise<RemoteRulesUploadResult> {

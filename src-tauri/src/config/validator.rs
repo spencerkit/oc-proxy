@@ -121,7 +121,47 @@ mod tests {
     use crate::domain::entities::{
         default_rule_cost_config, default_rule_quota_config, Group, Rule, RuleProtocol,
     };
+    use serde_json::json;
     use std::collections::HashMap;
+
+    #[test]
+    fn group_deserializes_failover_config() {
+        let raw = json!({
+            "id": "dev",
+            "name": "Dev",
+            "models": [],
+            "providerIds": ["p1"],
+            "activeProviderId": "p1",
+            "providers": [],
+            "failover": {
+                "enabled": true,
+                "failureThreshold": 3,
+                "cooldownSeconds": 60
+            }
+        });
+
+        let group: Group = serde_json::from_value(raw).expect("group should deserialize");
+        assert!(group.failover.enabled);
+        assert_eq!(group.failover.failure_threshold, 3);
+        assert_eq!(group.failover.cooldown_seconds, 60);
+    }
+
+    #[test]
+    fn group_failover_defaults_when_config_absent() {
+        let raw = json!({
+            "id": "dev",
+            "name": "Dev",
+            "models": [],
+            "providerIds": ["p1"],
+            "activeProviderId": "p1",
+            "providers": []
+        });
+
+        let group: Group = serde_json::from_value(raw).expect("group should deserialize");
+        assert!(!group.failover.enabled);
+        assert_eq!(group.failover.failure_threshold, 3);
+        assert_eq!(group.failover.cooldown_seconds, 300);
+    }
 
     #[test]
     /// Performs default config validates.
@@ -164,6 +204,7 @@ mod tests {
                 quota: default_rule_quota_config(),
                 cost: default_rule_cost_config(),
             }],
+            failover: crate::models::default_group_failover_config(),
         }];
 
         let err = validate_config(&cfg).expect_err("validation should fail");

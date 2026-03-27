@@ -124,14 +124,17 @@ export const bridge = {
     return withBridge(httpApi.exportGroupsToClipboard, ipc.exportGroupsToClipboard)
   },
 
-  importGroupsBackup() {
-    return withBridge(httpApi.importGroupsBackup, ipc.importGroupsBackup)
+  importGroupsBackup(mode?: import("@/types").GroupImportMode) {
+    return withBridge(
+      () => httpApi.importGroupsBackup(mode),
+      () => ipc.importGroupsBackup(mode)
+    )
   },
 
-  importGroupsFromJson(jsonText: string) {
+  importGroupsFromJson(jsonText: string, mode?: import("@/types").GroupImportMode) {
     return withBridge(
-      () => httpApi.importGroupsFromJson(jsonText),
-      () => ipc.importGroupsFromJson(jsonText)
+      () => httpApi.importGroupsFromJson(jsonText, mode),
+      () => ipc.importGroupsFromJson(jsonText, mode)
     )
   },
 

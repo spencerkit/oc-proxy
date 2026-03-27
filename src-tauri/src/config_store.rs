@@ -4,7 +4,9 @@
 
 use crate::config::migrator::migrate_config;
 use crate::config::schema::normalize_config;
-use crate::models::{default_config, validate_config, Group, ProxyConfig, Rule};
+use crate::models::{
+    default_config, default_group_failover_config, validate_config, Group, ProxyConfig, Rule,
+};
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use std::collections::{HashMap, HashSet};
@@ -51,6 +53,7 @@ impl ConfigStore {
         }
         self.reopen_groups_db()?;
         self.initialize_groups_db()?;
+        self.migrate_group_records_schema_if_needed()?;
         self.migrate_provider_records_schema_if_needed()?;
 
         if !self.file_path.exists() {
@@ -140,6 +143,7 @@ impl ConfigStore {
                 models_json TEXT NOT NULL,
                 active_provider_id TEXT,
                 provider_ids_json TEXT NOT NULL,
+                group_json TEXT,
                 updated_at INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS provider_records (
@@ -149,6 +153,22 @@ impl ConfigStore {
             );",
         )
         .map_err(|e| format!("create groups db schema failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Migrates legacy group table schema to include serialized group payload storage.
+    fn migrate_group_records_schema_if_needed(&self) -> Result<(), String> {
+        let conn = self
+            .groups_db
+            .lock()
+            .map_err(|_| "groups db lock poisoned".to_string())?;
+        let group_columns = table_columns(&conn, "group_records")?;
+        if group_columns.contains("group_json") {
+            return Ok(());
+        }
+
+        conn.execute("ALTER TABLE group_records ADD COLUMN group_json TEXT", [])
+            .map_err(|e| format!("migrate group_records schema failed: {e}"))?;
         Ok(())
     }
 
@@ -348,6 +368,7 @@ fn normalize_groups_and_providers(
             provider_ids,
             active_provider_id,
             providers: providers_for_group,
+            failover: group.failover,
         });
     }
 
@@ -409,14 +430,16 @@ fn persist_groups_and_providers(
         let provider_ids_json = serde_json::to_string(&group.provider_ids)
             .map_err(|e| format!("serialize provider ids failed: {e}"))?;
         tx.execute(
-            "INSERT INTO group_records(group_id, group_name, models_json, active_provider_id, provider_ids_json, updated_at)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO group_records(group_id, group_name, models_json, active_provider_id, provider_ids_json, group_json, updated_at)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 group.id,
                 group.name,
                 models_json,
                 group.active_provider_id,
                 provider_ids_json,
+                serde_json::to_string(group)
+                    .map_err(|e| format!("serialize group failed: {e}"))?,
                 now
             ],
         )
@@ -469,46 +492,71 @@ fn load_groups_and_providers_from_relational_tables(
     }
 
     let group_columns = table_columns(conn, "group_records")?;
-    let group_query = select_records_with_soft_delete_filter(
-        "SELECT group_id, group_name, models_json, active_provider_id, provider_ids_json FROM group_records",
-        &group_columns,
-        Some("ORDER BY rowid ASC"),
-    );
+    let group_query = if group_columns.contains("group_json") {
+        select_records_with_soft_delete_filter(
+            "SELECT group_json FROM group_records",
+            &group_columns,
+            Some("ORDER BY rowid ASC"),
+        )
+    } else {
+        select_records_with_soft_delete_filter(
+            "SELECT group_id, group_name, models_json, active_provider_id, provider_ids_json FROM group_records",
+            &group_columns,
+            Some("ORDER BY rowid ASC"),
+        )
+    };
     let mut group_stmt = conn
         .prepare(&group_query)
         .map_err(|e| format!("prepare group_records query failed: {e}"))?;
-    let group_rows = group_stmt
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })
-        .map_err(|e| format!("query group_records failed: {e}"))?;
-
     let mut groups = Vec::new();
-    for row in group_rows {
-        let (group_id, group_name, models_json, active_provider_id, provider_ids_json) =
-            row.map_err(|e| format!("read group_records row failed: {e}"))?;
-        let models = serde_json::from_str::<Vec<String>>(&models_json)
-            .map_err(|e| format!("parse models_json failed: {e}"))?;
-        let provider_ids = serde_json::from_str::<Vec<String>>(&provider_ids_json)
-            .map_err(|e| format!("parse provider_ids_json failed: {e}"))?;
-        let providers_for_group = provider_ids
-            .iter()
-            .filter_map(|provider_id| provider_map.get(provider_id).cloned())
-            .collect();
-        groups.push(Group {
-            id: group_id,
-            name: group_name,
-            models,
-            provider_ids,
-            active_provider_id,
-            providers: providers_for_group,
-        });
+    if group_columns.contains("group_json") {
+        let group_rows = group_stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| format!("query group_records failed: {e}"))?;
+        for row in group_rows {
+            let raw_group_json = row.map_err(|e| format!("read group_records row failed: {e}"))?;
+            let mut group = serde_json::from_str::<Group>(&raw_group_json)
+                .map_err(|e| format!("parse group_json failed: {e}"))?;
+            group.providers = group
+                .provider_ids
+                .iter()
+                .filter_map(|provider_id| provider_map.get(provider_id).cloned())
+                .collect();
+            groups.push(group);
+        }
+    } else {
+        let group_rows = group_stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(|e| format!("query group_records failed: {e}"))?;
+        for row in group_rows {
+            let (group_id, group_name, models_json, active_provider_id, provider_ids_json) =
+                row.map_err(|e| format!("read group_records row failed: {e}"))?;
+            let models = serde_json::from_str::<Vec<String>>(&models_json)
+                .map_err(|e| format!("parse models_json failed: {e}"))?;
+            let provider_ids = serde_json::from_str::<Vec<String>>(&provider_ids_json)
+                .map_err(|e| format!("parse provider_ids_json failed: {e}"))?;
+            let providers_for_group = provider_ids
+                .iter()
+                .filter_map(|provider_id| provider_map.get(provider_id).cloned())
+                .collect();
+            groups.push(Group {
+                id: group_id,
+                name: group_name,
+                models,
+                provider_ids,
+                active_provider_id,
+                providers: providers_for_group,
+                failover: default_group_failover_config(),
+            });
+        }
     }
 
     Ok((groups, providers))
@@ -584,6 +632,7 @@ fn load_groups_from_legacy_relational_tables(conn: &Connection) -> Result<Vec<Gr
             provider_ids,
             active_provider_id,
             providers,
+            failover: default_group_failover_config(),
         });
     }
     Ok(groups)
@@ -670,6 +719,7 @@ mod tests {
                 quota: default_rule_quota_config(),
                 cost: default_rule_cost_config(),
             }],
+            failover: default_group_failover_config(),
         }
     }
 
@@ -743,6 +793,33 @@ mod tests {
     }
 
     #[test]
+    fn initialize_loads_group_failover_config_from_sqlite() {
+        let temp_dir = std::env::temp_dir().join(format!("config-store-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let config_path = temp_dir.join("config.json");
+
+        let mut cfg = default_config();
+        let mut group = sample_group();
+        group.failover.enabled = true;
+        group.failover.failure_threshold = 5;
+        group.failover.cooldown_seconds = 90;
+        cfg.groups = vec![group];
+        let raw = serde_json::to_string_pretty(&cfg).expect("serialize config");
+        std::fs::write(&config_path, raw).expect("write config");
+
+        let first_store = ConfigStore::new(config_path.clone());
+        first_store.initialize().expect("first initialize");
+
+        let second_store = ConfigStore::new(config_path.clone());
+        second_store.initialize().expect("second initialize");
+        let loaded = second_store.get();
+        assert_eq!(loaded.groups.len(), 1);
+        assert!(loaded.groups[0].failover.enabled);
+        assert_eq!(loaded.groups[0].failover.failure_threshold, 5);
+        assert_eq!(loaded.groups[0].failover.cooldown_seconds, 90);
+    }
+
+    #[test]
     /// Initializes loads groups from sqlite when config groups empty for this module's workflow.
     fn initialize_loads_groups_from_sqlite_when_config_groups_empty() {
         let temp_dir = std::env::temp_dir().join(format!("config-store-test-{}", Uuid::new_v4()));
@@ -811,6 +888,7 @@ mod tests {
             provider_ids: vec!["provider-1".to_string()],
             active_provider_id: Some("provider-1".to_string()),
             providers: vec![linked_provider.clone(), stale_provider],
+            failover: default_group_failover_config(),
         }];
 
         let normalized = normalize_config_for_storage(cfg).expect("normalize config");
@@ -835,6 +913,7 @@ mod tests {
             provider_ids: vec![],
             active_provider_id: Some("provider-1".to_string()),
             providers: vec![linked_provider],
+            failover: default_group_failover_config(),
         }];
 
         let normalized = normalize_config_for_storage(cfg).expect("normalize config");

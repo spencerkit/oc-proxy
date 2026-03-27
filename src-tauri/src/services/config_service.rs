@@ -6,7 +6,8 @@ use crate::app_state::{apply_launch_on_startup_setting, sync_runtime_config, Sha
 use crate::backup::extract_groups_from_import_payload;
 use crate::domain::entities::Group;
 use crate::models::{
-    AuthSessionStatus, GroupBackupImportResult, ProxyConfig, ProxyStatus, SaveConfigResult,
+    AuthSessionStatus, GroupBackupImportResult, GroupImportMode, ProxyConfig, ProxyStatus,
+    SaveConfigResult,
 };
 use crate::services::{AppError, AppResult};
 use serde_json::Value;
@@ -86,17 +87,27 @@ pub async fn save_config(
 pub async fn import_groups_payload(
     state: &SharedState,
     parsed: Value,
+    mode: Option<GroupImportMode>,
 ) -> AppResult<(usize, ProxyConfig, bool, ProxyStatus)> {
     let imported_groups =
         extract_groups_from_import_payload(&parsed).map_err(AppError::validation)?;
+    let imported_group_count = imported_groups.len();
     let prev = state.config_store.get();
     let mut next = prev.clone();
-    next.groups = merge_imported_groups(&prev.groups, &imported_groups);
+    match mode.unwrap_or(GroupImportMode::Incremental) {
+        GroupImportMode::Incremental => {
+            next.groups = merge_imported_groups(&prev.groups, &imported_groups);
+        }
+        GroupImportMode::Overwrite => {
+            next.groups = imported_groups;
+            next.providers = vec![];
+        }
+    }
 
     let saved = state.config_store.save_config(next)?;
     let (restarted, status) = sync_runtime_config(state, prev, saved.clone()).await?;
 
-    Ok((imported_groups.len(), saved, restarted, status))
+    Ok((imported_group_count, saved, restarted, status))
 }
 
 /// Performs import groups with source.
@@ -105,8 +116,9 @@ pub async fn import_groups_with_source(
     parsed: Value,
     source: &str,
     file_path: Option<String>,
+    mode: Option<GroupImportMode>,
 ) -> AppResult<GroupBackupImportResult> {
-    let (groups_len, saved, restarted, status) = import_groups_payload(state, parsed).await?;
+    let (groups_len, saved, restarted, status) = import_groups_payload(state, parsed, mode).await?;
 
     Ok(GroupBackupImportResult {
         ok: true,
@@ -215,6 +227,7 @@ fn merge_group_by_provider_name(current: &Group, imported: &Group) -> Group {
             .collect(),
         active_provider_id: next_active_provider_id,
         providers,
+        failover: current.failover.clone(),
     }
 }
 
@@ -277,14 +290,17 @@ fn provider_name_key(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::app_state::AppState;
+    use crate::config::schema::default_config;
     use crate::domain::entities::{
-        default_rule_cost_config, default_rule_quota_config, Rule, RuleProtocol,
+        default_group_failover_config, default_rule_cost_config, default_rule_quota_config, Rule,
+        RuleProtocol,
     };
     use crate::integration_store::IntegrationStore;
     use crate::log_store::LogStore;
-    use crate::models::AppInfo;
+    use crate::models::{AppInfo, GroupImportMode};
     use crate::proxy::ProxyRuntime;
     use crate::stats_store::StatsStore;
+    use serde_json::json;
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
@@ -318,6 +334,7 @@ mod tests {
                 .collect(),
             active_provider_id: active.map(|v| v.to_string()),
             providers,
+            failover: default_group_failover_config(),
         }
     }
 
@@ -417,6 +434,36 @@ mod tests {
     }
 
     #[test]
+    /// Performs import merge preserves current failover config.
+    fn import_merge_preserves_current_failover_config() {
+        let current = vec![Group {
+            failover: crate::domain::entities::GroupFailoverConfig {
+                enabled: true,
+                failure_threshold: 4,
+                cooldown_seconds: 90,
+            },
+            ..group(
+                "group-a",
+                "Local",
+                Some("p-local"),
+                vec![provider("p-local", "alpha", "old-model")],
+            )
+        }];
+        let imported = vec![group(
+            "group-a",
+            "Imported",
+            Some("p-import"),
+            vec![provider("p-import", "alpha", "new-model")],
+        )];
+
+        let merged = merge_imported_groups(&current, &imported);
+        assert_eq!(merged.len(), 1);
+        assert!(merged[0].failover.enabled);
+        assert_eq!(merged[0].failover.failure_threshold, 4);
+        assert_eq!(merged[0].failover.cooldown_seconds, 90);
+    }
+
+    #[test]
     /// Performs import merge keeps local groups missing in import.
     fn import_merge_keeps_local_groups_missing_in_import() {
         let current = vec![group(
@@ -448,5 +495,169 @@ mod tests {
         assert!(status.remote_request);
         assert!(status.password_configured);
         assert!(status.authenticated);
+    }
+
+    #[tokio::test]
+    async fn import_groups_incremental_keeps_existing_top_level_config() {
+        let state = test_shared_state();
+        let mut initial = default_config();
+        initial.server.host = "127.0.0.1".to_string();
+        initial.ui.theme = "dark".to_string();
+        initial.groups = vec![group(
+            "group-local",
+            "Local",
+            Some("p-local"),
+            vec![provider("p-local", "alpha", "old-model")],
+        )];
+        initial.providers = initial.groups[0].providers.clone();
+        state
+            .config_store
+            .save_config(initial)
+            .expect("initial config should save");
+
+        let parsed = json!({
+            "groups": [
+                {
+                    "id": "group-local",
+                    "name": "Imported",
+                    "models": ["model-b"],
+                    "activeProviderId": "p-import",
+                    "providers": [
+                        {
+                            "id": "p-import",
+                            "name": "alpha",
+                            "protocol": "openai",
+                            "token": "token",
+                            "apiAddress": "https://example.com",
+                            "defaultModel": "new-model"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let (_, saved, _, _) =
+            import_groups_payload(&state, parsed, Some(GroupImportMode::Incremental))
+                .await
+                .expect("incremental import should succeed");
+
+        assert_eq!(saved.server.host, "127.0.0.1");
+        assert_eq!(saved.ui.theme, "dark");
+        assert_eq!(saved.groups.len(), 1);
+        assert_eq!(saved.groups[0].id, "group-local");
+        assert_eq!(saved.groups[0].providers.len(), 1);
+        assert_eq!(saved.groups[0].providers[0].name, "alpha");
+        assert_eq!(saved.groups[0].providers[0].default_model, "new-model");
+    }
+
+    #[tokio::test]
+    async fn import_groups_without_mode_defaults_to_incremental() {
+        let state = test_shared_state();
+        let mut initial = default_config();
+        initial.groups = vec![group(
+            "group-local",
+            "Local",
+            Some("p-local"),
+            vec![provider("p-local", "alpha", "old-model")],
+        )];
+        initial.providers = initial.groups[0].providers.clone();
+        state
+            .config_store
+            .save_config(initial)
+            .expect("initial config should save");
+
+        let parsed = json!({
+            "groups": [
+                {
+                    "id": "group-local",
+                    "name": "Imported",
+                    "models": ["model-b"],
+                    "activeProviderId": "p-import",
+                    "providers": [
+                        {
+                            "id": "p-import",
+                            "name": "alpha",
+                            "protocol": "openai",
+                            "token": "token",
+                            "apiAddress": "https://example.com",
+                            "defaultModel": "new-model"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let (_, saved, _, _) = import_groups_payload(&state, parsed, None)
+            .await
+            .expect("default import should succeed");
+
+        assert_eq!(saved.groups.len(), 1);
+        assert_eq!(saved.groups[0].name, "Imported");
+        assert_eq!(saved.groups[0].providers.len(), 1);
+        assert_eq!(saved.groups[0].providers[0].name, "alpha");
+        assert_eq!(saved.groups[0].providers[0].default_model, "new-model");
+    }
+
+    #[tokio::test]
+    async fn import_groups_overwrite_replaces_groups_and_global_providers_only() {
+        let state = test_shared_state();
+        let mut initial = default_config();
+        initial.server.host = "127.0.0.1".to_string();
+        initial.server.port = 9999;
+        initial.ui.theme = "dark".to_string();
+        initial.groups = vec![group(
+            "group-local",
+            "Local",
+            Some("p-local"),
+            vec![provider("p-local", "alpha", "old-model")],
+        )];
+        initial.providers = vec![
+            provider("p-local", "alpha", "old-model"),
+            provider("p-stale", "stale", "stale-model"),
+        ];
+        state
+            .config_store
+            .save_config(initial)
+            .expect("initial config should save");
+
+        let parsed = json!({
+            "groups": [
+                {
+                    "id": "group-imported",
+                    "name": "Imported",
+                    "models": ["model-b"],
+                    "activeProviderId": "p-import",
+                    "providers": [
+                        {
+                            "id": "p-import",
+                            "name": "beta",
+                            "protocol": "openai",
+                            "token": "token",
+                            "apiAddress": "https://example.com",
+                            "defaultModel": "new-model"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let (_, saved, _, _) =
+            import_groups_payload(&state, parsed, Some(GroupImportMode::Overwrite))
+                .await
+                .expect("overwrite import should succeed");
+
+        assert_eq!(saved.server.host, "127.0.0.1");
+        assert_eq!(saved.server.port, 9999);
+        assert_eq!(saved.ui.theme, "dark");
+        assert_eq!(saved.groups.len(), 1);
+        assert_eq!(saved.groups[0].id, "group-imported");
+        assert_eq!(saved.groups[0].providers.len(), 1);
+        assert_eq!(saved.groups[0].providers[0].name, "beta");
+        assert_eq!(saved.providers.len(), 1);
+        assert_eq!(saved.providers[0].name, "beta");
+        assert!(!saved
+            .providers
+            .iter()
+            .any(|provider| provider.name == "stale"));
     }
 }

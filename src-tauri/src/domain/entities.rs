@@ -222,6 +222,33 @@ pub struct Rule {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GroupFailoverConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_failover_failure_threshold")]
+    pub failure_threshold: u32,
+    #[serde(default = "default_failover_cooldown_seconds")]
+    pub cooldown_seconds: u32,
+}
+
+pub fn default_failover_failure_threshold() -> u32 {
+    3
+}
+
+pub fn default_failover_cooldown_seconds() -> u32 {
+    300
+}
+
+pub fn default_group_failover_config() -> GroupFailoverConfig {
+    GroupFailoverConfig {
+        enabled: false,
+        failure_threshold: default_failover_failure_threshold(),
+        cooldown_seconds: default_failover_cooldown_seconds(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Group {
     pub id: String,
     pub name: String,
@@ -233,6 +260,8 @@ pub struct Group {
     pub active_provider_id: Option<String>,
     #[serde(default, rename = "providers", alias = "rules")]
     pub providers: Vec<Rule>,
+    #[serde(default = "default_group_failover_config")]
+    pub failover: GroupFailoverConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -268,11 +297,22 @@ pub struct ProxyMetrics {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GroupRuntimeStatus {
+    pub group_id: String,
+    pub current_provider_id: Option<String>,
+    pub failover_active_provider_id: Option<String>,
+    pub failover_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProxyStatus {
     pub running: bool,
     pub address: Option<String>,
     pub lan_address: Option<String>,
     pub metrics: ProxyMetrics,
+    #[serde(default)]
+    pub group_runtime: Vec<GroupRuntimeStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

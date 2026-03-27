@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.18 - 2026-03-27
+### Features
+- feat: finish management import and sync updates (be17fb5)
+- feat: expand OpenClaw config and failover controls (f808180)
+### Fixes
+- fix: apply rustfmt for tauri backend (4e3abc6)
+
 ## v0.2.17 - 2026-03-24
 ### Fixes
 - fix(integration): merge auto-detected desktop targets (6538da0)

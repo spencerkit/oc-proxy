@@ -9,7 +9,8 @@ use super::observability::{
     response_headers_sse, StreamTokenAccumulator,
 };
 use super::routing::{
-    assert_rule_ready, build_rule_headers, detect_entry_protocol, refresh_route_index_if_needed,
+    assert_rule_ready, build_rule_headers, detect_entry_protocol, record_route_provider_failure,
+    record_route_provider_success, refresh_route_index_if_needed, resolve_runtime_active_route,
     resolve_target_model, resolve_upstream_path, resolve_upstream_url, EntryEndpoint,
     EntryProtocol, ParsedPath, PathEntry, RouteResolution,
 };
@@ -295,6 +296,13 @@ pub(super) async fn handle_proxy_request(
             );
         }
     };
+    let active_route = match resolve_runtime_active_route(&state, &active_route) {
+        Ok(route) => route,
+        Err(msg) => {
+            state.metrics.increment_error();
+            return proxy_error_response(500, "proxy_error", &msg, None, "proxy", &trace_id);
+        }
+    };
 
     if let Err((status, msg)) = assert_rule_ready(&active_route.rule) {
         state.metrics.increment_error();
@@ -528,6 +536,19 @@ pub(super) async fn handle_proxy_request(
             Ok(Ok(r)) => r,
             Ok(Err(err)) => {
                 let err_msg = format!("Upstream request failed: {err}");
+                if classify_provider_side_failure(Some(&err_msg), None) {
+                    let _ = record_route_provider_failure(
+                        &state,
+                        &active_route.group_id,
+                        &active_route.rule.id,
+                        &active_route.provider_ids,
+                        &crate::proxy::failover::FailoverConfigSnapshot {
+                            enabled: active_route.failover.enabled,
+                            failure_threshold: active_route.failover.failure_threshold,
+                            cooldown_seconds: active_route.failover.cooldown_seconds,
+                        },
+                    );
+                }
                 state.metrics.increment_error();
                 finalize_log(
                     &state,
@@ -575,6 +596,19 @@ pub(super) async fn handle_proxy_request(
                 let err_msg = format!(
                     "Upstream response header timeout exceeded after {request_timeout_ms}ms"
                 );
+                if classify_provider_side_failure(Some(&err_msg), Some(504)) {
+                    let _ = record_route_provider_failure(
+                        &state,
+                        &active_route.group_id,
+                        &active_route.rule.id,
+                        &active_route.provider_ids,
+                        &crate::proxy::failover::FailoverConfigSnapshot {
+                            enabled: active_route.failover.enabled,
+                            failure_threshold: active_route.failover.failure_threshold,
+                            cooldown_seconds: active_route.failover.cooldown_seconds,
+                        },
+                    );
+                }
                 state.metrics.increment_error();
                 finalize_log(
                     &state,
@@ -628,6 +662,19 @@ pub(super) async fn handle_proxy_request(
             Ok(r) => r,
             Err(err) => {
                 let err_msg = format!("Upstream request failed: {err}");
+                if classify_provider_side_failure(Some(&err_msg), None) {
+                    let _ = record_route_provider_failure(
+                        &state,
+                        &active_route.group_id,
+                        &active_route.rule.id,
+                        &active_route.provider_ids,
+                        &crate::proxy::failover::FailoverConfigSnapshot {
+                            enabled: active_route.failover.enabled,
+                            failure_threshold: active_route.failover.failure_threshold,
+                            cooldown_seconds: active_route.failover.cooldown_seconds,
+                        },
+                    );
+                }
                 state.metrics.increment_error();
                 finalize_log(
                     &state,
@@ -676,6 +723,19 @@ pub(super) async fn handle_proxy_request(
 
     let upstream_status = upstream_resp.status().as_u16();
     let upstream_is_error = upstream_status >= 400;
+    if upstream_is_error && classify_provider_side_failure(None, Some(upstream_status)) {
+        let _ = record_route_provider_failure(
+            &state,
+            &active_route.group_id,
+            &active_route.rule.id,
+            &active_route.provider_ids,
+            &crate::proxy::failover::FailoverConfigSnapshot {
+                enabled: active_route.failover.enabled,
+                failure_threshold: active_route.failover.failure_threshold,
+                cooldown_seconds: active_route.failover.cooldown_seconds,
+            },
+        );
+    }
     let upstream_headers_plain = plain_headers(upstream_resp.headers());
     let upstream_ct = upstream_resp
         .headers()
@@ -722,6 +782,13 @@ pub(super) async fn handle_proxy_request(
         let stream_debug_capture_body = cfg!(debug_assertions);
         let stream_upstream_status = upstream_status;
         let stream_upstream_is_error = upstream_is_error;
+        let stream_group_id = active_route.group_id.clone();
+        let stream_provider_ids = active_route.provider_ids.clone();
+        let stream_failover_config = crate::proxy::failover::FailoverConfigSnapshot {
+            enabled: active_route.failover.enabled,
+            failure_threshold: active_route.failover.failure_threshold,
+            cooldown_seconds: active_route.failover.cooldown_seconds,
+        };
         let stream_upstream_ct = upstream_ct.clone();
         let stream_started = started;
         let stream_transformer = transformer.clone();
@@ -734,6 +801,7 @@ pub(super) async fn handle_proxy_request(
             let mut bytes_stream = upstream_resp.bytes_stream();
             let mut usage_acc = StreamTokenAccumulator::default();
             let mut stream_failed = false;
+            let mut provider_side_stream_failure = false;
             let mut downstream_closed = false;
             let mut stream_upstream_response_bytes = Vec::<u8>::new();
             let mut stream_upstream_response_truncated = false;
@@ -1162,6 +1230,7 @@ pub(super) async fn handle_proxy_request(
                     }
                     Err(_) => {
                         stream_failed = true;
+                        provider_side_stream_failure = true;
                         stream_debug_terminal(
                             &stream_trace_id,
                             "read_error",
@@ -1236,6 +1305,31 @@ pub(super) async fn handle_proxy_request(
                 .add_latency(stream_started.elapsed().as_millis() as u64);
             if stream_failed || stream_upstream_is_error {
                 stream_state.metrics.increment_error();
+            }
+
+            match classify_stream_failover_outcome(
+                stream_failed,
+                downstream_closed,
+                stream_upstream_is_error,
+                provider_side_stream_failure,
+            ) {
+                StreamFailoverOutcome::ProviderFailure => {
+                    let _ = record_route_provider_failure(
+                        &stream_state,
+                        &stream_group_id,
+                        &stream_rule.id,
+                        &stream_provider_ids,
+                        &stream_failover_config,
+                    );
+                }
+                StreamFailoverOutcome::Success => {
+                    let _ = record_route_provider_success(
+                        &stream_state,
+                        &stream_group_id,
+                        &stream_rule.id,
+                    );
+                }
+                StreamFailoverOutcome::Ignore => {}
             }
 
             let stream_response_body = if stream_capture_body {
@@ -1333,6 +1427,19 @@ pub(super) async fn handle_proxy_request(
         Ok(v) => v,
         Err(err) => {
             let err_msg = format!("Failed to read upstream response: {err}");
+            if classify_provider_side_failure(Some(&err_msg), Some(upstream_status)) {
+                let _ = record_route_provider_failure(
+                    &state,
+                    &active_route.group_id,
+                    &active_route.rule.id,
+                    &active_route.provider_ids,
+                    &crate::proxy::failover::FailoverConfigSnapshot {
+                        enabled: active_route.failover.enabled,
+                        failure_threshold: active_route.failover.failure_threshold,
+                        cooldown_seconds: active_route.failover.cooldown_seconds,
+                    },
+                );
+            }
             state.metrics.increment_error();
             finalize_log(
                 &state,
@@ -1483,6 +1590,7 @@ pub(super) async fn handle_proxy_request(
         extract_token_usage(&upstream_json),
         extract_token_usage(&output_body),
     );
+    let _ = record_route_provider_success(&state, &active_route.group_id, &active_route.rule.id);
     if let Some(ref usage) = token_usage {
         state.metrics.add_token_usage(usage);
     }
@@ -1524,6 +1632,59 @@ pub(super) async fn handle_proxy_request(
     );
 
     resp
+}
+
+fn classify_provider_side_failure(
+    error_message: Option<&str>,
+    upstream_status: Option<u16>,
+) -> bool {
+    if let Some(status) = upstream_status {
+        if status == 429 || status >= 500 {
+            return true;
+        }
+    }
+
+    let normalized = error_message
+        .map(|message| message.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    normalized.contains("timeout")
+        || normalized.contains("timed out")
+        || normalized.contains("network")
+        || normalized.contains("connection")
+        || normalized.contains("upstream request failed")
+        || normalized.contains("failed to read upstream response")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamFailoverOutcome {
+    Success,
+    ProviderFailure,
+    Ignore,
+}
+
+fn classify_stream_failover_outcome(
+    stream_failed: bool,
+    downstream_closed: bool,
+    upstream_is_error: bool,
+    provider_side_stream_failure: bool,
+) -> StreamFailoverOutcome {
+    if upstream_is_error {
+        return StreamFailoverOutcome::Ignore;
+    }
+    if provider_side_stream_failure && stream_failed {
+        return StreamFailoverOutcome::ProviderFailure;
+    }
+    if downstream_closed {
+        return StreamFailoverOutcome::Ignore;
+    }
+    if stream_failed {
+        return StreamFailoverOutcome::Ignore;
+    }
+    StreamFailoverOutcome::Success
 }
 
 fn extract_header_token(headers: &HeaderMap, header_name: &str) -> Option<String> {
@@ -1994,14 +2155,502 @@ fn looks_like_sse_prelude(chunk: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_sse_delimiter, looks_like_sse_prelude, merge_token_usage, pop_sse_event,
+        classify_provider_side_failure, classify_stream_failover_outcome, find_sse_delimiter,
+        handle_proxy_request, looks_like_sse_prelude, merge_token_usage, pop_sse_event,
         prepare_transformer_for_route, request_matches_local_access_token,
-        stream_requires_sse_event_buffer, EntryEndpoint, PathEntry,
+        stream_requires_sse_event_buffer, EntryEndpoint, ParsedPath, PathEntry,
+        StreamFailoverOutcome,
     };
-    use crate::models::{RuleProtocol, TokenUsage};
+    use crate::models::{
+        default_group_failover_config, default_rule_cost_config, default_rule_quota_config, Group,
+        Rule, RuleProtocol, TokenUsage,
+    };
     use crate::proxy::routing::EntryProtocol;
-    use axum::http::{HeaderMap, HeaderValue};
+    use crate::proxy::{headless_service_state_for_tests, ServiceState};
+    use axum::{
+        body::{to_bytes, Body},
+        extract::State as AxumState,
+        http::{HeaderMap, HeaderValue, Method, StatusCode},
+        response::{IntoResponse, Response},
+        routing::post,
+        Json, Router,
+    };
+    use serde_json::{json, Value};
     use std::collections::HashSet;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        sync::oneshot,
+    };
+
+    #[derive(Clone)]
+    struct ScriptedUpstreamState {
+        responses: Arc<Vec<(u16, Value)>>,
+        hits: Arc<AtomicUsize>,
+    }
+
+    struct TestUpstream {
+        base_url: String,
+        hits: Arc<AtomicUsize>,
+        shutdown: Option<oneshot::Sender<()>>,
+    }
+
+    impl Drop for TestUpstream {
+        fn drop(&mut self) {
+            if let Some(shutdown) = self.shutdown.take() {
+                let _ = shutdown.send(());
+            }
+        }
+    }
+
+    async fn scripted_upstream_handler(
+        AxumState(state): AxumState<ScriptedUpstreamState>,
+    ) -> Response {
+        let call_index = state.hits.fetch_add(1, Ordering::SeqCst);
+        let (status, payload) = state
+            .responses
+            .get(call_index)
+            .cloned()
+            .or_else(|| state.responses.last().cloned())
+            .expect("scripted upstream must have at least one response");
+
+        (
+            StatusCode::from_u16(status).expect("scripted status must be valid"),
+            Json(payload),
+        )
+            .into_response()
+    }
+
+    async fn spawn_json_upstream(path: &'static str, responses: Vec<(u16, Value)>) -> TestUpstream {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let state = ScriptedUpstreamState {
+            responses: Arc::new(responses),
+            hits: hits.clone(),
+        };
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("mock upstream listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("mock upstream listener should have local addr");
+        let app = Router::new()
+            .route(path, post(scripted_upstream_handler))
+            .with_state(state);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            let server = axum::serve(listener, app);
+            let graceful = server.with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            });
+            let _ = graceful.await;
+        });
+
+        TestUpstream {
+            base_url: format!("http://{}", address),
+            hits,
+            shutdown: Some(shutdown_tx),
+        }
+    }
+
+    async fn spawn_stream_upstream(
+        path: &'static str,
+        chunks: Vec<Result<Vec<u8>, String>>,
+    ) -> TestUpstream {
+        spawn_scripted_stream_upstream(path, vec![chunks]).await
+    }
+
+    async fn spawn_raw_json_upstream(
+        _path: &'static str,
+        responses: Vec<Vec<Result<Vec<u8>, String>>>,
+    ) -> TestUpstream {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let responses = Arc::new(responses);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("mock raw upstream listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("mock raw upstream listener should have local addr");
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        let hits_for_server = hits.clone();
+        let responses_for_server = responses.clone();
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        return;
+                    }
+                    accept_result = listener.accept() => {
+                        let Ok((mut socket, _)) = accept_result else {
+                            return;
+                        };
+                        let call_index = hits_for_server.fetch_add(1, Ordering::SeqCst);
+                        let chunks = responses_for_server
+                            .get(call_index)
+                            .cloned()
+                            .or_else(|| responses_for_server.last().cloned())
+                            .expect("scripted raw upstream must have at least one response");
+
+                        let mut request_buffer = [0_u8; 4096];
+                        let _ = socket.read(&mut request_buffer).await;
+
+                        if socket
+                            .write_all(
+                                b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+                            )
+                            .await
+                            .is_err()
+                        {
+                            continue;
+                        }
+
+                        let mut closed_early = false;
+                        for chunk in chunks {
+                            match chunk {
+                                Ok(bytes) => {
+                                    let header = format!("{:X}\r\n", bytes.len());
+                                    if socket.write_all(header.as_bytes()).await.is_err() {
+                                        closed_early = true;
+                                        break;
+                                    }
+                                    if socket.write_all(&bytes).await.is_err() {
+                                        closed_early = true;
+                                        break;
+                                    }
+                                    if socket.write_all(b"\r\n").await.is_err() {
+                                        closed_early = true;
+                                        break;
+                                    }
+                                    if socket.flush().await.is_err() {
+                                        closed_early = true;
+                                        break;
+                                    }
+                                }
+                                Err(_) => {
+                                    let _ = socket.shutdown().await;
+                                    closed_early = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if !closed_early {
+                            let _ = socket.write_all(b"0\r\n\r\n").await;
+                            let _ = socket.flush().await;
+                        }
+                    }
+                }
+            }
+        });
+
+        TestUpstream {
+            base_url: format!("http://{}", address),
+            hits,
+            shutdown: Some(shutdown_tx),
+        }
+    }
+
+    async fn spawn_scripted_stream_upstream(
+        _path: &'static str,
+        responses: Vec<Vec<Result<Vec<u8>, String>>>,
+    ) -> TestUpstream {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let responses = Arc::new(responses);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("mock stream upstream listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("mock stream upstream listener should have local addr");
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+        let hits_for_server = hits.clone();
+        let responses_for_server = responses.clone();
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => {
+                        return;
+                    }
+                    accept_result = listener.accept() => {
+                        let Ok((mut socket, _)) = accept_result else {
+                            return;
+                        };
+                        let call_index = hits_for_server.fetch_add(1, Ordering::SeqCst);
+                        let chunks = responses_for_server
+                            .get(call_index)
+                            .cloned()
+                            .or_else(|| responses_for_server.last().cloned())
+                            .expect("scripted stream upstream must have at least one response");
+
+                        let mut request_buffer = [0_u8; 4096];
+                        let _ = socket.read(&mut request_buffer).await;
+
+                        if socket
+                            .write_all(
+                                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+                            )
+                            .await
+                            .is_err()
+                        {
+                            continue;
+                        }
+
+                        let mut closed_early = false;
+                        for chunk in chunks {
+                            match chunk {
+                                Ok(bytes) => {
+                                    let header = format!("{:X}\r\n", bytes.len());
+                                    if socket.write_all(header.as_bytes()).await.is_err() {
+                                        closed_early = true;
+                                        break;
+                                    }
+                                    if socket.write_all(&bytes).await.is_err() {
+                                        closed_early = true;
+                                        break;
+                                    }
+                                    if socket.write_all(b"\r\n").await.is_err() {
+                                        closed_early = true;
+                                        break;
+                                    }
+                                    if socket.flush().await.is_err() {
+                                        closed_early = true;
+                                        break;
+                                    }
+                                }
+                                Err(_) => {
+                                    let _ = socket.shutdown().await;
+                                    closed_early = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if !closed_early {
+                            let _ = socket.write_all(b"0\r\n\r\n").await;
+                            let _ = socket.flush().await;
+                        }
+                    }
+                }
+            }
+        });
+
+        TestUpstream {
+            base_url: format!("http://{}", address),
+            hits,
+            shutdown: Some(shutdown_tx),
+        }
+    }
+
+    fn anthropic_message_response(text: &str) -> Value {
+        json!({
+            "id": "msg_test",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-test",
+            "content": [{ "type": "text", "text": text }],
+            "stop_reason": "end_turn",
+            "stop_sequence": Value::Null,
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 1
+            }
+        })
+    }
+
+    fn openai_chat_completion_response(text: &str) -> Value {
+        json!({
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "gpt-test",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": text
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2
+            }
+        })
+    }
+
+    fn test_rule(
+        id: &str,
+        protocol: RuleProtocol,
+        api_address: String,
+        default_model: &str,
+    ) -> Rule {
+        Rule {
+            id: id.to_string(),
+            name: id.to_string(),
+            protocol,
+            token: "test-token".to_string(),
+            api_address,
+            website: String::new(),
+            default_model: default_model.to_string(),
+            model_mappings: Default::default(),
+            quota: default_rule_quota_config(),
+            cost: default_rule_cost_config(),
+        }
+    }
+
+    fn install_failover_group(
+        service_state: &ServiceState,
+        providers: Vec<Rule>,
+        failure_threshold: u32,
+    ) {
+        install_failover_group_with_cooldown(service_state, providers, failure_threshold, 300);
+    }
+
+    fn install_failover_group_with_cooldown(
+        service_state: &ServiceState,
+        providers: Vec<Rule>,
+        failure_threshold: u32,
+        cooldown_seconds: u32,
+    ) {
+        let shared = service_state
+            .shared_state
+            .clone()
+            .expect("headless service state should include shared state");
+        let preferred_provider_id = providers
+            .first()
+            .expect("test group needs at least one provider")
+            .id
+            .clone();
+        let provider_ids = providers
+            .iter()
+            .map(|provider| provider.id.clone())
+            .collect();
+        let mut failover = default_group_failover_config();
+        failover.enabled = true;
+        failover.failure_threshold = failure_threshold;
+        failover.cooldown_seconds = cooldown_seconds;
+        let mut next_config = shared.config_store.get();
+        next_config.providers = providers.clone();
+        next_config.groups = vec![Group {
+            id: "dev".to_string(),
+            name: "Dev".to_string(),
+            models: vec!["claude-test".to_string()],
+            provider_ids,
+            active_provider_id: Some(preferred_provider_id),
+            providers,
+            failover,
+        }];
+        shared
+            .config_store
+            .save_config(next_config)
+            .expect("test config should save");
+    }
+
+    fn runtime_failure_count(
+        service_state: &ServiceState,
+        group_id: &str,
+        provider_id: &str,
+    ) -> u32 {
+        let runtime = service_state
+            .failover_state
+            .read()
+            .expect("failover state lock should be readable");
+        crate::proxy::failover::provider_failure_count(&runtime, group_id, provider_id)
+    }
+
+    fn runtime_active_failover_provider(
+        service_state: &ServiceState,
+        group_id: &str,
+    ) -> Option<String> {
+        let runtime = service_state
+            .failover_state
+            .read()
+            .expect("failover state lock should be readable");
+        crate::proxy::failover::active_failover_provider_id(&runtime, group_id)
+    }
+
+    async fn send_messages_request(
+        service_state: &ServiceState,
+        request_body: Value,
+    ) -> (StatusCode, Value) {
+        let response = handle_proxy_request(
+            service_state.clone(),
+            Method::POST,
+            HeaderMap::new(),
+            Body::from(
+                serde_json::to_vec(&request_body).expect("request body should serialize to json"),
+            ),
+            ParsedPath {
+                group_id: "dev".to_string(),
+                suffix: "/messages".to_string(),
+            },
+        )
+        .await;
+        let status = response.status();
+        let body_bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body should be readable");
+        let payload = serde_json::from_slice(&body_bytes).expect("response body should be json");
+        (status, payload)
+    }
+
+    async fn send_streaming_messages_request(
+        service_state: &ServiceState,
+        request_body: Value,
+    ) -> (StatusCode, String) {
+        let response = handle_proxy_request(
+            service_state.clone(),
+            Method::POST,
+            HeaderMap::new(),
+            Body::from(
+                serde_json::to_vec(&request_body).expect("request body should serialize to json"),
+            ),
+            ParsedPath {
+                group_id: "dev".to_string(),
+                suffix: "/messages".to_string(),
+            },
+        )
+        .await;
+        let status = response.status();
+        let body_bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("stream response body should be readable");
+        (
+            status,
+            String::from_utf8(body_bytes.to_vec()).expect("stream response should be utf8"),
+        )
+    }
+
+    #[tokio::test]
+    async fn scripted_stream_upstream_accepts_direct_requests() {
+        let upstream = spawn_stream_upstream(
+            "/chat/completions",
+            vec![Ok(b"data: {\"ok\":true}\n\n".to_vec())],
+        )
+        .await;
+
+        let response = reqwest::Client::new()
+            .post(format!("{}/chat/completions", upstream.base_url))
+            .send()
+            .await
+            .expect("direct stream upstream request should connect");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .contains("text/event-stream"));
+    }
 
     #[test]
     fn pop_sse_event_handles_lf_delimiter() {
@@ -2171,6 +2820,842 @@ mod tests {
         assert_eq!(merged.output_tokens, upstream.output_tokens);
         assert_eq!(merged.cache_read_tokens, upstream.cache_read_tokens);
         assert_eq!(merged.cache_write_tokens, upstream.cache_write_tokens);
+    }
+
+    #[test]
+    fn failover_classification_counts_provider_side_status_codes() {
+        assert!(classify_provider_side_failure(None, Some(429)));
+        assert!(classify_provider_side_failure(None, Some(500)));
+        assert!(!classify_provider_side_failure(None, Some(400)));
+        assert!(!classify_provider_side_failure(None, Some(422)));
+    }
+
+    #[test]
+    fn failover_classification_ignores_local_validation_errors_without_upstream_failure() {
+        assert!(!classify_provider_side_failure(
+            Some("invalid request payload"),
+            None
+        ));
+        assert!(!classify_provider_side_failure(
+            Some("unsupported model alias"),
+            Some(200)
+        ));
+    }
+
+    #[test]
+    fn failover_classification_counts_transport_failures_even_after_non_error_status() {
+        assert!(classify_provider_side_failure(
+            Some("network failure"),
+            None
+        ));
+        assert!(classify_provider_side_failure(Some("timeout"), None));
+        assert!(classify_provider_side_failure(
+            Some("Failed to read upstream response"),
+            Some(200)
+        ));
+        assert!(!classify_provider_side_failure(None, Some(422)));
+    }
+
+    #[test]
+    fn stream_failover_outcome_distinguishes_provider_failures_from_local_ones() {
+        assert_eq!(
+            classify_stream_failover_outcome(false, false, false, false),
+            StreamFailoverOutcome::Success
+        );
+        assert_eq!(
+            classify_stream_failover_outcome(true, false, false, true),
+            StreamFailoverOutcome::ProviderFailure
+        );
+        assert_eq!(
+            classify_stream_failover_outcome(true, true, false, true),
+            StreamFailoverOutcome::ProviderFailure
+        );
+        assert_eq!(
+            classify_stream_failover_outcome(true, false, false, false),
+            StreamFailoverOutcome::Ignore
+        );
+        assert_eq!(
+            classify_stream_failover_outcome(false, true, false, true),
+            StreamFailoverOutcome::Ignore
+        );
+        assert_eq!(
+            classify_stream_failover_outcome(false, false, true, true),
+            StreamFailoverOutcome::Ignore
+        );
+    }
+
+    #[tokio::test]
+    async fn cooldown_expiry_retries_preferred_provider_on_next_live_request() {
+        let primary = spawn_json_upstream(
+            "/chat/completions",
+            vec![
+                (503, json!({"error": {"message": "service unavailable"}})),
+                (200, openai_chat_completion_response("recovered")),
+            ],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("backup"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group_with_cooldown(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            1,
+            1,
+        );
+
+        let request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+
+        let (failure_status, _) = send_messages_request(&service_state, request.clone()).await;
+        assert_eq!(failure_status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, request).await;
+        assert_eq!(success_status, StatusCode::OK);
+        assert_eq!(
+            success_payload["content"][0]["text"].as_str(),
+            Some("recovered")
+        );
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 2);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn local_errors_after_cooldown_do_not_clear_failover_before_preferred_provider_recovers()
+    {
+        let primary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("recovered"))],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("backup"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group_with_cooldown(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            1,
+            1,
+        );
+
+        {
+            let mut runtime = service_state
+                .failover_state
+                .write()
+                .expect("failover state lock should be writable");
+            crate::proxy::failover::record_provider_failure(
+                &mut runtime,
+                "dev",
+                "p1",
+                &["p1".to_string(), "p2".to_string()],
+                &crate::proxy::failover::FailoverConfigSnapshot {
+                    enabled: true,
+                    failure_threshold: 1,
+                    cooldown_seconds: 1,
+                },
+                chrono::Utc::now() - chrono::Duration::seconds(2),
+            );
+        }
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
+
+        let (error_status, _) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": "invalid"
+            }),
+        )
+        .await;
+        assert_eq!(error_status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 0);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
+
+        let (success_status, success_payload) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+        assert_eq!(success_status, StatusCode::OK);
+        assert_eq!(
+            success_payload["content"][0]["text"].as_str(),
+            Some("recovered")
+        );
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_failure_after_cooldown_restarts_failover_to_secondary() {
+        let primary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(503, json!({"error": {"message": "still failing"}}))],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("backup"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group_with_cooldown(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            1,
+            1,
+        );
+
+        {
+            let mut runtime = service_state
+                .failover_state
+                .write()
+                .expect("failover state lock should be writable");
+            crate::proxy::failover::record_provider_failure(
+                &mut runtime,
+                "dev",
+                "p1",
+                &["p1".to_string(), "p2".to_string()],
+                &crate::proxy::failover::FailoverConfigSnapshot {
+                    enabled: true,
+                    failure_threshold: 1,
+                    cooldown_seconds: 1,
+                },
+                chrono::Utc::now() - chrono::Duration::seconds(2),
+            );
+        }
+
+        let (failure_status, failure_payload) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+        assert_eq!(failure_status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            failure_payload["error"]["message"].as_str(),
+            Some("still failing")
+        );
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_side_failures_switch_live_requests_to_next_provider() {
+        let primary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(429, json!({"error": {"message": "rate limited"}}))],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            1,
+        );
+
+        let failure_request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+        let (failure_status, failure_payload) =
+            send_messages_request(&service_state, failure_request.clone()).await;
+        assert_eq!(failure_status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            failure_payload["error"]["message"].as_str(),
+            Some("rate limited")
+        );
+
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, failure_request).await;
+        assert_eq!(success_status, StatusCode::OK);
+        assert_eq!(success_payload["content"][0]["text"].as_str(), Some("ok"));
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn local_transform_errors_do_not_activate_failover_for_live_requests() {
+        let primary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("ok"))],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("backup"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            1,
+        );
+
+        let local_error_request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": "invalid"
+        });
+        let (error_status, _) = send_messages_request(&service_state, local_error_request).await;
+        assert_eq!(error_status, StatusCode::UNPROCESSABLE_ENTITY);
+
+        let success_request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, success_request).await;
+        assert_eq!(success_status, StatusCode::OK);
+        assert_eq!(success_payload["content"][0]["text"].as_str(), Some("ok"));
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn upstream_5xx_failures_switch_live_requests_to_next_provider() {
+        let primary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(503, json!({"error": {"message": "service unavailable"}}))],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            1,
+        );
+
+        let request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+
+        let (failure_status, failure_payload) =
+            send_messages_request(&service_state, request.clone()).await;
+        assert_eq!(failure_status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            failure_payload["error"]["message"].as_str(),
+            Some("service unavailable")
+        );
+        assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 1);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
+
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, request).await;
+        assert_eq!(success_status, StatusCode::OK);
+        assert_eq!(success_payload["content"][0]["text"].as_str(), Some("ok"));
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn transport_failures_switch_live_requests_to_next_provider() {
+        let service_state = headless_service_state_for_tests();
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("ok"))],
+        )
+        .await;
+        install_failover_group(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    "http://127.0.0.1:1".to_string(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            1,
+        );
+
+        let request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+
+        let (failure_status, failure_payload) =
+            send_messages_request(&service_state, request.clone()).await;
+        assert_eq!(failure_status, StatusCode::BAD_GATEWAY);
+        assert!(failure_payload["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Upstream request failed"));
+        assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 1);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
+
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, request).await;
+        assert_eq!(success_status, StatusCode::OK);
+        assert_eq!(success_payload["content"][0]["text"].as_str(), Some("ok"));
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn stream_read_failures_activate_failover_for_next_live_request() {
+        let primary = spawn_stream_upstream(
+            "/chat/completions",
+            vec![
+                Ok(b"data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"he\"},\"finish_reason\":null}]}\n\n".to_vec()),
+                Err("stream read failed".to_string()),
+            ],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            1,
+        );
+
+        let request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "stream": true,
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+
+        let (stream_status, stream_body) =
+            send_streaming_messages_request(&service_state, request.clone()).await;
+        assert_eq!(
+            stream_status,
+            StatusCode::OK,
+            "unexpected stream body: {stream_body}"
+        );
+        assert!(stream_body.contains("message_start"));
+        assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 1);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
+
+        let (success_status, success_payload) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello again"}]
+            }),
+        )
+        .await;
+        assert_eq!(success_status, StatusCode::OK);
+        assert_eq!(success_payload["content"][0]["text"].as_str(), Some("ok"));
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn successful_stream_request_resets_failure_count_before_threshold_is_reached() {
+        let primary = spawn_scripted_stream_upstream(
+            "/chat/completions",
+            vec![
+                vec![
+                    Ok(b"data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"he\"},\"finish_reason\":null}]}\n\n".to_vec()),
+                    Err("stream read failed".to_string()),
+                ],
+                vec![
+                    Ok(b"data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n".to_vec()),
+                    Ok(b"data: [DONE]\n\n".to_vec()),
+                ],
+                vec![
+                    Ok(b"data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"bye\"},\"finish_reason\":null}]}\n\n".to_vec()),
+                    Err("stream read failed again".to_string()),
+                ],
+                vec![
+                    Ok(b"data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"gpt-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"final\"},\"finish_reason\":null}]}\n\n".to_vec()),
+                    Ok(b"data: [DONE]\n\n".to_vec()),
+                ],
+            ],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("backup"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            2,
+        );
+
+        let request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "stream": true,
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+
+        let (first_status, first_body) =
+            send_streaming_messages_request(&service_state, request.clone()).await;
+        assert_eq!(
+            first_status,
+            StatusCode::OK,
+            "unexpected stream body: {first_body}"
+        );
+        assert!(first_body.contains("message_start"));
+        assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 1);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
+
+        let (second_status, second_body) =
+            send_streaming_messages_request(&service_state, request.clone()).await;
+        assert_eq!(
+            second_status,
+            StatusCode::OK,
+            "unexpected stream body: {second_body}"
+        );
+        assert!(second_body.contains("message_start"));
+        assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 0);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
+
+        let (third_status, third_body) =
+            send_streaming_messages_request(&service_state, request.clone()).await;
+        assert_eq!(
+            third_status,
+            StatusCode::OK,
+            "unexpected stream body: {third_body}"
+        );
+        assert!(third_body.contains("message_start"));
+        assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 1);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
+
+        let (fourth_status, fourth_body) =
+            send_streaming_messages_request(&service_state, request).await;
+        assert_eq!(
+            fourth_status,
+            StatusCode::OK,
+            "unexpected stream body: {fourth_body}"
+        );
+        assert!(fourth_body.contains("message_start"));
+        assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 0);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            None
+        );
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 4);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn non_stream_body_read_failures_activate_failover_for_next_live_request() {
+        let primary = spawn_raw_json_upstream(
+            "/chat/completions",
+            vec![vec![
+                Ok(
+                    serde_json::to_vec(&openai_chat_completion_response("partial"))
+                        .expect("chat completion response should serialize"),
+                ),
+                Err("body read failed".to_string()),
+            ]],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            1,
+        );
+
+        let request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+
+        let (failure_status, failure_payload) =
+            send_messages_request(&service_state, request.clone()).await;
+        assert_eq!(failure_status, StatusCode::BAD_GATEWAY);
+        assert!(failure_payload["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Failed to read upstream response"));
+        assert_eq!(runtime_failure_count(&service_state, "dev", "p1"), 1);
+        assert_eq!(
+            runtime_active_failover_provider(&service_state, "dev"),
+            Some("p2".to_string())
+        );
+
+        let (success_status, success_payload) =
+            send_messages_request(&service_state, request).await;
+        assert_eq!(success_status, StatusCode::OK);
+        assert_eq!(success_payload["content"][0]["text"].as_str(), Some("ok"));
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 1);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn successful_live_request_resets_failure_count_before_threshold_is_reached() {
+        let primary = spawn_json_upstream(
+            "/chat/completions",
+            vec![
+                (429, json!({"error": {"message": "rate limited"}})),
+                (200, openai_chat_completion_response("primary-ok")),
+                (429, json!({"error": {"message": "rate limited again"}})),
+                (200, openai_chat_completion_response("primary-final")),
+            ],
+        )
+        .await;
+        let secondary = spawn_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("backup"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![
+                test_rule(
+                    "p1",
+                    RuleProtocol::OpenaiCompletion,
+                    primary.base_url.clone(),
+                    "gpt-test",
+                ),
+                test_rule(
+                    "p2",
+                    RuleProtocol::OpenaiCompletion,
+                    secondary.base_url.clone(),
+                    "gpt-test",
+                ),
+            ],
+            2,
+        );
+
+        let request = json!({
+            "model": "claude-test",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hello"}]
+        });
+
+        let (first_status, _) = send_messages_request(&service_state, request.clone()).await;
+        assert_eq!(first_status, StatusCode::TOO_MANY_REQUESTS);
+
+        let (second_status, second_payload) =
+            send_messages_request(&service_state, request.clone()).await;
+        assert_eq!(second_status, StatusCode::OK);
+        assert_eq!(
+            second_payload["content"][0]["text"].as_str(),
+            Some("primary-ok")
+        );
+
+        let (third_status, _) = send_messages_request(&service_state, request.clone()).await;
+        assert_eq!(third_status, StatusCode::TOO_MANY_REQUESTS);
+
+        let (fourth_status, fourth_payload) = send_messages_request(&service_state, request).await;
+        assert_eq!(fourth_status, StatusCode::OK);
+        assert_eq!(
+            fourth_payload["content"][0]["text"].as_str(),
+            Some("primary-final")
+        );
+        assert_eq!(primary.hits.load(Ordering::SeqCst), 4);
+        assert_eq!(secondary.hits.load(Ordering::SeqCst), 0);
     }
 
     #[test]

@@ -26,3 +26,4 @@ docs/plans
 .tmp/
 packages/aor-cli/vendor/
 output/
+.worktrees/
