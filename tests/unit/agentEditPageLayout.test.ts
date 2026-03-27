@@ -239,6 +239,18 @@ test("shows OpenClaw source hint about validating related files", () => {
   assert.match(markup, /agentManagement\.openclawSourceValidationHint/)
 })
 
+test("keeps agent edit loading callback independent from draft state", () => {
+  const source = require("node:fs").readFileSync(
+    path.join(process.cwd(), "src/renderer/pages/AgentEditPage/AgentEditPage.tsx"),
+    "utf8"
+  ) as string
+
+  assert.doesNotMatch(
+    source,
+    /\[fallbackModelsText, formData, readAgentConfig, targetId, timeoutText\]/
+  )
+  assert.match(source, /\[readAgentConfig, targetId\]/)
+})
 test("marks dirty OpenClaw source tabs", () => {
   const markup = renderContent({
     kind: "openclaw",
