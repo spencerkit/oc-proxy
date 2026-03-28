@@ -202,6 +202,48 @@ wire_api = "responses"
   })
 })
 
+test("parseProviderImport auto-detects Codex payloads with quoted model_providers table names", () => {
+  const result = parseProviderImport({
+    format: "auto",
+    raw: `
+model_provider = "OpenAI"
+model = "gpt-5.4"
+
+["model_providers"."OpenAI"]
+name = "OpenAI"
+base_url = "https://supercodex.space/v1"
+wire_api = "responses"
+`.trim(),
+  })
+
+  assert.equal(result.format, "codex")
+  assert.deepEqual(result.draft, {
+    name: "OpenAI",
+    protocol: "openai",
+    apiAddress: "https://supercodex.space/v1",
+    defaultModel: "gpt-5.4",
+  })
+})
+
+test("parseProviderImport auto-detect rejects TOML and comments that only mention Codex markers", () => {
+  assert.throws(
+    () =>
+      parseProviderImport({
+        format: "auto",
+        raw: `
+# model_provider = "OpenAI"
+title = "mentions [model_providers.OpenAI] in text"
+
+[service]
+description = "model_provider and [model_providers.OpenAI] are documentation examples"
+url = "https://example.com"
+`.trim(),
+      }),
+    (error: unknown) =>
+      error instanceof ProviderImportParseError && error.code === "unrecognized_format"
+  )
+})
+
 test("parseProviderImport auto-detect prefers AOR over Claude Code when both markers are present", () => {
   const result = parseProviderImport({
     format: "auto",

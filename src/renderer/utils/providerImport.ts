@@ -110,7 +110,8 @@ function detectProviderImportFormat(raw: string): ProviderImportFormat {
     throw new ProviderImportParseError("unrecognized_format")
   }
 
-  if (raw.includes("model_provider") && raw.includes("[model_providers.")) {
+  const parsedToml = tryParseTomlRecord(raw)
+  if (hasCodexImportShape(parsedToml)) {
     return "codex"
   }
 
@@ -243,6 +244,14 @@ function parseJsonRecord(raw: string): Record<string, unknown> {
   }
 }
 
+function tryParseTomlRecord(raw: string): Record<string, unknown> | undefined {
+  try {
+    return asRecord(TOML.parse(raw)) ?? {}
+  } catch {
+    return undefined
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined
@@ -260,4 +269,12 @@ function normalizeProtocol(value: unknown): Provider["protocol"] | undefined {
   return SUPPORTED_PROTOCOLS.includes(protocol as Provider["protocol"])
     ? (protocol as Provider["protocol"])
     : undefined
+}
+
+function hasCodexImportShape(parsed: Record<string, unknown> | undefined): boolean {
+  if (!parsed) {
+    return false
+  }
+
+  return !!normalizeString(parsed.model_provider) && !!asRecord(parsed.model_providers)
 }
