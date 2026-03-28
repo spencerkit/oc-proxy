@@ -164,10 +164,23 @@ export const AgentEditPage: React.FC = () => {
 
   const sourceFiles = useMemo(() => buildSourceFiles(configFile), [configFile])
   const sourceFilesRef = useRef<AgentSourceFile[]>([])
+  const formDraftStateRef = useRef({
+    formData,
+    timeoutText,
+    fallbackModelsText,
+  })
 
   useEffect(() => {
     sourceFilesRef.current = sourceFiles
   }, [sourceFiles])
+
+  useEffect(() => {
+    formDraftStateRef.current = {
+      formData,
+      timeoutText,
+      fallbackModelsText,
+    }
+  }, [fallbackModelsText, formData, timeoutText])
 
   const loadConfig = useCallback(
     async (options?: { savedSourceId?: string; preserveFormDrafts?: boolean }) => {
@@ -185,11 +198,7 @@ export const AgentEditPage: React.FC = () => {
           result.openclawEditor
         )
         const mergedFormState = mergeReloadedFormDraftState(
-          {
-            formData,
-            timeoutText,
-            fallbackModelsText,
-          },
+          formDraftStateRef.current,
           {
             formData: nextFormState,
             timeoutText:
@@ -221,7 +230,7 @@ export const AgentEditPage: React.FC = () => {
         setLoading(false)
       }
     },
-    [fallbackModelsText, formData, readAgentConfig, targetId, timeoutText]
+    [readAgentConfig, targetId]
   )
 
   useEffect(() => {

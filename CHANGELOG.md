@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.19 - 2026-03-27
+### Fixes
+- fix: stop agent edit page loading loop (fa5bc53)
+### Maintenance
+- chore: bump version to v0.2.19 (416366f)
+
 ## v0.2.18 - 2026-03-27
 ### Features
 - feat: finish management import and sync updates (be17fb5)
