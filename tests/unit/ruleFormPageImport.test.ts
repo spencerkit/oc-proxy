@@ -46,8 +46,10 @@ function translate(key: string, options?: Record<string, unknown>): string {
     "ruleEditPage.title": "Edit Rule",
     "ruleCreatePage.newRule": "New Rule",
     "ruleForm.sectionRouting": "Routing",
+    "ruleForm.importEntryTitle": "Import Config",
     "ruleForm.importTitle": "Paste Config Import",
     "ruleForm.importHint": "Paste a supported config snippet to auto-fill provider fields.",
+    "ruleForm.importOpen": "Open Import",
     "ruleForm.importFormat": "Import Format",
     "ruleForm.importFormatAuto": "Auto Detect",
     "ruleForm.importFormatCodex": "Codex",
@@ -228,6 +230,18 @@ require.cache["@/components"] = {
         onChange,
         ...props,
       }),
+    Modal: ({ open, title, children, footer }: UnknownProps) =>
+      open
+        ? React.createElement(
+            "div",
+            {
+              role: "dialog",
+            },
+            title ? React.createElement("h2", null, title as React.ReactNode) : null,
+            children as React.ReactNode,
+            footer as React.ReactNode
+          )
+        : null,
   },
   filename: "@/components",
   id: "@/components",
@@ -467,22 +481,45 @@ function findForm(tree: React.ReactNode): FormElementNode {
   return element as FormElementNode
 }
 
-test("RuleFormPage shows provider import card only in create mode above routing", () => {
+test("RuleFormPage shows provider import entry only in create mode above routing", () => {
   resetHarness()
 
   const createHarness = createComponentHarness("create")
   const createMarkup = renderToStaticMarkup(createHarness.renderReady() as React.ReactElement)
 
-  assert.match(createMarkup, /Paste Config Import/)
+  assert.match(createMarkup, /Import Config/)
+  assert.match(createMarkup, /Open Import/)
+  assert.doesNotMatch(createMarkup, /Paste Config Import/)
   assert.match(createMarkup, /Routing/)
-  assert.ok(createMarkup.indexOf("Paste Config Import") < createMarkup.indexOf("Routing"))
+  assert.ok(createMarkup.indexOf("Import Config") < createMarkup.indexOf("Routing"))
 
   currentParams = { providerId: "provider-1" }
   const editHarness = createComponentHarness("edit")
   const editMarkup = renderToStaticMarkup(editHarness.renderReady() as React.ReactElement)
 
-  assert.doesNotMatch(editMarkup, /Paste Config Import/)
+  assert.doesNotMatch(editMarkup, /Import Config/)
+  assert.doesNotMatch(editMarkup, /Open Import/)
   assert.match(editMarkup, /Routing/)
+})
+
+test("RuleFormPage opens provider import popup on demand", () => {
+  resetHarness()
+  const harness = createComponentHarness("create")
+
+  let tree = harness.renderReady()
+  let markup = renderToStaticMarkup(tree as React.ReactElement)
+
+  assert.doesNotMatch(markup, /Paste Config Import/)
+  assert.doesNotMatch(markup, /Config Text/)
+
+  const openButton = findButtonByText(tree, "Open Import")
+  openButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  markup = renderToStaticMarkup(tree as React.ReactElement)
+
+  assert.match(markup, /Paste Config Import/)
+  assert.match(markup, /Config Text/)
 })
 
 test("RuleFormPage clear import resets format back to auto", () => {
@@ -490,6 +527,10 @@ test("RuleFormPage clear import resets format back to auto", () => {
   const harness = createComponentHarness("create")
 
   let tree = harness.renderReady()
+  const openButton = findButtonByText(tree, "Open Import")
+  openButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
   let formatSelect = findImportFormatSelect(tree)
   assert.equal(formatSelect.props.value, "auto")
 
@@ -512,6 +553,10 @@ test("RuleFormPage shows a precise error when imported AOR protocol is unsupport
   const harness = createComponentHarness("create")
 
   let tree = harness.renderReady()
+  const openButton = findButtonByText(tree, "Open Import")
+  openButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
   const importTextarea = findTextareaById(tree, "provider-import-raw")
   importTextarea.props.onChange?.(
     createTextAreaChangeEvent(
@@ -553,6 +598,10 @@ test("RuleFormPage parse and apply fills imported fields, preserves omitted webs
   assert.match(markup, /Default Model is required/)
 
   tree = harness.renderReady()
+  const openButton = findButtonByText(tree, "Open Import")
+  openButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
   const importTextarea = findTextareaById(tree, "provider-import-raw")
   importTextarea.props.onChange?.(
     createTextAreaChangeEvent(
@@ -583,6 +632,7 @@ test("RuleFormPage parse and apply fills imported fields, preserves omitted webs
   assert.equal(findInputById(tree, "apiAddress").props.value, "https://imported.example.com/v1")
   assert.equal(findInputById(tree, "defaultModel").props.value, "gpt-imported")
   assert.equal(findInputById(tree, "website").props.value, "https://preserved.example.com")
+  assert.doesNotMatch(markup, /Paste Config Import/)
   assert.doesNotMatch(markup, /Rule Name is required/)
   assert.doesNotMatch(markup, /Token is required/)
   assert.doesNotMatch(markup, /API Address is required/)

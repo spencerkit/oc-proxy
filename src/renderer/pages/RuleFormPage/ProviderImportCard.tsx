@@ -26,6 +26,7 @@ const PREVIEW_FIELDS: ProviderImportField[] = [
 ]
 
 export interface ProviderImportCardProps {
+  showHeader?: boolean
   format: ProviderImportInputFormat
   rawValue: string
   parseError: string | null
@@ -46,6 +47,7 @@ function getFieldLabelKey(field: ProviderImportField) {
 }
 
 export const ProviderImportCard: React.FC<ProviderImportCardProps> = ({
+  showHeader = true,
   format,
   rawValue,
   parseError,
@@ -69,10 +71,12 @@ export const ProviderImportCard: React.FC<ProviderImportCardProps> = ({
   return (
     <section className={styles.importCard}>
       <div className={styles.importCardHeader}>
-        <div className={styles.importHeaderCopy}>
-          <h2 className={styles.sectionTitle}>{t("ruleForm.importTitle")}</h2>
-          <p className={styles.fieldHint}>{t("ruleForm.importHint")}</p>
-        </div>
+        {showHeader ? (
+          <div className={styles.importHeaderCopy}>
+            <h2 className={styles.sectionTitle}>{t("ruleForm.importTitle")}</h2>
+            <p className={styles.fieldHint}>{t("ruleForm.importHint")}</p>
+          </div>
+        ) : null}
         <div className={styles.importActions}>
           <Button type="button" variant="default" size="small" onClick={onClear}>
             {t("ruleForm.importClear")}

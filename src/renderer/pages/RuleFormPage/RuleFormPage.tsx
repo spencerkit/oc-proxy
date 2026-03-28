@@ -2,7 +2,7 @@ import { AlertCircle, ArrowLeft, CheckCircle, Eye, EyeOff, TestTube2 } from "luc
 import type React from "react"
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { Button, Input, JsonTreeView, Switch } from "@/components"
+import { Button, Input, JsonTreeView, Modal, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { configState, saveConfigAction, testRuleQuotaDraftAction } from "@/store"
 import type { Provider, ProxyConfig, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
@@ -241,6 +241,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
   const [importText, setImportText] = useState("")
   const [importResult, setImportResult] = useState<ProviderImportParseResult | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
 
   const [quotaEnabled, setQuotaEnabled] = useState(false)
   const [quotaProvider, setQuotaProvider] = useState("custom")
@@ -437,6 +438,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
       apiAddress: undefined,
       defaultModel: undefined,
     }))
+    setShowImportModal(false)
   }
 
   const focusField = (id: string) => {
@@ -790,17 +792,17 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
         <div className={styles.ruleGrid}>
           <form onSubmit={handleSubmit} className={styles.ruleForm}>
             {!isEditMode ? (
-              <ProviderImportCard
-                format={importFormat}
-                rawValue={importText}
-                parseError={importError}
-                parseResult={importResult}
-                onFormatChange={handleImportFormatChange}
-                onRawChange={handleImportTextChange}
-                onParse={handleImportParse}
-                onApply={handleImportApply}
-                onClear={handleImportClear}
-              />
+              <section className={styles.importEntry}>
+                <div className={styles.importEntryContent}>
+                  <h2 className={styles.sectionTitle}>{t("ruleForm.importEntryTitle")}</h2>
+                  <p className={styles.fieldHint}>{t("ruleForm.importHint")}</p>
+                </div>
+                <div className={styles.importEntryActions}>
+                  <Button type="button" variant="default" onClick={() => setShowImportModal(true)}>
+                    {t("ruleForm.importOpen")}
+                  </Button>
+                </div>
+              </section>
             ) : null}
 
             <section className={styles.formSection}>
@@ -1350,6 +1352,28 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
           </form>
         </div>
       </div>
+
+      {!isEditMode ? (
+        <Modal
+          open={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          title={t("ruleForm.importTitle")}
+          size="large"
+        >
+          <ProviderImportCard
+            showHeader={false}
+            format={importFormat}
+            rawValue={importText}
+            parseError={importError}
+            parseResult={importResult}
+            onFormatChange={handleImportFormatChange}
+            onRawChange={handleImportTextChange}
+            onParse={handleImportParse}
+            onApply={handleImportApply}
+            onClear={handleImportClear}
+          />
+        </Modal>
+      ) : null}
     </div>
   )
 }

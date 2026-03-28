@@ -365,6 +365,29 @@
   color: var(--text-secondary);
 }
 
+.importEntry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px dashed color-mix(in srgb, var(--border) 75%, var(--accent) 25%);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg-raised) 8%);
+  flex-wrap: wrap;
+}
+
+.importEntryContent {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.importEntryActions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
 .importCard {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);

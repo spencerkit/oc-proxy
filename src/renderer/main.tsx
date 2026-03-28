@@ -6,6 +6,7 @@ import { BrowserRouter, HashRouter } from "react-router-dom"
 import App from "./App"
 import { ToastContainer } from "./components/common/ToastContainer"
 import { ToastProvider } from "./contexts/ToastContext"
+import { installMockPreviewRuntime } from "./dev/mockPreview"
 import i18n, { initI18n, type Locale } from "./i18n"
 import type { AuthSessionStatus } from "./types"
 import { bridge } from "./utils/bridge"
@@ -61,6 +62,10 @@ window.onunhandledrejection = event => {
 }
 
 console.log("Renderer starting...")
+
+if (import.meta.env.DEV) {
+  installMockPreviewRuntime(window)
+}
 
 /** Resolves theme. */
 function resolveTheme(theme?: unknown): "light" | "dark" {
