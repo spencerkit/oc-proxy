@@ -89,12 +89,13 @@ const PROVIDER_IMPORT_ERROR_KEYS: Record<
   | "ruleForm.importErrorInvalidJson"
   | "ruleForm.importErrorInvalidToml"
   | "ruleForm.importErrorUnrecognizedFormat"
+  | "ruleForm.importErrorUnsupportedProtocol"
   | "ruleForm.importErrorNoSupportedFields"
 > = {
   invalid_json: "ruleForm.importErrorInvalidJson",
   invalid_toml: "ruleForm.importErrorInvalidToml",
   unrecognized_format: "ruleForm.importErrorUnrecognizedFormat",
-  unsupported_protocol: "ruleForm.importErrorUnrecognizedFormat",
+  unsupported_protocol: "ruleForm.importErrorUnsupportedProtocol",
   no_supported_fields: "ruleForm.importErrorNoSupportedFields",
 }
 

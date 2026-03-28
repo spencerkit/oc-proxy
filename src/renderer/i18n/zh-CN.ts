@@ -760,6 +760,7 @@ export const zhCN = {
     importErrorUnrecognizedFormat: "无法识别导入格式",
     importErrorInvalidJson: "输入不是合法 JSON",
     importErrorInvalidToml: "输入不是合法 TOML",
+    importErrorUnsupportedProtocol: "导入的 Provider 协议不受支持",
     importErrorNoSupportedFields: "未找到可导入的 Provider 字段",
     quotaEnabled: "启用额度查询",
     quotaEnabledHint: "开启后会在 Provider 卡片展示该 Provider 的剩余额度。",

@@ -20,17 +20,27 @@ type CssModuleExports = Record<string, string>
 type TestState<T> = { current: T }
 type UnknownProps = Record<string, unknown>
 type ReactElementNode = React.ReactElement<UnknownProps>
+type InputElementNode = React.ReactElement<React.ComponentProps<"input">>
+type TextAreaElementNode = React.ReactElement<React.ComponentProps<"textarea">>
 type SelectElementNode = React.ReactElement<React.ComponentProps<"select">>
 type ButtonElementNode = React.ReactElement<React.ComponentProps<"button">>
+type FormElementNode = React.ReactElement<React.ComponentProps<"form">>
 
 const unitOutDir = path.join(process.cwd(), ".tmp/unit-tests")
 const originalResolveFilename = Module._resolveFilename
 const originalCssExtension = require.extensions[".css"]
+const originalDocument = globalThis.document
 
 const configStateValue: TestState<ProxyConfig | null> = { current: null }
 let currentParams: { groupId?: string; providerId?: string } = {}
 
-function translate(key: string): string {
+Object.assign(globalThis, {
+  document: {
+    getElementById: () => null,
+  },
+})
+
+function translate(key: string, options?: Record<string, unknown>): string {
   const translations: Record<string, string> = {
     "ruleCreatePage.title": "Create Rule",
     "ruleEditPage.title": "Edit Rule",
@@ -47,10 +57,24 @@ function translate(key: string): string {
     "ruleForm.importInputPlaceholder": "Paste config here",
     "ruleForm.importParse": "Parse",
     "ruleForm.importClear": "Clear",
+    "ruleForm.importApply": "Apply To Form",
+    "ruleForm.importErrorUnsupportedProtocol": "Imported provider protocol is not supported",
     "header.providers": "Providers",
     "header.backToService": "Back",
     "servicePage.groupPath": "Group",
+    "servicePage.ruleName": "Rule Name",
+    "servicePage.token": "Token",
+    "servicePage.apiAddress": "API Address",
+    "servicePage.defaultModel": "Default Model",
     "app.statusLoading": "Loading",
+    "validation.required": "{{field}} is required",
+    "ruleProtocol.anthropic": "Anthropic",
+    "ruleProtocol.openai_completion": "OpenAI Chat Completions",
+    "ruleProtocol.openai": "OpenAI Responses",
+  }
+
+  if (key === "validation.required" && typeof options?.field === "string") {
+    return `${String(options.field)} is required`
   }
 
   return translations[key] ?? key
@@ -395,6 +419,30 @@ function createSelectChangeEvent(value: string): React.ChangeEvent<HTMLSelectEle
   return { target: { value } } as unknown as React.ChangeEvent<HTMLSelectElement>
 }
 
+function createInputChangeEvent(value: string): React.ChangeEvent<HTMLInputElement> {
+  return { target: { value } } as unknown as React.ChangeEvent<HTMLInputElement>
+}
+
+function createTextAreaChangeEvent(value: string): React.ChangeEvent<HTMLTextAreaElement> {
+  return { target: { value } } as unknown as React.ChangeEvent<HTMLTextAreaElement>
+}
+
+function createFormSubmitEvent(): React.FormEvent<HTMLFormElement> {
+  return { preventDefault() {} } as unknown as React.FormEvent<HTMLFormElement>
+}
+
+function findInputById(tree: React.ReactNode, id: string): InputElementNode {
+  const element = findElement(tree, node => node.type === "input" && node.props.id === id)
+  assert.ok(element)
+  return element as InputElementNode
+}
+
+function findTextareaById(tree: React.ReactNode, id: string): TextAreaElementNode {
+  const element = findElement(tree, node => node.type === "textarea" && node.props.id === id)
+  assert.ok(element)
+  return element as TextAreaElementNode
+}
+
 function findImportFormatSelect(tree: React.ReactNode): SelectElementNode {
   const element = findElement(
     tree,
@@ -411,6 +459,12 @@ function findButtonByText(tree: React.ReactNode, label: string): ButtonElementNo
   )
   assert.ok(element)
   return element as ButtonElementNode
+}
+
+function findForm(tree: React.ReactNode): FormElementNode {
+  const element = findElement(tree, node => node.type === "form")
+  assert.ok(element)
+  return element as FormElementNode
 }
 
 test("RuleFormPage shows provider import card only in create mode above routing", () => {
@@ -453,8 +507,93 @@ test("RuleFormPage clear import resets format back to auto", () => {
   assert.equal(formatSelect.props.value, "auto")
 })
 
+test("RuleFormPage shows a precise error when imported AOR protocol is unsupported", () => {
+  resetHarness()
+  const harness = createComponentHarness("create")
+
+  let tree = harness.renderReady()
+  const importTextarea = findTextareaById(tree, "provider-import-raw")
+  importTextarea.props.onChange?.(
+    createTextAreaChangeEvent(
+      JSON.stringify({
+        format: "aor-provider/v1",
+        protocol: "custom",
+        name: "Unsupported",
+        api_key: "secret",
+        base_url: "https://unsupported.example.com/v1",
+        model: "test-model",
+      })
+    )
+  )
+
+  tree = harness.renderReady()
+  const parseButton = findButtonByText(tree, "Parse")
+  parseButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  const markup = renderToStaticMarkup(harness.renderReady() as React.ReactElement)
+  assert.match(markup, /Imported provider protocol is not supported/)
+})
+
+test("RuleFormPage parse and apply fills imported fields, preserves omitted website, and clears validation errors", async () => {
+  resetHarness()
+  const harness = createComponentHarness("create")
+
+  let tree = harness.renderReady()
+  const websiteInput = findInputById(tree, "website")
+  websiteInput.props.onChange?.(createInputChangeEvent("https://preserved.example.com"))
+
+  tree = harness.renderReady()
+  const form = findForm(tree)
+  await form.props.onSubmit?.(createFormSubmitEvent())
+
+  let markup = renderToStaticMarkup(harness.renderReady() as React.ReactElement)
+  assert.match(markup, /Rule Name is required/)
+  assert.match(markup, /Token is required/)
+  assert.match(markup, /API Address is required/)
+  assert.match(markup, /Default Model is required/)
+
+  tree = harness.renderReady()
+  const importTextarea = findTextareaById(tree, "provider-import-raw")
+  importTextarea.props.onChange?.(
+    createTextAreaChangeEvent(
+      JSON.stringify({
+        format: "aor-provider/v1",
+        protocol: "openai",
+        name: "Imported Provider",
+        api_key: "imported-secret",
+        base_url: "https://imported.example.com/v1",
+        model: "gpt-imported",
+      })
+    )
+  )
+
+  tree = harness.renderReady()
+  const parseButton = findButtonByText(tree, "Parse")
+  parseButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  const applyButton = findButtonByText(tree, "Apply To Form")
+  applyButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  markup = renderToStaticMarkup(tree as React.ReactElement)
+
+  assert.equal(findInputById(tree, "name").props.value, "Imported Provider")
+  assert.equal(findInputById(tree, "token").props.value, "imported-secret")
+  assert.equal(findInputById(tree, "apiAddress").props.value, "https://imported.example.com/v1")
+  assert.equal(findInputById(tree, "defaultModel").props.value, "gpt-imported")
+  assert.equal(findInputById(tree, "website").props.value, "https://preserved.example.com")
+  assert.doesNotMatch(markup, /Rule Name is required/)
+  assert.doesNotMatch(markup, /Token is required/)
+  assert.doesNotMatch(markup, /API Address is required/)
+  assert.doesNotMatch(markup, /Default Model is required/)
+})
+
 process.on("exit", () => {
   Module._resolveFilename = originalResolveFilename
+  Object.assign(globalThis, {
+    document: originalDocument,
+  })
   if (originalCssExtension) {
     require.extensions[".css"] = originalCssExtension
     return

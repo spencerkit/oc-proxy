@@ -794,6 +794,7 @@ export const enUS = {
     importErrorUnrecognizedFormat: "Unable to recognize import format",
     importErrorInvalidJson: "Input is not valid JSON",
     importErrorInvalidToml: "Input is not valid TOML",
+    importErrorUnsupportedProtocol: "Imported provider protocol is not supported",
     importErrorNoSupportedFields: "No supported provider fields were found",
     quotaEnabled: "Enable Quota Query",
     quotaEnabledHint: "When enabled, remaining quota is shown on the provider card.",
