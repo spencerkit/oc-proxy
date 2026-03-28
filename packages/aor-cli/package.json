@@ -17,6 +17,6 @@
     "postinstall": "node scripts/install.js"
   },
   "dependencies": {
-    "tar": "^6.2.1"
+    "tar": "^7.5.13"
   }
 }

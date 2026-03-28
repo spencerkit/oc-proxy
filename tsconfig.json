@@ -5,6 +5,7 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
+    "ignoreDeprecations": "6.0",
 
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -41,6 +42,8 @@
       "@/pages/*": ["src/renderer/pages/*"],
       "@/contexts": ["src/renderer/contexts/index"],
       "@/contexts/*": ["src/renderer/contexts/*"],
+      "@relax-state/core": ["src/types/relax-state-core.d.ts"],
+      "@relax-state/react": ["src/types/relax-state-react.d.ts"],
       "@relax-state/store": ["src/types/relax-state-store.d.ts"]
     }
   },

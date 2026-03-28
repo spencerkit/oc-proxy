@@ -1,4 +1,3 @@
-import type { Action } from "@relax-state/core"
 import { useActions as useRelaxActions, useRelaxValue } from "@relax-state/react"
 
 type ActionHookReturn<P extends readonly unknown[]> = {
@@ -6,7 +5,7 @@ type ActionHookReturn<P extends readonly unknown[]> = {
 }
 
 export const useActions = <const P extends readonly unknown[]>(actions: P): ActionHookReturn<P> => {
-  return useRelaxActions(actions as unknown as Action[]) as ActionHookReturn<P>
+  return useRelaxActions(actions as never) as ActionHookReturn<P>
 }
 
 export { useRelaxValue }

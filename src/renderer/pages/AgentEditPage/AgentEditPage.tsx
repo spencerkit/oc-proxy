@@ -133,10 +133,12 @@ function buildSourcePlaceholder(kind: IntegrationClientKind, sourceId: string): 
 function buildSourceFiles(configFile?: AgentConfigFile | null): AgentSourceFile[] {
   if (!configFile) return []
   if (configFile.sourceFiles?.length) return configFile.sourceFiles
+  const filePathParts = configFile.filePath.split(/[\\/]/)
+  const fileName = filePathParts[filePathParts.length - 1] || "config"
   return [
     {
       sourceId: "primary",
-      label: configFile.filePath.split(/[\\/]/).at(-1) || "config",
+      label: fileName,
       filePath: configFile.filePath,
       content: configFile.content,
     },

@@ -4,6 +4,7 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "strict": true,
+    "ignoreDeprecations": "6.0",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
@@ -27,6 +28,8 @@
       "@/pages/*": ["src/renderer/pages/*"],
       "@/contexts": ["src/renderer/contexts/index"],
       "@/contexts/*": ["src/renderer/contexts/*"],
+      "@relax-state/core": ["src/types/relax-state-core.d.ts"],
+      "@relax-state/react": ["src/types/relax-state-react.d.ts"],
       "@relax-state/store": ["src/types/relax-state-store.d.ts"]
     },
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
@@ -37,6 +40,8 @@
   "include": [
     "tests/unit/**/*.ts",
     "src/renderer/vite-env.d.ts",
+    "src/types/relax-state-core.d.ts",
+    "src/types/relax-state-react.d.ts",
     "src/renderer/types/index.ts",
     "src/renderer/types/config.ts",
     "src/renderer/types/proxy.ts",
