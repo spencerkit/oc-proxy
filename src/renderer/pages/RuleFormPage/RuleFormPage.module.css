@@ -365,6 +365,109 @@
   color: var(--text-secondary);
 }
 
+.importCard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4);
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg-raised) 12%);
+  display: grid;
+  gap: var(--sp-4);
+}
+
+.importCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.importHeaderCopy {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.importActions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.importTextarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.importTextarea:focus-visible {
+  outline: 2px solid var(--accent-subtle);
+  outline-offset: 1px;
+}
+
+.importPreview {
+  display: grid;
+  gap: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+
+.importPreviewTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.importDetectedFormat {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.importPreviewGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-2);
+}
+
+.importPreviewItem {
+  display: grid;
+  gap: 4px;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.importPreviewLabel {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.importPreviewValue {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.importApplyRow {
+  display: flex;
+  justify-content: flex-start;
+}
+
 @media (max-width: 768px) {
   .ruleForm {
     padding: var(--sp-4);

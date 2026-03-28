@@ -46,6 +46,7 @@
     "src/renderer/pages/AgentEditPage/AgentSourceTabs.tsx",
     "src/renderer/pages/AgentEditPage/OpenClawEditorForm.tsx",
     "src/renderer/pages/GroupEditPage/GroupEditPage.tsx",
+    "src/renderer/pages/RuleFormPage/ProviderImportCard.tsx",
     "src/renderer/pages/ServicePage/ProviderList.tsx",
     "src/renderer/pages/LogsPage/LogsPage.tsx",
     "src/renderer/utils/agentSourceFormat.ts",
