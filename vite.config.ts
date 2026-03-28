@@ -7,6 +7,16 @@ const rootDir = __dirname
 export default defineConfig({
   base: "./",
   root: "src/renderer",
+  define: {
+    global: "globalThis",
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      define: {
+        global: "globalThis",
+      },
+    },
+  },
   server: {
     port: 5173,
     strictPort: true,

@@ -19,7 +19,7 @@ import type {
   RuleQuotaSnapshot,
 } from "@/types"
 import { formatProviderLatency } from "@/utils/providerTesting"
-import { resolveProviderWebsiteHref } from "@/utils/providerWebsite"
+import { openProviderWebsite, resolveProviderWebsiteHref } from "@/utils/providerWebsite"
 import { formatCompactUrlForDisplay } from "@/utils/serverAddress"
 import { formatTokenMillions } from "@/utils/tokenFormat"
 import sharedStyles from "../ServicePage/ServicePage.module.css"
@@ -156,6 +156,10 @@ const MemoCatalogProviderCard = memo<CatalogProviderCardProps>(
                     href={websiteHref}
                     target="_blank"
                     rel="noreferrer"
+                    onClick={event => {
+                      event.preventDefault()
+                      void openProviderWebsite(websiteHref)
+                    }}
                     title={t("ruleForm.officialWebsite")}
                     aria-label={`${t("ruleForm.officialWebsite")}: ${provider.name}`}
                   >

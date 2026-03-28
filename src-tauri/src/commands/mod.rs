@@ -20,8 +20,8 @@ mod quota;
 mod remote;
 
 pub use app::{
-    app_get_info, app_get_status, app_read_clipboard_text, app_renderer_ready,
-    app_report_renderer_error, app_start_server, app_stop_server,
+    app_get_info, app_get_status, app_open_external_url, app_read_clipboard_text,
+    app_renderer_ready, app_report_renderer_error, app_start_server, app_stop_server,
 };
 pub use auth::{auth_get_session_status, auth_login, auth_logout};
 pub use config::{
@@ -76,6 +76,7 @@ pub fn build_invoke_handler(
         integration_write_agent_config,
         integration_write_agent_config_source,
         app_read_clipboard_text,
+        app_open_external_url,
         logs_list,
         logs_clear,
         logs_stats_summary,

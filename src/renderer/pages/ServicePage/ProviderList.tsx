@@ -5,7 +5,7 @@ import { Button } from "@/components"
 import { useTranslation } from "@/hooks"
 import type { Group, GroupRuntimeStatus, ProviderModelHealthSnapshot } from "@/types"
 import { formatProviderLatency } from "@/utils/providerTesting"
-import { resolveProviderWebsiteHref } from "@/utils/providerWebsite"
+import { openProviderWebsite, resolveProviderWebsiteHref } from "@/utils/providerWebsite"
 import { formatCompactUrlForDisplay } from "@/utils/serverAddress"
 import styles from "./ServicePage.module.css"
 
@@ -244,6 +244,10 @@ export const ProviderList: React.FC<{
                               href={websiteHref}
                               target="_blank"
                               rel="noreferrer"
+                              onClick={event => {
+                                event.preventDefault()
+                                void openProviderWebsite(websiteHref)
+                              }}
                               title={t("ruleForm.officialWebsite")}
                               aria-label={`${t("ruleForm.officialWebsite")}: ${provider.name}`}
                             >

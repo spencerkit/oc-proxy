@@ -2,12 +2,20 @@ import { AlertCircle, ArrowLeft, CheckCircle, Eye, EyeOff, TestTube2 } from "luc
 import type React from "react"
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { Button, Input, JsonTreeView, Switch } from "@/components"
+import { Button, Input, JsonTreeView, Modal, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { configState, saveConfigAction, testRuleQuotaDraftAction } from "@/store"
 import type { Provider, ProxyConfig, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
 import { createStableId } from "@/utils/id"
+import {
+  applyProviderImportDraft,
+  type ProviderImportInputFormat,
+  ProviderImportParseError,
+  type ProviderImportParseResult,
+  parseProviderImport,
+} from "@/utils/providerImport"
 import { useActions, useRelaxValue } from "@/utils/relax"
+import ProviderImportCard from "./ProviderImportCard"
 import styles from "./RuleFormPage.module.css"
 
 const RULE_FORM_ACTIONS = [saveConfigAction, testRuleQuotaDraftAction] as const
@@ -75,6 +83,21 @@ const normalizeNumericInput = (raw: string) => {
 }
 
 const COST_CURRENCY_OPTIONS = ["USD", "CNY", "EUR", "JPY", "HKD", "GBP", "SGD"] as const
+
+const PROVIDER_IMPORT_ERROR_KEYS: Record<
+  ProviderImportParseError["code"],
+  | "ruleForm.importErrorInvalidJson"
+  | "ruleForm.importErrorInvalidToml"
+  | "ruleForm.importErrorUnrecognizedFormat"
+  | "ruleForm.importErrorUnsupportedProtocol"
+  | "ruleForm.importErrorNoSupportedFields"
+> = {
+  invalid_json: "ruleForm.importErrorInvalidJson",
+  invalid_toml: "ruleForm.importErrorInvalidToml",
+  unrecognized_format: "ruleForm.importErrorUnrecognizedFormat",
+  unsupported_protocol: "ruleForm.importErrorUnsupportedProtocol",
+  no_supported_fields: "ruleForm.importErrorNoSupportedFields",
+}
 
 const normalizeQuotaUnitType = (raw: unknown): Provider["quota"]["unitType"] => {
   if (raw === "percentage" || raw === "amount" || raw === "tokens") {
@@ -214,6 +237,11 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
   const [website, setWebsite] = useState("")
   const [defaultModel, setDefaultModel] = useState("")
   const [modelMappings, setModelMappings] = useState<Record<string, string>>({})
+  const [importFormat, setImportFormat] = useState<ProviderImportInputFormat>("auto")
+  const [importText, setImportText] = useState("")
+  const [importResult, setImportResult] = useState<ProviderImportParseResult | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
 
   const [quotaEnabled, setQuotaEnabled] = useState(false)
   const [quotaProvider, setQuotaProvider] = useState("custom")
@@ -342,6 +370,76 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
       setLoading(false)
     }
   }, [isEditMode])
+
+  const resetImportFeedback = () => {
+    setImportResult(null)
+    setImportError(null)
+  }
+
+  const handleImportFormatChange = (value: ProviderImportInputFormat) => {
+    setImportFormat(value)
+    resetImportFeedback()
+  }
+
+  const handleImportTextChange = (value: string) => {
+    setImportText(value)
+    resetImportFeedback()
+  }
+
+  const handleImportClear = () => {
+    setImportFormat("auto")
+    setImportText("")
+    resetImportFeedback()
+  }
+
+  const handleImportParse = () => {
+    try {
+      const result = parseProviderImport({
+        format: importFormat,
+        raw: importText,
+      })
+      setImportResult(result)
+      setImportError(null)
+    } catch (error) {
+      setImportResult(null)
+      if (error instanceof ProviderImportParseError) {
+        setImportError(t(PROVIDER_IMPORT_ERROR_KEYS[error.code]))
+        return
+      }
+      setImportError(t("ruleForm.importErrorUnrecognizedFormat"))
+    }
+  }
+
+  const handleImportApply = () => {
+    if (!importResult) return
+
+    const nextFields = applyProviderImportDraft(
+      {
+        name,
+        protocol,
+        token,
+        apiAddress,
+        website,
+        defaultModel,
+      },
+      importResult.draft
+    )
+
+    setName(nextFields.name)
+    setProtocol(nextFields.protocol)
+    setToken(nextFields.token)
+    setApiAddress(nextFields.apiAddress)
+    setWebsite(nextFields.website)
+    setDefaultModel(nextFields.defaultModel)
+    setErrors(prev => ({
+      ...prev,
+      name: undefined,
+      token: undefined,
+      apiAddress: undefined,
+      defaultModel: undefined,
+    }))
+    setShowImportModal(false)
+  }
 
   const focusField = (id: string) => {
     const input = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | null
@@ -693,6 +791,20 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
       <div className={styles.formContainer}>
         <div className={styles.ruleGrid}>
           <form onSubmit={handleSubmit} className={styles.ruleForm}>
+            {!isEditMode ? (
+              <section className={styles.importEntry}>
+                <div className={styles.importEntryContent}>
+                  <h2 className={styles.sectionTitle}>{t("ruleForm.importEntryTitle")}</h2>
+                  <p className={styles.fieldHint}>{t("ruleForm.importHint")}</p>
+                </div>
+                <div className={styles.importEntryActions}>
+                  <Button type="button" variant="default" onClick={() => setShowImportModal(true)}>
+                    {t("ruleForm.importOpen")}
+                  </Button>
+                </div>
+              </section>
+            ) : null}
+
             <section className={styles.formSection}>
               <h2 className={styles.sectionTitle}>{t("ruleForm.sectionRouting")}</h2>
 
@@ -1240,6 +1352,28 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
           </form>
         </div>
       </div>
+
+      {!isEditMode ? (
+        <Modal
+          open={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          title={t("ruleForm.importTitle")}
+          size="large"
+        >
+          <ProviderImportCard
+            showHeader={false}
+            format={importFormat}
+            rawValue={importText}
+            parseError={importError}
+            parseResult={importResult}
+            onFormatChange={handleImportFormatChange}
+            onRawChange={handleImportTextChange}
+            onParse={handleImportParse}
+            onApply={handleImportApply}
+            onClear={handleImportClear}
+          />
+        </Modal>
+      ) : null}
     </div>
   )
 }

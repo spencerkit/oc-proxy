@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.20 - 2026-03-29
+### Features
+- feat: add provider paste import parser (25024b9)
+- feat: add provider import card ui (f45cbed)
+- feat(rule-form): wire provider import into create mode (2f22d94)
+- feat(rule-form): move provider import into modal (b4c01b4)
+### Fixes
+- fix(provider): open website links in external browser (5396887)
+- fix(import): tighten provider paste format detection (095553f)
+- fix: show provider import warnings (3df3717)
+- fix(parser): harden codex provider import detection (4e6f2db)
+- fix(rule-form): reset import format on clear (c1a59ff)
+- fix(rule-form): improve import error handling and tests (77d8f0f)
+- fix(vite): define global for toml parser (4948cc0)
+- fix(ci): satisfy rustfmt export layout (75720bb)
+### Maintenance
+- test(import): cover provider auto-detect precedence (5515c34)
+
 ## v0.2.19 - 2026-03-27
 ### Fixes
 - fix: stop agent edit page loading loop (fa5bc53)

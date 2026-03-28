@@ -47,6 +47,13 @@ pub async fn app_read_clipboard_text(app: AppHandle) -> Result<ClipboardTextResu
 }
 
 #[tauri::command]
+/// Opens an external URL with the system default handler.
+pub async fn app_open_external_url(url: String) -> Result<(), String> {
+    tauri_plugin_opener::open_url(url, None::<&str>)
+        .map_err(|error| format!("open external url failed: {error}"))
+}
+
+#[tauri::command]
 /// Marks renderer as ready for watchdog logic.
 pub async fn app_renderer_ready(
     state: State<'_, SharedState>,
