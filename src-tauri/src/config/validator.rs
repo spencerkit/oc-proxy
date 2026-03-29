@@ -208,6 +208,31 @@ mod tests {
     }
 
     #[test]
+    fn rule_cost_template_modified_after_apply_defaults_to_false_when_missing() {
+        let raw = json!({
+            "enabled": true,
+            "inputPricePerM": 3.0,
+            "outputPricePerM": 15.0,
+            "cacheInputPricePerM": 0.3,
+            "cacheOutputPricePerM": 3.75,
+            "currency": "USD",
+            "template": {
+                "vendorId": "anthropic",
+                "vendorLabel": "Anthropic",
+                "modelId": "claude-sonnet-4-5",
+                "modelLabel": "Claude Sonnet 4.5",
+                "sourceUrl": "https://platform.claude.com/docs/zh-CN/about-claude/pricing",
+                "verifiedAt": "2026-03-29",
+                "appliedAt": "2026-03-29T00:00:00.000Z"
+            }
+        });
+
+        let cost: RuleCostConfig = serde_json::from_value(raw).expect("cost should deserialize");
+        let template = cost.template.expect("template should exist");
+        assert!(!template.modified_after_apply);
+    }
+
+    #[test]
     /// Performs default config validates.
     fn default_config_validates() {
         let cfg = default_config();
