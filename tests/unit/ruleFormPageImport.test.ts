@@ -32,7 +32,10 @@ const originalCssExtension = require.extensions[".css"]
 const originalDocument = globalThis.document
 
 const configStateValue: TestState<ProxyConfig | null> = { current: null }
+const savedConfigs: ProxyConfig[] = []
 let currentParams: { groupId?: string; providerId?: string } = {}
+const navigateMock = () => {}
+const showToastMock = () => {}
 
 Object.assign(globalThis, {
   document: {
@@ -61,6 +64,29 @@ function translate(key: string, options?: Record<string, unknown>): string {
     "ruleForm.importClear": "Clear",
     "ruleForm.importApply": "Apply To Form",
     "ruleForm.importErrorUnsupportedProtocol": "Imported provider protocol is not supported",
+    "ruleForm.billingTemplateSummaryNone": "No billing template applied",
+    "ruleForm.billingTemplateSummaryApplied": "Applied {{vendor}} / {{model}}",
+    "ruleForm.billingTemplateSummaryModified":
+      "Applied {{vendor}} / {{model}}, modified after apply",
+    "ruleForm.billingTemplateOpen": "Select Billing Template",
+    "ruleForm.billingTemplateClear": "Clear Template Source",
+    "ruleForm.billingTemplateModalTitle": "Billing Templates",
+    "ruleForm.billingTemplateSearchLabel": "Search Templates",
+    "ruleForm.billingTemplateSearchPlaceholder":
+      "Search vendor or model, e.g. GPT-4o, Claude Sonnet, GLM-5",
+    "ruleForm.billingTemplateVendorLabel": "Vendor",
+    "ruleForm.billingTemplateModelLabel": "Model",
+    "ruleForm.billingTemplateAvailabilityReady": "Ready",
+    "ruleForm.billingTemplateAvailabilityUnpriced": "Pricing unavailable",
+    "ruleForm.billingTemplateCompletenessFull": "Full",
+    "ruleForm.billingTemplateCompletenessPartial": "Partial",
+    "ruleForm.billingTemplateVerifiedAt": "Verified at",
+    "ruleForm.billingTemplateSource": "Official Source",
+    "ruleForm.billingTemplatePartialHint":
+      "Only the fields confirmed by the official source will be applied.",
+    "ruleForm.billingTemplateUnavailableHint":
+      "This official model is listed for search coverage, but pricing is not prefilled until a directly verifiable per-1M API price is available.",
+    "ruleForm.billingTemplateApply": "Apply Billing Template",
     "header.providers": "Providers",
     "header.backToService": "Back",
     "servicePage.groupPath": "Group",
@@ -75,10 +101,12 @@ function translate(key: string, options?: Record<string, unknown>): string {
     "ruleProtocol.openai": "OpenAI Responses",
   }
 
-  if (key === "validation.required" && typeof options?.field === "string") {
-    return `${String(options.field)} is required`
+  if (typeof options === "object" && options) {
+    return (translations[key] ?? key).replace(/{{(\w+)}}/g, (_match, token: string) => {
+      const value = options[token]
+      return value === undefined ? `{{${token}}}` : String(value)
+    })
   }
-
   return translations[key] ?? key
 }
 
@@ -149,7 +177,7 @@ require.extensions[".css"] = module => {
 
 require.cache["react-router-dom"] = {
   exports: {
-    useNavigate: () => () => {},
+    useNavigate: () => navigateMock,
     useParams: () => currentParams,
   },
   filename: "react-router-dom",
@@ -160,7 +188,7 @@ require.cache["react-router-dom"] = {
 require.cache["@/hooks"] = {
   exports: {
     useLogs: () => ({
-      showToast: () => {},
+      showToast: showToastMock,
     }),
     useTranslation: () => ({
       t: translate,
@@ -190,7 +218,14 @@ require.cache["@/utils/relax"] = {
       }
       return null
     },
-    useActions: () => [async () => ({}), async () => ({})],
+    useActions: () => [
+      async (nextConfig: ProxyConfig) => {
+        savedConfigs.push(nextConfig)
+        configStateValue.current = nextConfig
+        return {}
+      },
+      async () => ({}),
+    ],
   },
   filename: "@/utils/relax",
   id: "@/utils/relax",
@@ -227,7 +262,8 @@ require.cache["@/components"] = {
       React.createElement("input", {
         type: "checkbox",
         checked,
-        onChange,
+        onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+          (onChange as ((checked: boolean) => void) | undefined)?.(event.target.checked),
         ...props,
       }),
     Modal: ({ open, title, children, footer }: UnknownProps) =>
@@ -315,6 +351,7 @@ function createConfig(): ProxyConfig {
 
 function resetHarness() {
   configStateValue.current = createConfig()
+  savedConfigs.length = 0
   currentParams = {}
 }
 
@@ -455,6 +492,12 @@ function findTextareaById(tree: React.ReactNode, id: string): TextAreaElementNod
   const element = findElement(tree, node => node.type === "textarea" && node.props.id === id)
   assert.ok(element)
   return element as TextAreaElementNode
+}
+
+function findSelectById(tree: React.ReactNode, id: string): SelectElementNode {
+  const element = findElement(tree, node => node.type === "select" && node.props.id === id)
+  assert.ok(element)
+  return element as SelectElementNode
 }
 
 function findImportFormatSelect(tree: React.ReactNode): SelectElementNode {
@@ -637,6 +680,157 @@ test("RuleFormPage parse and apply fills imported fields, preserves omitted webs
   assert.doesNotMatch(markup, /Token is required/)
   assert.doesNotMatch(markup, /API Address is required/)
   assert.doesNotMatch(markup, /Default Model is required/)
+})
+
+test("RuleFormPage opens billing template picker only after cost is enabled", () => {
+  resetHarness()
+  const harness = createComponentHarness("create")
+
+  let tree = harness.renderReady()
+  let markup = renderToStaticMarkup(tree as React.ReactElement)
+  assert.doesNotMatch(markup, /Select Billing Template/)
+
+  const costEnabledInput = findInputById(tree, "cost-enabled")
+  costEnabledInput.props.onChange?.({
+    target: { checked: true },
+  } as React.ChangeEvent<HTMLInputElement>)
+
+  tree = harness.renderReady()
+  markup = renderToStaticMarkup(tree as React.ReactElement)
+  assert.match(markup, /Select Billing Template/)
+
+  const openButton = findButtonByText(tree, "Select Billing Template")
+  openButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  markup = renderToStaticMarkup(tree as React.ReactElement)
+  assert.match(markup, /Billing Templates/)
+  assert.match(markup, /OpenAI/)
+  assert.match(markup, /Anthropic/)
+})
+
+test("RuleFormPage applies a partial OpenAI template without clearing cache write price", () => {
+  resetHarness()
+  const harness = createComponentHarness("create")
+
+  let tree = harness.renderReady()
+  const costEnabledInput = findInputById(tree, "cost-enabled")
+  costEnabledInput.props.onChange?.({
+    target: { checked: true },
+  } as React.ChangeEvent<HTMLInputElement>)
+
+  tree = harness.renderReady()
+  const cacheOutputInput = findInputById(tree, "cost-cache-output")
+  cacheOutputInput.props.onChange?.(createInputChangeEvent("7"))
+
+  tree = harness.renderReady()
+  const openButton = findButtonByText(tree, "Select Billing Template")
+  openButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  const searchInput = findTextareaById(tree, "billing-template-search")
+  searchInput.props.onChange?.(createTextAreaChangeEvent("gpt-4o"))
+
+  tree = harness.renderReady()
+  const templateButton = findButtonByText(tree, "GPT-4o")
+  templateButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  const applyButton = findButtonByText(tree, "Apply Billing Template")
+  assert.equal(applyButton.props.disabled, false)
+  applyButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  assert.equal(findInputById(tree, "cost-input").props.value, "2.5")
+  assert.equal(findInputById(tree, "cost-output").props.value, "10")
+  assert.equal(findInputById(tree, "cost-cache-input").props.value, "1.25")
+  assert.equal(findInputById(tree, "cost-cache-output").props.value, "7")
+  assert.equal(findSelectById(tree, "cost-currency").props.value, "USD")
+})
+
+test("RuleFormPage disables apply for unpriced GLM-5 placeholders", () => {
+  resetHarness()
+  const harness = createComponentHarness("create")
+
+  let tree = harness.renderReady()
+  const costEnabledInput = findInputById(tree, "cost-enabled")
+  costEnabledInput.props.onChange?.({
+    target: { checked: true },
+  } as React.ChangeEvent<HTMLInputElement>)
+
+  tree = harness.renderReady()
+  const openButton = findButtonByText(tree, "Select Billing Template")
+  openButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  const searchInput = findTextareaById(tree, "billing-template-search")
+  searchInput.props.onChange?.(createTextAreaChangeEvent("glm-5"))
+
+  tree = harness.renderReady()
+  const templateButton = findButtonByText(tree, "GLM-5")
+  templateButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  const applyButton = findButtonByText(tree, "Apply Billing Template")
+  assert.equal(applyButton.props.disabled, true)
+})
+
+test("RuleFormPage marks template attribution as modified after manual price edits", async () => {
+  resetHarness()
+  currentParams = { providerId: "provider-1" }
+  const config = configStateValue.current
+  if (!config) {
+    throw new Error("expected config")
+  }
+  const existingProvider = config.providers?.[0]
+  if (!existingProvider) {
+    throw new Error("expected existing provider")
+  }
+  existingProvider.cost = {
+    enabled: true,
+    inputPricePerM: 3,
+    outputPricePerM: 15,
+    cacheInputPricePerM: 0.3,
+    cacheOutputPricePerM: 3.75,
+    currency: "USD",
+    template: {
+      vendorId: "anthropic",
+      vendorLabel: "Anthropic",
+      modelId: "claude-sonnet-4-5",
+      modelLabel: "Claude Sonnet 4.5",
+      sourceUrl: "https://platform.claude.com/docs/zh-CN/about-claude/pricing",
+      verifiedAt: "2026-03-29",
+      appliedAt: "2026-03-29T00:00:00.000Z",
+      modifiedAfterApply: false,
+    },
+  }
+
+  const harness = createComponentHarness("edit")
+  let tree = harness.renderReady()
+  let markup = renderToStaticMarkup(tree as React.ReactElement)
+  assert.match(markup, /Applied Anthropic \/ Claude Sonnet 4.5/)
+
+  const outputInput = findInputById(tree, "cost-output")
+  outputInput.props.onChange?.(createInputChangeEvent("16"))
+
+  tree = harness.renderReady()
+  markup = renderToStaticMarkup(tree as React.ReactElement)
+  assert.match(markup, /Applied Anthropic \/ Claude Sonnet 4.5, modified after apply/)
+
+  findInputById(tree, "name").props.onChange?.(createInputChangeEvent("Existing Provider Updated"))
+  const form = findForm(tree)
+  await form.props.onSubmit?.(createFormSubmitEvent())
+
+  assert.equal(savedConfigs.length, 1)
+  const savedConfig = savedConfigs[0]
+  assert.ok(savedConfig)
+  if (!savedConfig.providers) {
+    throw new Error("expected saved providers")
+  }
+  const savedProvider = savedConfig.providers.find(provider => provider.id === "provider-1")
+  assert.ok(savedProvider?.cost?.template)
+  assert.equal(savedProvider.cost?.template?.modifiedAfterApply, true)
+  assert.equal(savedProvider.cost?.template?.modelId, "claude-sonnet-4-5")
 })
 
 process.on("exit", () => {

@@ -6,6 +6,14 @@ import { Button, Input, JsonTreeView, Modal, Switch } from "@/components"
 import { useLogs, useTranslation } from "@/hooks"
 import { configState, saveConfigAction, testRuleQuotaDraftAction } from "@/store"
 import type { Provider, ProxyConfig, RuleQuotaSnapshot, RuleQuotaTestResult } from "@/types"
+import type { BillingTemplateAttribution } from "@/types/proxy"
+import {
+  applyBillingTemplateToCost,
+  canApplyBillingTemplate,
+  doesCostMatchBillingTemplate,
+  findBillingTemplate,
+  searchBillingTemplates,
+} from "@/utils/billingTemplates"
 import { createStableId } from "@/utils/id"
 import {
   applyProviderImportDraft,
@@ -83,6 +91,13 @@ const normalizeNumericInput = (raw: string) => {
 }
 
 const COST_CURRENCY_OPTIONS = ["USD", "CNY", "EUR", "JPY", "HKD", "GBP", "SGD"] as const
+
+const parseCostInputValue = (value: string): number => Number(value || "0")
+
+const formatBillingTemplatePrice = (value: number | undefined, currency: string): string => {
+  if (value === undefined) return "-"
+  return `${value} ${currency}`
+}
 
 const PROVIDER_IMPORT_ERROR_KEYS: Record<
   ProviderImportParseError["code"],
@@ -242,6 +257,10 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
   const [importResult, setImportResult] = useState<ProviderImportParseResult | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showBillingTemplateModal, setShowBillingTemplateModal] = useState(false)
+  const [billingTemplateSearch, setBillingTemplateSearch] = useState("")
+  const [selectedBillingVendorId, setSelectedBillingVendorId] = useState("")
+  const [selectedBillingModelId, setSelectedBillingModelId] = useState("")
 
   const [quotaEnabled, setQuotaEnabled] = useState(false)
   const [quotaProvider, setQuotaProvider] = useState("custom")
@@ -266,6 +285,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
   const [cacheInputPricePerM, setCacheInputPricePerM] = useState("")
   const [cacheOutputPricePerM, setCacheOutputPricePerM] = useState("")
   const [costCurrency, setCostCurrency] = useState("USD")
+  const [costTemplate, setCostTemplate] = useState<BillingTemplateAttribution | null>(null)
 
   const [loading, setLoading] = useState(mode === "edit")
   const [errors, setErrors] = useState<{
@@ -304,6 +324,42 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
   })
   const quotaTestDirty =
     !!quotaTestResult && !!quotaTestFingerprint && quotaTestFingerprint !== quotaDraftFingerprint
+  const billingTemplateResults = searchBillingTemplates(billingTemplateSearch)
+  const selectedBillingTemplate =
+    billingTemplateResults.find(
+      template =>
+        template.vendorId === selectedBillingVendorId && template.modelId === selectedBillingModelId
+    ) ?? null
+  const currentCostDraft = {
+    enabled: costEnabled,
+    inputPricePerM: parseCostInputValue(inputPricePerM),
+    outputPricePerM: parseCostInputValue(outputPricePerM),
+    cacheInputPricePerM: parseCostInputValue(cacheInputPricePerM),
+    cacheOutputPricePerM: parseCostInputValue(cacheOutputPricePerM),
+    currency: costCurrency.trim() || "USD",
+    template: costTemplate,
+  }
+  const appliedBillingTemplate =
+    costTemplate && findBillingTemplate(costTemplate.vendorId, costTemplate.modelId)
+      ? findBillingTemplate(costTemplate.vendorId, costTemplate.modelId) || null
+      : null
+  const billingTemplateMarkedModified =
+    !!costTemplate &&
+    (costTemplate.modifiedAfterApply ||
+      (appliedBillingTemplate
+        ? !doesCostMatchBillingTemplate(currentCostDraft, appliedBillingTemplate)
+        : false))
+  const billingTemplateSummaryText = costTemplate
+    ? t(
+        billingTemplateMarkedModified
+          ? "ruleForm.billingTemplateSummaryModified"
+          : "ruleForm.billingTemplateSummaryApplied",
+        {
+          vendor: costTemplate.vendorLabel,
+          model: costTemplate.modelLabel,
+        }
+      )
+    : t("ruleForm.billingTemplateSummaryNone")
 
   useEffect(() => {
     if (!config) return
@@ -354,6 +410,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
     setCacheInputPricePerM(String(provider.cost?.cacheInputPricePerM ?? ""))
     setCacheOutputPricePerM(String(provider.cost?.cacheOutputPricePerM ?? ""))
     setCostCurrency(provider.cost?.currency || "USD")
+    setCostTemplate(provider.cost?.template ?? null)
 
     setLoading(false)
   }, [config, group, isEditMode, isGlobalMode, navigate, provider, showToast, t])
@@ -370,6 +427,11 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
       setLoading(false)
     }
   }, [isEditMode])
+
+  useEffect(() => {
+    if (costEnabled) return
+    setShowBillingTemplateModal(false)
+  }, [costEnabled])
 
   const resetImportFeedback = () => {
     setImportResult(null)
@@ -439,6 +501,53 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
       defaultModel: undefined,
     }))
     setShowImportModal(false)
+  }
+
+  const markCostTemplateModified = () => {
+    setCostTemplate((currentTemplate: BillingTemplateAttribution | null) => {
+      if (!currentTemplate || currentTemplate.modifiedAfterApply) {
+        return currentTemplate
+      }
+      return {
+        ...currentTemplate,
+        modifiedAfterApply: true,
+      }
+    })
+  }
+
+  const handleCostCurrencyChange = (value: string) => {
+    setCostCurrency(value)
+    markCostTemplateModified()
+  }
+
+  const handleCostFieldChange =
+    (setter: (value: string) => void) => (event: React.ChangeEvent<HTMLInputElement>) => {
+      setter(normalizeNumericInput(event.target.value))
+      markCostTemplateModified()
+    }
+
+  const handleBillingTemplateApply = () => {
+    if (!selectedBillingTemplate || !canApplyBillingTemplate(selectedBillingTemplate)) {
+      return
+    }
+
+    const nextCost = applyBillingTemplateToCost(
+      currentCostDraft,
+      selectedBillingTemplate,
+      new Date().toISOString()
+    )
+
+    setCostCurrency(nextCost.currency)
+    setInputPricePerM(String(nextCost.inputPricePerM))
+    setOutputPricePerM(String(nextCost.outputPricePerM))
+    setCacheInputPricePerM(String(nextCost.cacheInputPricePerM))
+    setCacheOutputPricePerM(String(nextCost.cacheOutputPricePerM))
+    setCostTemplate(nextCost.template ?? null)
+    setShowBillingTemplateModal(false)
+  }
+
+  const handleClearBillingTemplateAttribution = () => {
+    setCostTemplate(null)
   }
 
   const focusField = (id: string) => {
@@ -670,11 +779,12 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
       quota: quotaConfig,
       cost: {
         enabled: costEnabled,
-        inputPricePerM: Number(inputPricePerM || "0"),
-        outputPricePerM: Number(outputPricePerM || "0"),
-        cacheInputPricePerM: Number(cacheInputPricePerM || "0"),
-        cacheOutputPricePerM: Number(cacheOutputPricePerM || "0"),
+        inputPricePerM: parseCostInputValue(inputPricePerM),
+        outputPricePerM: parseCostInputValue(outputPricePerM),
+        cacheInputPricePerM: parseCostInputValue(cacheInputPricePerM),
+        cacheOutputPricePerM: parseCostInputValue(cacheOutputPricePerM),
         currency: costCurrency.trim() || "USD",
+        template: costTemplate,
       },
     }
 
@@ -1263,13 +1373,48 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
               </div>
               {costEnabled && (
                 <>
+                  <div className={styles.billingTemplateRow}>
+                    <div className={styles.billingTemplateSummary}>
+                      <strong>{billingTemplateSummaryText}</strong>
+                      {costTemplate?.sourceUrl ? (
+                        <a
+                          className={styles.billingTemplateSource}
+                          href={costTemplate.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {t("ruleForm.billingTemplateSource")}
+                        </a>
+                      ) : null}
+                    </div>
+                    <div className={styles.billingTemplateActions}>
+                      {costTemplate ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="small"
+                          onClick={handleClearBillingTemplateAttribution}
+                        >
+                          {t("ruleForm.billingTemplateClear")}
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="small"
+                        onClick={() => setShowBillingTemplateModal(true)}
+                      >
+                        {t("ruleForm.billingTemplateOpen")}
+                      </Button>
+                    </div>
+                  </div>
                   <div className={styles.formGroup}>
                     <label htmlFor="cost-currency">{t("ruleForm.costCurrency")}</label>
                     <select
                       id="cost-currency"
                       className={styles.nativeSelect}
                       value={costCurrency}
-                      onChange={e => setCostCurrency(e.target.value)}
+                      onChange={e => handleCostCurrencyChange(e.target.value)}
                     >
                       {!COST_CURRENCY_OPTIONS.includes(
                         costCurrency as (typeof COST_CURRENCY_OPTIONS)[number]
@@ -1291,7 +1436,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
                         min="0"
                         step="0.0001"
                         value={inputPricePerM}
-                        onChange={e => setInputPricePerM(normalizeNumericInput(e.target.value))}
+                        onChange={handleCostFieldChange(setInputPricePerM)}
                       />
                     </div>
                     <div className={styles.formGroup}>
@@ -1303,7 +1448,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
                         min="0"
                         step="0.0001"
                         value={outputPricePerM}
-                        onChange={e => setOutputPricePerM(normalizeNumericInput(e.target.value))}
+                        onChange={handleCostFieldChange(setOutputPricePerM)}
                       />
                     </div>
                   </div>
@@ -1317,9 +1462,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
                         min="0"
                         step="0.0001"
                         value={cacheInputPricePerM}
-                        onChange={e =>
-                          setCacheInputPricePerM(normalizeNumericInput(e.target.value))
-                        }
+                        onChange={handleCostFieldChange(setCacheInputPricePerM)}
                       />
                     </div>
                     <div className={styles.formGroup}>
@@ -1331,9 +1474,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
                         min="0"
                         step="0.0001"
                         value={cacheOutputPricePerM}
-                        onChange={e =>
-                          setCacheOutputPricePerM(normalizeNumericInput(e.target.value))
-                        }
+                        onChange={handleCostFieldChange(setCacheOutputPricePerM)}
                       />
                     </div>
                   </div>
@@ -1374,6 +1515,162 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
           />
         </Modal>
       ) : null}
+
+      <Modal
+        open={showBillingTemplateModal}
+        onClose={() => setShowBillingTemplateModal(false)}
+        title={t("ruleForm.billingTemplateModalTitle")}
+        size="large"
+      >
+        <div className={styles.billingTemplateModal}>
+          <div className={styles.formGroup}>
+            <label htmlFor="billing-template-search">
+              {t("ruleForm.billingTemplateSearchLabel")}
+            </label>
+            <textarea
+              id="billing-template-search"
+              className={styles.importTextarea}
+              value={billingTemplateSearch}
+              onChange={e => setBillingTemplateSearch(e.target.value)}
+              placeholder={t("ruleForm.billingTemplateSearchPlaceholder")}
+            />
+          </div>
+
+          <div className={styles.billingTemplateLayout}>
+            <div className={styles.billingTemplateList}>
+              {billingTemplateResults.map(template => {
+                const isActive =
+                  template.vendorId === selectedBillingVendorId &&
+                  template.modelId === selectedBillingModelId
+
+                return (
+                  <div
+                    key={`${template.vendorId}:${template.modelId}`}
+                    className={`${styles.billingTemplateItem} ${isActive ? styles.billingTemplateItemActive : ""}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedBillingVendorId(template.vendorId)
+                        setSelectedBillingModelId(template.modelId)
+                      }}
+                    >
+                      {template.modelLabel}
+                    </button>
+                    <span>{template.vendorLabel}</span>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className={styles.billingTemplateDetail}>
+              {selectedBillingTemplate ? (
+                <>
+                  <div>
+                    <h3>{selectedBillingTemplate.modelLabel}</h3>
+                    <p>
+                      {t("ruleForm.billingTemplateVendorLabel")}:{" "}
+                      {selectedBillingTemplate.vendorLabel}
+                    </p>
+                  </div>
+
+                  <div className={styles.billingTemplateBadgeRow}>
+                    <span>
+                      {selectedBillingTemplate.availability === "ready"
+                        ? t("ruleForm.billingTemplateAvailabilityReady")
+                        : t("ruleForm.billingTemplateAvailabilityUnpriced")}
+                    </span>
+                    <span>
+                      {selectedBillingTemplate.completeness === "full"
+                        ? t("ruleForm.billingTemplateCompletenessFull")
+                        : t("ruleForm.billingTemplateCompletenessPartial")}
+                    </span>
+                  </div>
+
+                  <div className={styles.importPreviewGrid}>
+                    <div className={styles.importPreviewItem}>
+                      <span className={styles.importPreviewLabel}>
+                        {t("ruleForm.costInputPerM")}
+                      </span>
+                      <strong className={styles.importPreviewValue}>
+                        {formatBillingTemplatePrice(
+                          selectedBillingTemplate.inputPricePerM,
+                          selectedBillingTemplate.currency
+                        )}
+                      </strong>
+                    </div>
+                    <div className={styles.importPreviewItem}>
+                      <span className={styles.importPreviewLabel}>
+                        {t("ruleForm.costOutputPerM")}
+                      </span>
+                      <strong className={styles.importPreviewValue}>
+                        {formatBillingTemplatePrice(
+                          selectedBillingTemplate.outputPricePerM,
+                          selectedBillingTemplate.currency
+                        )}
+                      </strong>
+                    </div>
+                    <div className={styles.importPreviewItem}>
+                      <span className={styles.importPreviewLabel}>
+                        {t("ruleForm.costCacheInputPerM")}
+                      </span>
+                      <strong className={styles.importPreviewValue}>
+                        {formatBillingTemplatePrice(
+                          selectedBillingTemplate.cacheInputPricePerM,
+                          selectedBillingTemplate.currency
+                        )}
+                      </strong>
+                    </div>
+                    <div className={styles.importPreviewItem}>
+                      <span className={styles.importPreviewLabel}>
+                        {t("ruleForm.costCacheOutputPerM")}
+                      </span>
+                      <strong className={styles.importPreviewValue}>
+                        {formatBillingTemplatePrice(
+                          selectedBillingTemplate.cacheOutputPricePerM,
+                          selectedBillingTemplate.currency
+                        )}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <p>
+                    {t("ruleForm.billingTemplateVerifiedAt")}: {selectedBillingTemplate.verifiedAt}
+                  </p>
+                  <a
+                    className={styles.billingTemplateSource}
+                    href={selectedBillingTemplate.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {t("ruleForm.billingTemplateSource")}
+                  </a>
+                  <p>
+                    {selectedBillingTemplate.availability === "unpriced"
+                      ? t("ruleForm.billingTemplateUnavailableHint")
+                      : selectedBillingTemplate.completeness === "partial"
+                        ? t("ruleForm.billingTemplatePartialHint")
+                        : selectedBillingTemplate.sourceNote}
+                  </p>
+                  <div className={styles.billingTemplateActions}>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="small"
+                      disabled={!canApplyBillingTemplate(selectedBillingTemplate)}
+                      onClick={handleBillingTemplateApply}
+                    >
+                      {t("ruleForm.billingTemplateApply")}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <p>{t("ruleForm.billingTemplateSearchPlaceholder")}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
