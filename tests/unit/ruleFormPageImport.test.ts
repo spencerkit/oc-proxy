@@ -748,6 +748,42 @@ test("RuleFormPage applies a partial OpenAI template without clearing cache writ
   assert.equal(findSelectById(tree, "cost-currency").props.value, "USD")
 })
 
+test("RuleFormPage keeps blank cache write price blank when applying a partial OpenAI template", () => {
+  resetHarness()
+  const harness = createComponentHarness("create")
+
+  let tree = harness.renderReady()
+  const costEnabledInput = findInputById(tree, "cost-enabled")
+  costEnabledInput.props.onChange?.({
+    target: { checked: true },
+  } as React.ChangeEvent<HTMLInputElement>)
+
+  tree = harness.renderReady()
+  assert.equal(findInputById(tree, "cost-cache-output").props.value, "")
+
+  const openButton = findButtonByText(tree, "Select Billing Template")
+  openButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  const searchInput = findTextareaById(tree, "billing-template-search")
+  searchInput.props.onChange?.(createTextAreaChangeEvent("gpt-4o"))
+
+  tree = harness.renderReady()
+  const templateButton = findButtonByText(tree, "GPT-4o")
+  templateButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  const applyButton = findButtonByText(tree, "Apply Billing Template")
+  assert.equal(applyButton.props.disabled, false)
+  applyButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  assert.equal(findInputById(tree, "cost-input").props.value, "2.5")
+  assert.equal(findInputById(tree, "cost-output").props.value, "10")
+  assert.equal(findInputById(tree, "cost-cache-input").props.value, "1.25")
+  assert.equal(findInputById(tree, "cost-cache-output").props.value, "")
+})
+
 test("RuleFormPage disables apply for unpriced GLM-5 placeholders", () => {
   resetHarness()
   const harness = createComponentHarness("create")

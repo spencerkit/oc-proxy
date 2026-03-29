@@ -99,6 +99,11 @@ const formatBillingTemplatePrice = (value: number | undefined, currency: string)
   return `${value} ${currency}`
 }
 
+const resolveAppliedCostFieldValue = (
+  currentRawValue: string,
+  templateValue: number | undefined
+) => (templateValue === undefined ? currentRawValue : String(templateValue))
+
 const PROVIDER_IMPORT_ERROR_KEYS: Record<
   ProviderImportParseError["code"],
   | "ruleForm.importErrorInvalidJson"
@@ -538,10 +543,21 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
     )
 
     setCostCurrency(nextCost.currency)
-    setInputPricePerM(String(nextCost.inputPricePerM))
-    setOutputPricePerM(String(nextCost.outputPricePerM))
-    setCacheInputPricePerM(String(nextCost.cacheInputPricePerM))
-    setCacheOutputPricePerM(String(nextCost.cacheOutputPricePerM))
+    setInputPricePerM(
+      resolveAppliedCostFieldValue(inputPricePerM, selectedBillingTemplate.inputPricePerM)
+    )
+    setOutputPricePerM(
+      resolveAppliedCostFieldValue(outputPricePerM, selectedBillingTemplate.outputPricePerM)
+    )
+    setCacheInputPricePerM(
+      resolveAppliedCostFieldValue(cacheInputPricePerM, selectedBillingTemplate.cacheInputPricePerM)
+    )
+    setCacheOutputPricePerM(
+      resolveAppliedCostFieldValue(
+        cacheOutputPricePerM,
+        selectedBillingTemplate.cacheOutputPricePerM
+      )
+    )
     setCostTemplate(nextCost.template ?? null)
     setShowBillingTemplateModal(false)
   }
