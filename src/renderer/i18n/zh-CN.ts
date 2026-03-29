@@ -826,7 +826,7 @@ export const zhCN = {
     billingTemplateCompletenessPartial: "部分",
     billingTemplateVerifiedAt: "核对日期",
     billingTemplateSource: "官方来源",
-    billingTemplatePartialHint: "仅会回填官方已明确给出的价格字段。",
+    billingTemplatePartialHint: "官方未给出的计费字段在应用模板时会按 0 回填。",
     billingTemplateUnavailableHint:
       "该官方模型仅用于搜索覆盖，暂未预置价格，直到存在可直接核验的 API 单价。",
     billingTemplateApply: "应用计费模板",

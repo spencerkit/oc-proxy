@@ -83,7 +83,7 @@ function translate(key: string, options?: Record<string, unknown>): string {
     "ruleForm.billingTemplateVerifiedAt": "Verified at",
     "ruleForm.billingTemplateSource": "Official Source",
     "ruleForm.billingTemplatePartialHint":
-      "Only the fields confirmed by the official source will be applied.",
+      "Officially missing fields default to 0 when applying the template.",
     "ruleForm.billingTemplateUnavailableHint":
       "This official model is listed for search coverage, but pricing is not prefilled until a directly verifiable per-1M API price is available.",
     "ruleForm.billingTemplateApply": "Apply Billing Template",
@@ -709,7 +709,7 @@ test("RuleFormPage opens billing template picker only after cost is enabled", ()
   assert.match(markup, /Anthropic/)
 })
 
-test("RuleFormPage applies a partial OpenAI template without clearing cache write price", () => {
+test("RuleFormPage applies a partial OpenAI template and fills missing cache write price with zero", () => {
   resetHarness()
   const harness = createComponentHarness("create")
 
@@ -744,11 +744,11 @@ test("RuleFormPage applies a partial OpenAI template without clearing cache writ
   assert.equal(findInputById(tree, "cost-input").props.value, "2.5")
   assert.equal(findInputById(tree, "cost-output").props.value, "10")
   assert.equal(findInputById(tree, "cost-cache-input").props.value, "1.25")
-  assert.equal(findInputById(tree, "cost-cache-output").props.value, "7")
+  assert.equal(findInputById(tree, "cost-cache-output").props.value, "0")
   assert.equal(findSelectById(tree, "cost-currency").props.value, "USD")
 })
 
-test("RuleFormPage keeps blank cache write price blank when applying a partial OpenAI template", () => {
+test("RuleFormPage writes zero into blank cache write price when applying a partial OpenAI template", () => {
   resetHarness()
   const harness = createComponentHarness("create")
 
@@ -781,10 +781,10 @@ test("RuleFormPage keeps blank cache write price blank when applying a partial O
   assert.equal(findInputById(tree, "cost-input").props.value, "2.5")
   assert.equal(findInputById(tree, "cost-output").props.value, "10")
   assert.equal(findInputById(tree, "cost-cache-input").props.value, "1.25")
-  assert.equal(findInputById(tree, "cost-cache-output").props.value, "")
+  assert.equal(findInputById(tree, "cost-cache-output").props.value, "0")
 })
 
-test("RuleFormPage disables apply for unpriced GLM-5 placeholders", () => {
+test("RuleFormPage applies zero-valued GLM-5 placeholder pricing", () => {
   resetHarness()
   const harness = createComponentHarness("create")
 
@@ -808,7 +808,14 @@ test("RuleFormPage disables apply for unpriced GLM-5 placeholders", () => {
 
   tree = harness.renderReady()
   const applyButton = findButtonByText(tree, "Apply Billing Template")
-  assert.equal(applyButton.props.disabled, true)
+  assert.equal(applyButton.props.disabled, false)
+  applyButton.props.onClick?.({} as React.MouseEvent<HTMLButtonElement>)
+
+  tree = harness.renderReady()
+  assert.equal(findInputById(tree, "cost-input").props.value, "0")
+  assert.equal(findInputById(tree, "cost-output").props.value, "0")
+  assert.equal(findInputById(tree, "cost-cache-input").props.value, "0")
+  assert.equal(findInputById(tree, "cost-cache-output").props.value, "0")
 })
 
 test("RuleFormPage marks template attribution as modified after manual price edits", async () => {

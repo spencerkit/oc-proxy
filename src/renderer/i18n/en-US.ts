@@ -861,7 +861,8 @@ export const enUS = {
     billingTemplateCompletenessPartial: "Partial",
     billingTemplateVerifiedAt: "Verified at",
     billingTemplateSource: "Official Source",
-    billingTemplatePartialHint: "Only the fields confirmed by the official source will be applied.",
+    billingTemplatePartialHint:
+      "Officially missing billing fields will default to 0 when applying the template.",
     billingTemplateUnavailableHint:
       "This official model is listed for search coverage, but pricing is not prefilled until a directly verifiable per-1M API price is available.",
     billingTemplateApply: "Apply Billing Template",
