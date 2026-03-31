@@ -506,6 +506,8 @@ mod tests {
             website: String::new(),
             default_model: "gpt-4.1".to_string(),
             model_mappings: HashMap::new(),
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota,
             cost: default_rule_cost_config(),
         }

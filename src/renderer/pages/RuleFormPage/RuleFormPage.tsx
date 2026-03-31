@@ -92,6 +92,23 @@ const COST_CURRENCY_OPTIONS = ["USD", "CNY", "EUR", "JPY", "HKD", "GBP", "SGD"] 
 
 const parseCostInputValue = (value: string): number => Number(value || "0")
 
+const normalizeHeaderPassthroughList = (raw: string): string[] => {
+  const normalizedHeaders: string[] = []
+  const seenHeaders = new Set<string>()
+
+  for (const part of raw.split(/[\n,]+/)) {
+    const normalized = part.trim().toLowerCase()
+    if (!normalized || seenHeaders.has(normalized)) continue
+    seenHeaders.add(normalized)
+    normalizedHeaders.push(normalized)
+  }
+
+  return normalizedHeaders
+}
+
+const formatHeaderPassthroughList = (headers?: string[] | null): string =>
+  normalizeHeaderPassthroughList((headers ?? []).join("\n")).join("\n")
+
 const formatBillingTemplatePrice = (value: number | undefined, currency: string): string => {
   if (value === undefined) return "-"
   return `${value} ${currency}`
@@ -287,6 +304,8 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
   const [website, setWebsite] = useState("")
   const [defaultModel, setDefaultModel] = useState("")
   const [modelMappings, setModelMappings] = useState<Record<string, string>>({})
+  const [headerPassthroughAllowText, setHeaderPassthroughAllowText] = useState("")
+  const [headerPassthroughDenyText, setHeaderPassthroughDenyText] = useState("")
   const [importFormat, setImportFormat] = useState<ProviderImportInputFormat>("auto")
   const [importText, setImportText] = useState("")
   const [importResult, setImportResult] = useState<ProviderImportParseResult | null>(null)
@@ -425,6 +444,8 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
     setWebsite(provider.website || "")
     setDefaultModel(provider.defaultModel)
     setModelMappings(provider.modelMappings || {})
+    setHeaderPassthroughAllowText(formatHeaderPassthroughList(provider.headerPassthroughAllow))
+    setHeaderPassthroughDenyText(formatHeaderPassthroughList(provider.headerPassthroughDeny))
 
     const quota = provider.quota
     setQuotaEnabled(!!quota?.enabled)
@@ -815,6 +836,8 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
 
     const quotaHeaders = parseQuotaHeaders(quotaHeadersText)
     const threshold = Number(quotaLowThresholdPercent)
+    const headerPassthroughAllow = normalizeHeaderPassthroughList(headerPassthroughAllowText)
+    const headerPassthroughDeny = normalizeHeaderPassthroughList(headerPassthroughDenyText)
     const quotaConfig = buildQuotaConfig({
       enabled: quotaEnabled,
       provider: quotaProvider,
@@ -833,6 +856,7 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
     })
 
     const providerDraft: Provider = {
+      ...(provider ?? {}),
       id: isEditMode ? providerId || createStableId() : createStableId(),
       name: name.trim(),
       protocol,
@@ -845,6 +869,8 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
           .map(([key, value]) => [key.trim(), value.trim()])
           .filter(([key, value]) => key && value)
       ),
+      headerPassthroughAllow,
+      headerPassthroughDeny,
       quota: quotaConfig,
       cost: {
         enabled: costEnabled,
@@ -1125,6 +1151,34 @@ export const RuleFormPage: React.FC<RuleFormPageProps> = ({ mode }) => {
                   className={styles.input}
                   hint={t("ruleForm.officialWebsiteHint")}
                 />
+              </div>
+
+              <div className={styles.formGroup}>
+                <label htmlFor="header-passthrough-allow">
+                  {t("ruleForm.headerPassthroughAllow")}
+                </label>
+                <textarea
+                  id="header-passthrough-allow"
+                  className={styles.jsonTextarea}
+                  value={headerPassthroughAllowText}
+                  onChange={e => setHeaderPassthroughAllowText(e.target.value)}
+                  placeholder={t("ruleForm.headerPassthroughPlaceholder")}
+                />
+                <p className={styles.fieldHint}>{t("ruleForm.headerPassthroughAllowHint")}</p>
+              </div>
+
+              <div className={styles.formGroup}>
+                <label htmlFor="header-passthrough-deny">
+                  {t("ruleForm.headerPassthroughDeny")}
+                </label>
+                <textarea
+                  id="header-passthrough-deny"
+                  className={styles.jsonTextarea}
+                  value={headerPassthroughDenyText}
+                  onChange={e => setHeaderPassthroughDenyText(e.target.value)}
+                  placeholder={t("ruleForm.headerPassthroughPlaceholder")}
+                />
+                <p className={styles.fieldHint}>{t("ruleForm.headerPassthroughDenyHint")}</p>
               </div>
             </section>
 

@@ -115,6 +115,8 @@ export interface Rule {
   website?: string
   defaultModel: string
   modelMappings: Record<string, string>
+  headerPassthroughAllow?: string[]
+  headerPassthroughDeny?: string[]
   quota: RuleQuotaConfig
   cost?: RuleCostConfig
 }

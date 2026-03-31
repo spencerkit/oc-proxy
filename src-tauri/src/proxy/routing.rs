@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use url::Url;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum EntryProtocol {
     Openai,
     Anthropic,
@@ -163,6 +163,132 @@ pub(crate) fn build_rule_headers(protocol: &RuleProtocol, rule: &Rule) -> HashMa
         }
     }
     headers
+}
+
+/// Build final outbound request headers, optionally enabling safe passthrough.
+pub(super) fn build_forward_headers(
+    entry_protocol: EntryProtocol,
+    target_protocol: &RuleProtocol,
+    rule: &Rule,
+    downstream_headers: &axum::http::HeaderMap,
+    header_passthrough_enabled: bool,
+) -> HashMap<String, String> {
+    let mut forwarded_headers = HashMap::new();
+    let allow_set = normalized_header_set(&rule.header_passthrough_allow);
+    let deny_set = normalized_header_set(&rule.header_passthrough_deny);
+    let mut passthrough_anthropic_version = None;
+
+    if header_passthrough_enabled {
+        for (name, value) in downstream_headers {
+            let normalized_name = normalize_header_name(name.as_str());
+            if normalized_name.is_empty() || deny_set.contains(&normalized_name) {
+                continue;
+            }
+
+            let normalized_value = match value.to_str() {
+                Ok(raw) => raw.trim(),
+                Err(_) => continue,
+            };
+            if normalized_value.is_empty() {
+                continue;
+            }
+
+            if normalized_name == "anthropic-version" {
+                if should_passthrough_anthropic_version(
+                    entry_protocol,
+                    target_protocol,
+                    &allow_set,
+                    normalized_value,
+                ) {
+                    passthrough_anthropic_version = Some(normalized_value.to_string());
+                }
+                continue;
+            }
+
+            if is_hard_blocked_passthrough_header(&normalized_name) {
+                continue;
+            }
+
+            forwarded_headers.insert(normalized_name, normalized_value.to_string());
+        }
+    }
+
+    let mut rule_headers = build_rule_headers(target_protocol, rule);
+    if let Some(version) = passthrough_anthropic_version {
+        rule_headers.insert("anthropic-version".to_string(), version);
+    }
+    forwarded_headers.extend(rule_headers);
+    forwarded_headers
+}
+
+fn normalize_header_name(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn normalized_header_set(values: &[String]) -> std::collections::HashSet<String> {
+    values
+        .iter()
+        .map(|value| normalize_header_name(value))
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn is_hard_blocked_passthrough_header(name: &str) -> bool {
+    matches!(
+        name,
+        "accept"
+            | "accept-encoding"
+            | "anthropic-beta"
+            | "anthropic-dangerous-direct-browser-access"
+            | "api-key"
+            | "authorization"
+            | "connection"
+            | "content-encoding"
+            | "content-length"
+            | "cookie"
+            | "forwarded"
+            | "host"
+            | "keep-alive"
+            | "openai-organization"
+            | "openai-project"
+            | "origin"
+            | "proxy-authorization"
+            | "proxy-connection"
+            | "referer"
+            | "set-cookie"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+            | "via"
+            | "x-api-key"
+            | "x-real-ip"
+    ) || name.starts_with("cf-")
+        || name.starts_with("sec-")
+        || name.starts_with("x-forwarded-")
+}
+
+fn should_passthrough_anthropic_version(
+    entry_protocol: EntryProtocol,
+    target_protocol: &RuleProtocol,
+    allow_set: &std::collections::HashSet<String>,
+    value: &str,
+) -> bool {
+    entry_protocol == EntryProtocol::Anthropic
+        && *target_protocol == RuleProtocol::Anthropic
+        && allow_set.contains("anthropic-version")
+        && is_valid_anthropic_version(value)
+}
+
+fn is_valid_anthropic_version(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
 }
 
 /// Refresh in-memory route index when config revision changes.

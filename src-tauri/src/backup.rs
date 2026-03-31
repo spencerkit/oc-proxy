@@ -73,6 +73,8 @@ mod tests {
                 website: String::new(),
                 default_model: "claude-3-7-sonnet".to_string(),
                 model_mappings: HashMap::new(),
+                header_passthrough_allow: Vec::new(),
+                header_passthrough_deny: Vec::new(),
                 quota: default_rule_quota_config(),
                 cost: default_rule_cost_config(),
             }],

@@ -60,6 +60,8 @@ pub async fn test_draft(
         website: String::new(),
         default_model: rule_default_model,
         model_mappings: std::collections::HashMap::new(),
+        header_passthrough_allow: Vec::new(),
+        header_passthrough_deny: Vec::new(),
         quota,
         cost: default_rule_cost_config(),
     };

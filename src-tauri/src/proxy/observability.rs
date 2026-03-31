@@ -1112,6 +1112,8 @@ mod tests {
             website: String::new(),
             default_model: "claude-sonnet-4.5".to_string(),
             model_mappings: HashMap::new(),
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: default_rule_quota_config(),
             cost: RuleCostConfig {
                 enabled: true,

@@ -728,6 +728,13 @@ export const zhCN = {
     officialWebsite: "官网",
     officialWebsiteHint: "可选。会在 Provider 卡片上提供官网快速跳转。",
     officialWebsitePlaceholder: "例如 docs.anthropic.com",
+    headerPassthroughAllow: "额外透传 Header（Allow）",
+    headerPassthroughAllowHint:
+      "可选。填入需要额外允许透传到该 Provider 的请求头名，支持逗号或换行分隔；保存时会自动转成小写并去重。当前主要用于 anthropic-version。",
+    headerPassthroughDeny: "禁止透传 Header（Deny）",
+    headerPassthroughDenyHint:
+      "可选。即使全局已开启透传，这里列出的请求头也不会转发到该 Provider。支持逗号或换行分隔；保存时会自动转成小写并去重。",
+    headerPassthroughPlaceholder: "anthropic-version\nx-request-id",
     importEntryTitle: "导入配置",
     importTitle: "粘贴配置导入",
     importHint: "粘贴支持的配置片段，自动填充 Provider 表单字段。",

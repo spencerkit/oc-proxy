@@ -579,6 +579,8 @@ mod tests {
             website: String::new(),
             default_model: "gpt-5-mini".to_string(),
             model_mappings: Default::default(),
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: crate::domain::entities::default_rule_quota_config(),
             cost: crate::domain::entities::default_rule_cost_config(),
         }
@@ -596,6 +598,7 @@ mod tests {
             compat: CompatConfig {
                 strict_mode: false,
                 text_tool_call_fallback_enabled: true,
+                header_passthrough_enabled: true,
             },
             logging: LoggingConfig {
                 capture_body: false,
