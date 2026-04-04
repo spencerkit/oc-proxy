@@ -94,6 +94,7 @@ impl IntegrationStore {
             kind,
             config_dir: normalized_dir,
             config: None,
+            group_id: None,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -131,6 +132,37 @@ impl IntegrationStore {
         }
 
         guard[index].config_dir = normalized_dir;
+        guard[index].updated_at = Utc::now().to_rfc3339();
+        let updated = guard[index].clone();
+        self.persist(&guard)?;
+        Ok(updated)
+    }
+
+    /// Updates target group binding for this module's workflow.
+    pub fn set_target_group_id(
+        &self,
+        target_id: &str,
+        group_id: Option<String>,
+    ) -> Result<IntegrationTarget, String> {
+        let normalized_id = target_id.trim();
+        if normalized_id.is_empty() {
+            return Err("target id is required".to_string());
+        }
+        let mut guard = self
+            .targets
+            .lock()
+            .map_err(|_| "integration store lock poisoned".to_string())?;
+
+        let index = guard
+            .iter()
+            .position(|item| item.id == normalized_id)
+            .ok_or_else(|| "integration target not found".to_string())?;
+
+        guard[index].group_id = group_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(String::from);
         guard[index].updated_at = Utc::now().to_rfc3339();
         let updated = guard[index].clone();
         self.persist(&guard)?;
@@ -218,6 +250,7 @@ impl IntegrationStore {
                 kind,
                 config_dir: normalized_dir,
                 config,
+                group_id: None,
                 created_at: now.clone(),
                 updated_at: now,
             };
