@@ -120,6 +120,7 @@ fn build_default_target(kind: IntegrationClientKind, config_dir: PathBuf) -> Int
         kind,
         config_dir: config_dir.to_string_lossy().to_string(),
         config: None,
+        group_id: None,
         created_at: timestamp.clone(),
         updated_at: timestamp,
     }
@@ -389,6 +390,31 @@ pub fn write_group_entry_with_targets_and_base_url(
 
         match write_target_entry(target, &entry_url) {
             Ok(file_path) => {
+                let persist_result = state.integration_store.put_target(
+                    &target.id,
+                    target.kind.clone(),
+                    target.config_dir.clone(),
+                    target.config.clone(),
+                );
+                let persist_result = persist_result.and_then(|_| {
+                    state
+                        .integration_store
+                        .set_target_group_id(&target.id, Some(normalized_group_id.to_string()))
+                });
+                if let Err(err) = persist_result {
+                    failed += 1;
+                    items.push(IntegrationWriteItem {
+                        target_id: target.id.clone(),
+                        kind: Some(target.kind.clone()),
+                        config_dir: target.config_dir.clone(),
+                        file_path: Some(file_path.to_string_lossy().to_string()),
+                        ok: false,
+                        message: Some(format!(
+                            "entry written but target binding was not saved: {err}"
+                        )),
+                    });
+                    continue;
+                }
                 succeeded += 1;
                 items.push(IntegrationWriteItem {
                     target_id: target.id.clone(),
@@ -1573,6 +1599,66 @@ mod tests {
     }
 
     #[test]
+    fn write_group_entry_persists_target_group_binding() {
+        let state = test_shared_state();
+        let unique_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time must move forward")
+            .as_nanos();
+        let config_dir = std::env::temp_dir().join(format!("oc-proxy-claude-target-{unique_id}"));
+        std::fs::create_dir_all(&config_dir).expect("claude config dir should be created");
+
+        let mut config = state.config_store.get();
+        config.groups = vec![crate::models::Group {
+            id: "dev".to_string(),
+            name: "Dev".to_string(),
+            models: vec!["claude-test".to_string()],
+            provider_ids: Vec::new(),
+            active_provider_id: None,
+            providers: Vec::new(),
+            failover: crate::models::default_group_failover_config(),
+        }];
+        state
+            .config_store
+            .save_config(config)
+            .expect("config with group should save");
+
+        state
+            .integration_store
+            .put_target(
+                "claude-target",
+                IntegrationClientKind::Claude,
+                config_dir.to_string_lossy().to_string(),
+                Some(AgentConfig {
+                    agent_id: None,
+                    provider_id: None,
+                    url: None,
+                    api_token: None,
+                    api_format: None,
+                    model: None,
+                    fallback_models: None,
+                    timeout: None,
+                    always_thinking_enabled: Some(true),
+                    include_coauthored_by: None,
+                    skip_dangerous_mode_permission_prompt: None,
+                }),
+            )
+            .expect("target should save");
+
+        write_group_entry(&state, "dev", vec!["claude-target".to_string()])
+            .expect("write group entry should succeed");
+
+        let targets = state.integration_store.list();
+        let target = targets
+            .iter()
+            .find(|item| item.id == "claude-target")
+            .expect("target should exist after write");
+        assert_eq!(target.group_id.as_deref(), Some("dev"));
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[test]
     fn codex_config_reads_token_from_auth_json_first() {
         let config_root = json!({
             "model_provider": "custom_provider",
@@ -1995,6 +2081,7 @@ base_url = "http://should-not-change"
             kind: IntegrationClientKind::Codex,
             config_dir: custom_codex.to_string_lossy().to_string(),
             config: None,
+            group_id: None,
             created_at: "2026-03-24T00:00:00Z".to_string(),
             updated_at: "2026-03-24T00:00:00Z".to_string(),
         }];
@@ -2027,6 +2114,7 @@ base_url = "http://should-not-change"
             kind: IntegrationClientKind::Claude,
             config_dir: "/.claude".to_string(),
             config: None,
+            group_id: None,
             created_at: "2026-03-24T00:00:00Z".to_string(),
             updated_at: "2026-03-24T00:00:00Z".to_string(),
         };
@@ -2035,6 +2123,7 @@ base_url = "http://should-not-change"
             kind: IntegrationClientKind::Claude,
             config_dir: "/.claude".to_string(),
             config: None,
+            group_id: None,
             created_at: "2026-03-24T01:00:00Z".to_string(),
             updated_at: "2026-03-24T01:00:00Z".to_string(),
         };
@@ -2096,6 +2185,7 @@ base_url = "http://should-not-change"
                 include_coauthored_by: None,
                 skip_dangerous_mode_permission_prompt: None,
             }),
+            group_id: None,
             created_at: "2026-03-26T00:00:00Z".to_string(),
             updated_at: "2026-03-26T00:00:00Z".to_string(),
         };
@@ -2178,6 +2268,7 @@ base_url = "http://should-not-change"
                 include_coauthored_by: None,
                 skip_dangerous_mode_permission_prompt: None,
             }),
+            group_id: None,
             created_at: "2026-03-26T00:00:00Z".to_string(),
             updated_at: "2026-03-26T00:00:00Z".to_string(),
         };
@@ -2250,6 +2341,7 @@ base_url = "http://should-not-change"
                 include_coauthored_by: None,
                 skip_dangerous_mode_permission_prompt: None,
             }),
+            group_id: None,
             created_at: "2026-03-26T00:00:00Z".to_string(),
             updated_at: "2026-03-26T00:00:00Z".to_string(),
         };
@@ -2537,6 +2629,7 @@ base_url = "http://should-not-change"
                     include_coauthored_by: None,
                     skip_dangerous_mode_permission_prompt: None,
                 }),
+                group_id: None,
                 created_at: "2026-03-26T00:00:00Z".to_string(),
                 updated_at: "2026-03-26T00:00:00Z".to_string(),
             }],

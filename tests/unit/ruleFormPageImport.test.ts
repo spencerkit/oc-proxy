@@ -63,6 +63,11 @@ function translate(key: string, options?: Record<string, unknown>): string {
     "ruleForm.importParse": "Parse",
     "ruleForm.importClear": "Clear",
     "ruleForm.importApply": "Apply To Form",
+    "ruleForm.headerPassthroughAllow": "Extra Passthrough Headers (Allow)",
+    "ruleForm.headerPassthroughAllowHint": "Optional passthrough allow list",
+    "ruleForm.headerPassthroughDeny": "Blocked Passthrough Headers (Deny)",
+    "ruleForm.headerPassthroughDenyHint": "Optional passthrough deny list",
+    "ruleForm.headerPassthroughPlaceholder": "anthropic-version\nx-request-id",
     "ruleForm.importErrorUnsupportedProtocol": "Imported provider protocol is not supported",
     "ruleForm.billingTemplateSummaryNone": "No billing template applied",
     "ruleForm.billingTemplateSummaryApplied": "Applied {{vendor}} / {{model}}",
@@ -707,6 +712,54 @@ test("RuleFormPage opens billing template picker only after cost is enabled", ()
   assert.match(markup, /Billing Templates/)
   assert.match(markup, /OpenAI/)
   assert.match(markup, /Anthropic/)
+})
+
+test("RuleFormPage edit mode loads passthrough header lists into the form", () => {
+  resetHarness()
+  currentParams = { providerId: "provider-1" }
+  const config = configStateValue.current
+  if (!config) {
+    throw new Error("expected config")
+  }
+  const existingProvider = config.providers?.[0]
+  if (!existingProvider) {
+    throw new Error("expected existing provider")
+  }
+  existingProvider.headerPassthroughAllow = ["anthropic-version", "x-trace-id"]
+  existingProvider.headerPassthroughDeny = ["x-request-id"]
+
+  const harness = createComponentHarness("edit")
+  const tree = harness.renderReady()
+
+  assert.equal(
+    findTextareaById(tree, "header-passthrough-allow").props.value,
+    "anthropic-version\nx-trace-id"
+  )
+  assert.equal(findTextareaById(tree, "header-passthrough-deny").props.value, "x-request-id")
+})
+
+test("RuleFormPage normalizes passthrough header lists before save", async () => {
+  resetHarness()
+  currentParams = { providerId: "provider-1" }
+  const harness = createComponentHarness("edit")
+
+  let tree = harness.renderReady()
+  findTextareaById(tree, "header-passthrough-allow").props.onChange?.(
+    createTextAreaChangeEvent(" Anthropic-Version,\nX-Trace-Id , x-trace-id\n")
+  )
+  findTextareaById(tree, "header-passthrough-deny").props.onChange?.(
+    createTextAreaChangeEvent("X-Request-ID,\nx-request-id\nsec-fetch-site")
+  )
+
+  tree = harness.renderReady()
+  const form = findForm(tree)
+  await form.props.onSubmit?.(createFormSubmitEvent())
+
+  assert.equal(savedConfigs.length, 1)
+  const savedProvider = savedConfigs[0]?.providers?.find(provider => provider.id === "provider-1")
+  assert.ok(savedProvider)
+  assert.deepEqual(savedProvider.headerPassthroughAllow, ["anthropic-version", "x-trace-id"])
+  assert.deepEqual(savedProvider.headerPassthroughDeny, ["x-request-id", "sec-fetch-site"])
 })
 
 test("RuleFormPage applies a partial OpenAI template and fills missing cache write price with zero", () => {

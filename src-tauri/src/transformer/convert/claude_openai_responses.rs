@@ -1,5 +1,6 @@
 //! Claude Messages to OpenAI Responses conversion
 
+use super::common::claude_thinking_to_openai_reasoning;
 use super::common::*;
 use crate::transformer::types::*;
 use serde_json::{json, Value};
@@ -103,6 +104,9 @@ pub fn claude_req_to_openai_responses(claude_req: &[u8], model: &str) -> Result<
     if let Some(temperature) = req.temperature {
         openai_req["temperature"] = json!(temperature);
     }
+    if let Some(reasoning) = claude_thinking_to_openai_reasoning(req.thinking.as_ref(), model) {
+        openai_req["reasoning"] = reasoning;
+    }
 
     let mut input = Vec::new();
     for msg in &req.messages {
@@ -185,6 +189,9 @@ pub fn openai_responses_req_to_claude(openai_req: &[u8], model: &str) -> Result<
     }
     if let Some(temperature) = req.get("temperature") {
         claude_req["temperature"] = temperature.clone();
+    }
+    if let Some(thinking) = req.get("thinking").filter(|v| !v.is_null()) {
+        claude_req["thinking"] = thinking.clone();
     }
 
     let mut messages = Vec::new();

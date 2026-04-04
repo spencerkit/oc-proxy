@@ -2,7 +2,8 @@
 //! Reference: ccNexus/internal/transformer/convert/claude_openai.go
 
 use super::common::{
-    build_claude_event, extract_system_text, extract_tool_result_content, parse_sse,
+    build_claude_event, claude_thinking_to_openai_reasoning_effort, extract_system_text,
+    extract_tool_result_content, parse_sse,
 };
 use crate::transformer::types::*;
 use serde_json::{json, Value};
@@ -138,6 +139,8 @@ pub fn claude_req_to_openai(claude_req: &[u8], model: &str) -> Result<Vec<u8>, S
             }),
         tools: None,
         tool_choice: None,
+        reasoning_effort: claude_thinking_to_openai_reasoning_effort(req.thinking.as_ref(), model)
+            .map(str::to_string),
     };
 
     if let Some(tools) = &req.tools {
@@ -179,6 +182,9 @@ pub fn openai_req_to_claude(openai_req: &[u8], model: &str) -> Result<Vec<u8>, S
     }
     if let Some(temperature) = req.get("temperature") {
         claude_req["temperature"] = temperature.clone();
+    }
+    if let Some(thinking) = req.get("thinking").filter(|v| !v.is_null()) {
+        claude_req["thinking"] = thinking.clone();
     }
 
     let mut system_prompt = Vec::new();

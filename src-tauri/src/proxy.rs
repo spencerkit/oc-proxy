@@ -591,6 +591,8 @@ mod tests {
             website: String::new(),
             default_model: "claude-primary".to_string(),
             model_mappings: HashMap::new(),
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: default_rule_quota_config(),
             cost: default_rule_cost_config(),
         };
@@ -603,6 +605,8 @@ mod tests {
             website: String::new(),
             default_model: "claude-secondary".to_string(),
             model_mappings: HashMap::new(),
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: default_rule_quota_config(),
             cost: default_rule_cost_config(),
         };
@@ -677,6 +681,8 @@ mod tests {
             website: String::new(),
             default_model: "claude-primary".to_string(),
             model_mappings: HashMap::new(),
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: default_rule_quota_config(),
             cost: default_rule_cost_config(),
         };
@@ -689,6 +695,8 @@ mod tests {
             website: String::new(),
             default_model: "claude-secondary".to_string(),
             model_mappings: HashMap::new(),
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: default_rule_quota_config(),
             cost: default_rule_cost_config(),
         };
@@ -799,6 +807,8 @@ mod tests {
             website: String::new(),
             default_model: "fallback".to_string(),
             model_mappings: mappings,
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: default_rule_quota_config(),
             cost: default_rule_cost_config(),
         };
@@ -834,6 +844,8 @@ mod tests {
             website: String::new(),
             default_model: "fallback".to_string(),
             model_mappings: mappings,
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: default_rule_quota_config(),
             cost: default_rule_cost_config(),
         };
@@ -867,6 +879,8 @@ mod tests {
             website: String::new(),
             default_model: "fallback".to_string(),
             model_mappings: HashMap::new(),
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: default_rule_quota_config(),
             cost: default_rule_cost_config(),
         };

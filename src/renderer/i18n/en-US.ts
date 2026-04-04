@@ -762,6 +762,13 @@ export const enUS = {
     officialWebsite: "Official Website",
     officialWebsiteHint: "Optional. Adds a quick-link entry on provider cards.",
     officialWebsitePlaceholder: "e.g. docs.anthropic.com",
+    headerPassthroughAllow: "Extra Passthrough Headers (Allow)",
+    headerPassthroughAllowHint:
+      "Optional. Add headers that should be additionally allowed through to this provider. Comma or newline separated; values are lowercased and deduplicated on save. This is mainly for anthropic-version.",
+    headerPassthroughDeny: "Blocked Passthrough Headers (Deny)",
+    headerPassthroughDenyHint:
+      "Optional. Headers listed here will never be forwarded to this provider even when global passthrough is enabled. Comma or newline separated; values are lowercased and deduplicated on save.",
+    headerPassthroughPlaceholder: "anthropic-version\nx-request-id",
     importEntryTitle: "Import Config",
     importTitle: "Paste Config Import",
     importHint: "Paste a supported config snippet to auto-fill provider fields.",

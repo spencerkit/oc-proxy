@@ -21,9 +21,15 @@ pub struct CompatConfig {
     pub strict_mode: bool,
     #[serde(default = "default_text_tool_call_fallback_enabled")]
     pub text_tool_call_fallback_enabled: bool,
+    #[serde(default = "default_header_passthrough_enabled")]
+    pub header_passthrough_enabled: bool,
 }
 
 fn default_text_tool_call_fallback_enabled() -> bool {
+    true
+}
+
+fn default_header_passthrough_enabled() -> bool {
     true
 }
 
@@ -58,7 +64,7 @@ pub struct RemoteGitConfig {
     pub branch: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RuleProtocol {
     #[serde(rename = "openai")]
     Openai,
@@ -231,6 +237,10 @@ pub struct Rule {
     pub default_model: String,
     #[serde(default)]
     pub model_mappings: HashMap<String, String>,
+    #[serde(default)]
+    pub header_passthrough_allow: Vec<String>,
+    #[serde(default)]
+    pub header_passthrough_deny: Vec<String>,
     #[serde(default = "default_rule_quota_config")]
     pub quota: RuleQuotaConfig,
     #[serde(default = "default_rule_cost_config")]

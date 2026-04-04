@@ -64,6 +64,7 @@ function createDefaultConfig(): ProxyConfig {
     compat: {
       strictMode: false,
       textToolCallFallbackEnabled: true,
+      headerPassthroughEnabled: true,
     },
     logging: {
       captureBody: false,
@@ -191,6 +192,7 @@ function normalizeConfig(config: ProxyConfig | null | undefined): ProxyConfig {
     providers: normalizedProviders,
     compat: {
       ...safeConfig.compat,
+      headerPassthroughEnabled: safeConfig.compat.headerPassthroughEnabled ?? true,
       textToolCallFallbackEnabled: safeConfig.compat.textToolCallFallbackEnabled ?? true,
     },
     groups: (safeConfig.groups ?? []).map(group =>

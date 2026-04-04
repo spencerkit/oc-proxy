@@ -9,7 +9,7 @@ use super::observability::{
     response_headers_sse, StreamTokenAccumulator,
 };
 use super::routing::{
-    assert_rule_ready, build_rule_headers, detect_entry_protocol, record_route_provider_failure,
+    assert_rule_ready, build_forward_headers, detect_entry_protocol, record_route_provider_failure,
     record_route_provider_success, refresh_route_index_if_needed, resolve_runtime_active_route,
     resolve_target_model, resolve_upstream_path, resolve_upstream_url, EntryEndpoint,
     EntryProtocol, ParsedPath, PathEntry, RouteResolution,
@@ -20,7 +20,7 @@ use super::{
     STREAM_REQUEST_TIMEOUT_MS,
 };
 use crate::auth::extract_bearer_token;
-use crate::models::{RuleProtocol, TokenUsage};
+use crate::models::{IntegrationClientKind, RuleProtocol, TokenUsage};
 use crate::transformer::convert::claude_openai_responses::ResponsesToClaudeOptions;
 use crate::transformer::{StreamContext, Transformer};
 use axum::body::{to_bytes, Body, Bytes};
@@ -207,6 +207,7 @@ pub(super) async fn handle_proxy_request(
         capture_body,
         _strict_mode,
         text_tool_call_fallback_enabled,
+        header_passthrough_enabled,
     ) = match state.config.read() {
         Ok(cfg) => (
             cfg.server.auth_enabled,
@@ -214,6 +215,7 @@ pub(super) async fn handle_proxy_request(
             cfg.logging.capture_body,
             cfg.compat.strict_mode,
             cfg.compat.text_tool_call_fallback_enabled,
+            cfg.compat.header_passthrough_enabled,
         ),
         Err(_) => {
             state.metrics.increment_error();
@@ -443,7 +445,12 @@ pub(super) async fn handle_proxy_request(
         }
     };
 
-    let upstream_body = match build_upstream_body(transformer.as_ref(), &request_body) {
+    let effective_request_body = maybe_inject_default_thinking(
+        &request_body,
+        should_inject_claude_thinking(&state, &parsed_path.group_id, &entry, &target_protocol),
+    );
+
+    let upstream_body = match build_upstream_body(transformer.as_ref(), &effective_request_body) {
         Ok(v) => v,
         Err(msg) => {
             state.metrics.increment_error();
@@ -490,7 +497,13 @@ pub(super) async fn handle_proxy_request(
         .unwrap_or(false);
     state.metrics.increment_request(stream);
 
-    let upstream_headers = build_rule_headers(&target_protocol, &active_route.rule);
+    let upstream_headers = build_forward_headers(
+        entry.protocol,
+        &target_protocol,
+        &active_route.rule,
+        &headers,
+        header_passthrough_enabled,
+    );
     append_processing_log(
         &state,
         &request_timestamp,
@@ -511,16 +524,21 @@ pub(super) async fn handle_proxy_request(
     );
     let request_timeout_ms = resolve_request_timeout_ms(stream, &transformer_name);
 
+    let mut reqwest_headers = reqwest::header::HeaderMap::new();
+    for (key, value) in &upstream_headers {
+        let Ok(name) = reqwest::header::HeaderName::from_bytes(key.as_bytes()) else {
+            continue;
+        };
+        let Ok(value) = reqwest::header::HeaderValue::from_str(value) else {
+            continue;
+        };
+        reqwest_headers.insert(name, value);
+    }
+
     let request_builder = state
         .client
         .post(upstream_url.clone())
-        .headers(reqwest::header::HeaderMap::from_iter(
-            upstream_headers.iter().filter_map(|(k, v)| {
-                let name = reqwest::header::HeaderName::from_bytes(k.as_bytes()).ok()?;
-                let value = reqwest::header::HeaderValue::from_str(v).ok()?;
-                Some((name, value))
-            }),
-        ))
+        .headers(reqwest_headers)
         .json(&upstream_body);
 
     let upstream_resp = if stream {
@@ -1728,6 +1746,58 @@ pub(super) fn build_upstream_body(
     serde_json::from_slice(&converted).map_err(|e| format!("parse converted: {}", e))
 }
 
+fn should_inject_claude_thinking(
+    state: &ServiceState,
+    group_id: &str,
+    entry: &PathEntry,
+    target_protocol: &RuleProtocol,
+) -> bool {
+    if entry.protocol != EntryProtocol::Anthropic
+        || entry.endpoint != EntryEndpoint::Messages
+        || !matches!(
+            *target_protocol,
+            RuleProtocol::Anthropic | RuleProtocol::Openai | RuleProtocol::OpenaiCompletion
+        )
+    {
+        return false;
+    }
+
+    let Some(shared_state) = state.shared_state.as_ref() else {
+        return false;
+    };
+
+    shared_state.integration_store.list().iter().any(|target| {
+        target.kind == IntegrationClientKind::Claude
+            && target.group_id.as_deref() == Some(group_id)
+            && target
+                .config
+                .as_ref()
+                .and_then(|config| config.always_thinking_enabled)
+                .unwrap_or(false)
+    })
+}
+
+fn maybe_inject_default_thinking(request_body: &Value, should_inject: bool) -> Value {
+    if !should_inject {
+        return request_body.clone();
+    }
+
+    let mut injected = request_body.clone();
+    let Some(root) = injected.as_object_mut() else {
+        return request_body.clone();
+    };
+
+    let has_explicit_thinking = root
+        .get("thinking")
+        .filter(|value| !value.is_null())
+        .is_some();
+    if !has_explicit_thinking {
+        root.insert("thinking".to_string(), json!({ "type": "enabled" }));
+    }
+
+    injected
+}
+
 /// Map upstream response body back to the downstream entry surface.
 fn map_response_body(transformer: &dyn Transformer, upstream_json: &Value) -> Value {
     let response_bytes = match serde_json::to_vec(upstream_json) {
@@ -2158,14 +2228,15 @@ mod tests {
         stream_requires_sse_event_buffer, EntryEndpoint, ParsedPath, PathEntry,
         StreamFailoverOutcome,
     };
+    use crate::api::dto::AgentConfig;
     use crate::models::{
         default_group_failover_config, default_rule_cost_config, default_rule_quota_config, Group,
-        Rule, RuleProtocol, TokenUsage,
+        IntegrationClientKind, Rule, RuleProtocol, TokenUsage,
     };
     use crate::proxy::routing::EntryProtocol;
     use crate::proxy::{headless_service_state_for_tests, ServiceState};
     use axum::{
-        body::{to_bytes, Body},
+        body::{to_bytes, Body, Bytes},
         extract::State as AxumState,
         http::{HeaderMap, HeaderValue, Method, StatusCode},
         response::{IntoResponse, Response},
@@ -2173,10 +2244,10 @@ mod tests {
         Json, Router,
     };
     use serde_json::{json, Value};
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     };
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
@@ -2196,7 +2267,31 @@ mod tests {
         shutdown: Option<oneshot::Sender<()>>,
     }
 
+    #[derive(Clone)]
+    struct CapturingUpstreamState {
+        responses: Arc<Vec<(u16, Value)>>,
+        hits: Arc<AtomicUsize>,
+        captured_headers: Arc<Mutex<Vec<HashMap<String, String>>>>,
+        captured_bodies: Arc<Mutex<Vec<Value>>>,
+    }
+
+    struct CapturingTestUpstream {
+        base_url: String,
+        hits: Arc<AtomicUsize>,
+        captured_headers: Arc<Mutex<Vec<HashMap<String, String>>>>,
+        captured_bodies: Arc<Mutex<Vec<Value>>>,
+        shutdown: Option<oneshot::Sender<()>>,
+    }
+
     impl Drop for TestUpstream {
+        fn drop(&mut self) {
+            if let Some(shutdown) = self.shutdown.take() {
+                let _ = shutdown.send(());
+            }
+        }
+    }
+
+    impl Drop for CapturingTestUpstream {
         fn drop(&mut self) {
             if let Some(shutdown) = self.shutdown.take() {
                 let _ = shutdown.send(());
@@ -2217,6 +2312,51 @@ mod tests {
 
         (
             StatusCode::from_u16(status).expect("scripted status must be valid"),
+            Json(payload),
+        )
+            .into_response()
+    }
+
+    async fn capturing_upstream_handler(
+        AxumState(state): AxumState<CapturingUpstreamState>,
+        headers: HeaderMap,
+        body: Bytes,
+    ) -> Response {
+        let call_index = state.hits.fetch_add(1, Ordering::SeqCst);
+        let (status, payload) = state
+            .responses
+            .get(call_index)
+            .cloned()
+            .or_else(|| state.responses.last().cloned())
+            .expect("capturing upstream must have at least one response");
+
+        let mut captured = HashMap::new();
+        for (name, value) in &headers {
+            let key = name.as_str().to_ascii_lowercase();
+            let entry = captured.entry(key).or_insert_with(String::new);
+            let text = value.to_str().unwrap_or_default().to_string();
+            if entry.is_empty() {
+                *entry = text;
+            } else {
+                entry.push_str(", ");
+                entry.push_str(&text);
+            }
+        }
+        state
+            .captured_headers
+            .lock()
+            .expect("capture lock should succeed")
+            .push(captured);
+        let captured_body =
+            serde_json::from_slice::<Value>(&body).expect("captured request body should be json");
+        state
+            .captured_bodies
+            .lock()
+            .expect("capture body lock should succeed")
+            .push(captured_body);
+
+        (
+            StatusCode::from_u16(status).expect("captured status must be valid"),
             Json(payload),
         )
             .into_response()
@@ -2250,6 +2390,47 @@ mod tests {
         TestUpstream {
             base_url: format!("http://{}", address),
             hits,
+            shutdown: Some(shutdown_tx),
+        }
+    }
+
+    async fn spawn_capturing_json_upstream(
+        path: &'static str,
+        responses: Vec<(u16, Value)>,
+    ) -> CapturingTestUpstream {
+        let hits = Arc::new(AtomicUsize::new(0));
+        let captured_headers = Arc::new(Mutex::new(Vec::new()));
+        let captured_bodies = Arc::new(Mutex::new(Vec::new()));
+        let state = CapturingUpstreamState {
+            responses: Arc::new(responses),
+            hits: hits.clone(),
+            captured_headers: captured_headers.clone(),
+            captured_bodies: captured_bodies.clone(),
+        };
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("capturing upstream listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("capturing upstream listener should have local addr");
+        let app = Router::new()
+            .route(path, post(capturing_upstream_handler))
+            .with_state(state);
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+        tokio::spawn(async move {
+            let server = axum::serve(listener, app);
+            let graceful = server.with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            });
+            let _ = graceful.await;
+        });
+
+        CapturingTestUpstream {
+            base_url: format!("http://{}", address),
+            hits,
+            captured_headers,
+            captured_bodies,
             shutdown: Some(shutdown_tx),
         }
     }
@@ -2483,6 +2664,27 @@ mod tests {
         })
     }
 
+    fn openai_responses_response(text: &str) -> Value {
+        json!({
+            "id": "resp-test",
+            "object": "response",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": text
+                }]
+            }],
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "total_tokens": 2
+            }
+        })
+    }
+
     fn test_rule(
         id: &str,
         protocol: RuleProtocol,
@@ -2498,6 +2700,8 @@ mod tests {
             website: String::new(),
             default_model: default_model.to_string(),
             model_mappings: Default::default(),
+            header_passthrough_allow: Vec::new(),
+            header_passthrough_deny: Vec::new(),
             quota: default_rule_quota_config(),
             cost: default_rule_cost_config(),
         }
@@ -2578,10 +2782,18 @@ mod tests {
         service_state: &ServiceState,
         request_body: Value,
     ) -> (StatusCode, Value) {
+        send_messages_request_with_headers(service_state, HeaderMap::new(), request_body).await
+    }
+
+    async fn send_messages_request_with_headers(
+        service_state: &ServiceState,
+        headers: HeaderMap,
+        request_body: Value,
+    ) -> (StatusCode, Value) {
         let response = handle_proxy_request(
             service_state.clone(),
             Method::POST,
-            HeaderMap::new(),
+            headers,
             Body::from(
                 serde_json::to_vec(&request_body).expect("request body should serialize to json"),
             ),
@@ -3751,5 +3963,374 @@ mod tests {
             &entry,
             "local-test-token"
         ));
+    }
+
+    #[tokio::test]
+    async fn safe_passthrough_forwards_business_headers_but_overrides_reserved_ones() {
+        let upstream = spawn_capturing_json_upstream(
+            "/v1/messages",
+            vec![(200, anthropic_message_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![test_rule(
+                "p1",
+                RuleProtocol::Anthropic,
+                upstream.base_url.clone(),
+                "claude-test",
+            )],
+            1,
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-request-id", HeaderValue::from_static("req-123"));
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer downstream"),
+        );
+        headers.insert("x-api-key", HeaderValue::from_static("downstream-key"));
+        headers.insert("anthropic-beta", HeaderValue::from_static("beta-flag"));
+        headers.insert("connection", HeaderValue::from_static("keep-alive"));
+
+        let (status, _) = send_messages_request_with_headers(
+            &service_state,
+            headers,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(upstream.hits.load(Ordering::SeqCst), 1);
+        let captured = upstream
+            .captured_headers
+            .lock()
+            .expect("capture lock should succeed");
+        let forwarded = captured.last().expect("captured request should exist");
+
+        assert_eq!(
+            forwarded.get("x-request-id").map(String::as_str),
+            Some("req-123")
+        );
+        assert_eq!(
+            forwarded.get("x-api-key").map(String::as_str),
+            Some("test-token")
+        );
+        assert_eq!(
+            forwarded.get("anthropic-version").map(String::as_str),
+            Some("2023-06-01")
+        );
+        assert!(!forwarded.contains_key("authorization"));
+        assert!(!forwarded.contains_key("connection"));
+        assert!(!forwarded.contains_key("anthropic-beta"));
+    }
+
+    #[tokio::test]
+    async fn anthropic_version_passthrough_requires_explicit_allow_on_same_protocol() {
+        let upstream = spawn_capturing_json_upstream(
+            "/v1/messages",
+            vec![(200, anthropic_message_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        let mut rule = test_rule(
+            "p1",
+            RuleProtocol::Anthropic,
+            upstream.base_url.clone(),
+            "claude-test",
+        );
+        rule.header_passthrough_allow = vec!["anthropic-version".to_string()];
+        install_failover_group(&service_state, vec![rule], 1);
+
+        let mut headers = HeaderMap::new();
+        headers.insert("anthropic-version", HeaderValue::from_static("2025-02-19"));
+
+        let (status, _) = send_messages_request_with_headers(
+            &service_state,
+            headers,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let captured = upstream
+            .captured_headers
+            .lock()
+            .expect("capture lock should succeed");
+        let forwarded = captured.last().expect("captured request should exist");
+        assert_eq!(
+            forwarded.get("anthropic-version").map(String::as_str),
+            Some("2025-02-19")
+        );
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_inject_thinking_for_bound_claude_target() {
+        let upstream = spawn_capturing_json_upstream(
+            "/v1/messages",
+            vec![(200, anthropic_message_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![test_rule(
+                "p1",
+                RuleProtocol::Anthropic,
+                upstream.base_url.clone(),
+                "claude-test",
+            )],
+            1,
+        );
+
+        let shared = service_state
+            .shared_state
+            .clone()
+            .expect("headless service state should include shared state");
+        let config_dir = std::env::temp_dir().join("oc-proxy-thinking-test-claude");
+        std::fs::create_dir_all(&config_dir).expect("test claude config dir should exist");
+        shared
+            .integration_store
+            .put_target(
+                "claude-target",
+                IntegrationClientKind::Claude,
+                config_dir.to_string_lossy().to_string(),
+                Some(AgentConfig {
+                    agent_id: None,
+                    provider_id: None,
+                    url: None,
+                    api_token: None,
+                    api_format: None,
+                    model: None,
+                    fallback_models: None,
+                    timeout: None,
+                    always_thinking_enabled: Some(true),
+                    include_coauthored_by: None,
+                    skip_dangerous_mode_permission_prompt: None,
+                }),
+            )
+            .expect("claude target should persist");
+        shared
+            .integration_store
+            .set_target_group_id("claude-target", Some("dev".to_string()))
+            .expect("group binding should persist");
+
+        let (status, _) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let captured = upstream
+            .captured_bodies
+            .lock()
+            .expect("capture body lock should succeed");
+        let forwarded = captured.last().expect("captured request should exist");
+        assert_eq!(forwarded["thinking"], json!({"type": "enabled"}));
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_inject_reasoning_effort_for_bound_claude_target_on_openai_chat() {
+        let upstream = spawn_capturing_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![test_rule(
+                "p1",
+                RuleProtocol::OpenaiCompletion,
+                upstream.base_url.clone(),
+                "gpt-test",
+            )],
+            1,
+        );
+
+        let shared = service_state
+            .shared_state
+            .clone()
+            .expect("headless service state should include shared state");
+        let config_dir = std::env::temp_dir().join("oc-proxy-thinking-test-openai-chat");
+        std::fs::create_dir_all(&config_dir).expect("test claude config dir should exist");
+        shared
+            .integration_store
+            .put_target(
+                "claude-target",
+                IntegrationClientKind::Claude,
+                config_dir.to_string_lossy().to_string(),
+                Some(AgentConfig {
+                    agent_id: None,
+                    provider_id: None,
+                    url: None,
+                    api_token: None,
+                    api_format: None,
+                    model: None,
+                    fallback_models: None,
+                    timeout: None,
+                    always_thinking_enabled: Some(true),
+                    include_coauthored_by: None,
+                    skip_dangerous_mode_permission_prompt: None,
+                }),
+            )
+            .expect("claude target should persist");
+        shared
+            .integration_store
+            .set_target_group_id("claude-target", Some("dev".to_string()))
+            .expect("group binding should persist");
+
+        let (status, _) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let captured = upstream
+            .captured_bodies
+            .lock()
+            .expect("capture body lock should succeed");
+        let forwarded = captured.last().expect("captured request should exist");
+        assert_eq!(forwarded["reasoning_effort"], json!("medium"));
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_inject_reasoning_effort_for_bound_claude_target_on_openai_responses(
+    ) {
+        let upstream = spawn_capturing_json_upstream(
+            "/responses",
+            vec![(200, openai_responses_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![test_rule(
+                "p1",
+                RuleProtocol::Openai,
+                upstream.base_url.clone(),
+                "gpt-test",
+            )],
+            1,
+        );
+
+        let shared = service_state
+            .shared_state
+            .clone()
+            .expect("headless service state should include shared state");
+        let config_dir = std::env::temp_dir().join("oc-proxy-thinking-test-openai-responses");
+        std::fs::create_dir_all(&config_dir).expect("test claude config dir should exist");
+        shared
+            .integration_store
+            .put_target(
+                "claude-target",
+                IntegrationClientKind::Claude,
+                config_dir.to_string_lossy().to_string(),
+                Some(AgentConfig {
+                    agent_id: None,
+                    provider_id: None,
+                    url: None,
+                    api_token: None,
+                    api_format: None,
+                    model: None,
+                    fallback_models: None,
+                    timeout: None,
+                    always_thinking_enabled: Some(true),
+                    include_coauthored_by: None,
+                    skip_dangerous_mode_permission_prompt: None,
+                }),
+            )
+            .expect("claude target should persist");
+        shared
+            .integration_store
+            .set_target_group_id("claude-target", Some("dev".to_string()))
+            .expect("group binding should persist");
+
+        let (status, _) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let captured = upstream
+            .captured_bodies
+            .lock()
+            .expect("capture body lock should succeed");
+        let forwarded = captured.last().expect("captured request should exist");
+        assert_eq!(forwarded["reasoning"]["effort"], json!("medium"));
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[tokio::test]
+    async fn anthropic_version_passthrough_is_blocked_on_cross_protocol_routes() {
+        let upstream = spawn_capturing_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        let mut rule = test_rule(
+            "p1",
+            RuleProtocol::OpenaiCompletion,
+            upstream.base_url.clone(),
+            "gpt-test",
+        );
+        rule.header_passthrough_allow = vec!["anthropic-version".to_string()];
+        install_failover_group(&service_state, vec![rule], 1);
+
+        let mut headers = HeaderMap::new();
+        headers.insert("anthropic-version", HeaderValue::from_static("2025-02-19"));
+
+        let (status, _) = send_messages_request_with_headers(
+            &service_state,
+            headers,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let captured = upstream
+            .captured_headers
+            .lock()
+            .expect("capture lock should succeed");
+        let forwarded = captured.last().expect("captured request should exist");
+        assert!(!forwarded.contains_key("anthropic-version"));
+        assert_eq!(
+            forwarded.get("authorization").map(String::as_str),
+            Some("Bearer test-token")
+        );
     }
 }

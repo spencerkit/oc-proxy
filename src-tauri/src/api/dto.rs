@@ -193,6 +193,8 @@ pub struct IntegrationTarget {
     pub kind: IntegrationClientKind,
     pub config_dir: String,
     pub config: Option<AgentConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
