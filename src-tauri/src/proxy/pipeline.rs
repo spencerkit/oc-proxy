@@ -20,7 +20,7 @@ use super::{
     STREAM_REQUEST_TIMEOUT_MS,
 };
 use crate::auth::extract_bearer_token;
-use crate::models::{RuleProtocol, TokenUsage};
+use crate::models::{IntegrationClientKind, RuleProtocol, TokenUsage};
 use crate::transformer::convert::claude_openai_responses::ResponsesToClaudeOptions;
 use crate::transformer::{StreamContext, Transformer};
 use axum::body::{to_bytes, Body, Bytes};
@@ -445,7 +445,12 @@ pub(super) async fn handle_proxy_request(
         }
     };
 
-    let upstream_body = match build_upstream_body(transformer.as_ref(), &request_body) {
+    let effective_request_body = maybe_inject_default_thinking(
+        &request_body,
+        should_inject_claude_thinking(&state, &parsed_path.group_id, &entry, &target_protocol),
+    );
+
+    let upstream_body = match build_upstream_body(transformer.as_ref(), &effective_request_body) {
         Ok(v) => v,
         Err(msg) => {
             state.metrics.increment_error();
@@ -1741,6 +1746,58 @@ pub(super) fn build_upstream_body(
     serde_json::from_slice(&converted).map_err(|e| format!("parse converted: {}", e))
 }
 
+fn should_inject_claude_thinking(
+    state: &ServiceState,
+    group_id: &str,
+    entry: &PathEntry,
+    target_protocol: &RuleProtocol,
+) -> bool {
+    if entry.protocol != EntryProtocol::Anthropic
+        || entry.endpoint != EntryEndpoint::Messages
+        || !matches!(
+            *target_protocol,
+            RuleProtocol::Anthropic | RuleProtocol::Openai | RuleProtocol::OpenaiCompletion
+        )
+    {
+        return false;
+    }
+
+    let Some(shared_state) = state.shared_state.as_ref() else {
+        return false;
+    };
+
+    shared_state.integration_store.list().iter().any(|target| {
+        target.kind == IntegrationClientKind::Claude
+            && target.group_id.as_deref() == Some(group_id)
+            && target
+                .config
+                .as_ref()
+                .and_then(|config| config.always_thinking_enabled)
+                .unwrap_or(false)
+    })
+}
+
+fn maybe_inject_default_thinking(request_body: &Value, should_inject: bool) -> Value {
+    if !should_inject {
+        return request_body.clone();
+    }
+
+    let mut injected = request_body.clone();
+    let Some(root) = injected.as_object_mut() else {
+        return request_body.clone();
+    };
+
+    let has_explicit_thinking = root
+        .get("thinking")
+        .filter(|value| !value.is_null())
+        .is_some();
+    if !has_explicit_thinking {
+        root.insert("thinking".to_string(), json!({ "type": "enabled" }));
+    }
+
+    injected
+}
+
 /// Map upstream response body back to the downstream entry surface.
 fn map_response_body(transformer: &dyn Transformer, upstream_json: &Value) -> Value {
     let response_bytes = match serde_json::to_vec(upstream_json) {
@@ -2171,14 +2228,15 @@ mod tests {
         stream_requires_sse_event_buffer, EntryEndpoint, ParsedPath, PathEntry,
         StreamFailoverOutcome,
     };
+    use crate::api::dto::AgentConfig;
     use crate::models::{
         default_group_failover_config, default_rule_cost_config, default_rule_quota_config, Group,
-        Rule, RuleProtocol, TokenUsage,
+        IntegrationClientKind, Rule, RuleProtocol, TokenUsage,
     };
     use crate::proxy::routing::EntryProtocol;
     use crate::proxy::{headless_service_state_for_tests, ServiceState};
     use axum::{
-        body::{to_bytes, Body},
+        body::{to_bytes, Body, Bytes},
         extract::State as AxumState,
         http::{HeaderMap, HeaderValue, Method, StatusCode},
         response::{IntoResponse, Response},
@@ -2214,12 +2272,14 @@ mod tests {
         responses: Arc<Vec<(u16, Value)>>,
         hits: Arc<AtomicUsize>,
         captured_headers: Arc<Mutex<Vec<HashMap<String, String>>>>,
+        captured_bodies: Arc<Mutex<Vec<Value>>>,
     }
 
     struct CapturingTestUpstream {
         base_url: String,
         hits: Arc<AtomicUsize>,
         captured_headers: Arc<Mutex<Vec<HashMap<String, String>>>>,
+        captured_bodies: Arc<Mutex<Vec<Value>>>,
         shutdown: Option<oneshot::Sender<()>>,
     }
 
@@ -2260,6 +2320,7 @@ mod tests {
     async fn capturing_upstream_handler(
         AxumState(state): AxumState<CapturingUpstreamState>,
         headers: HeaderMap,
+        body: Bytes,
     ) -> Response {
         let call_index = state.hits.fetch_add(1, Ordering::SeqCst);
         let (status, payload) = state
@@ -2286,6 +2347,13 @@ mod tests {
             .lock()
             .expect("capture lock should succeed")
             .push(captured);
+        let captured_body =
+            serde_json::from_slice::<Value>(&body).expect("captured request body should be json");
+        state
+            .captured_bodies
+            .lock()
+            .expect("capture body lock should succeed")
+            .push(captured_body);
 
         (
             StatusCode::from_u16(status).expect("captured status must be valid"),
@@ -2332,10 +2400,12 @@ mod tests {
     ) -> CapturingTestUpstream {
         let hits = Arc::new(AtomicUsize::new(0));
         let captured_headers = Arc::new(Mutex::new(Vec::new()));
+        let captured_bodies = Arc::new(Mutex::new(Vec::new()));
         let state = CapturingUpstreamState {
             responses: Arc::new(responses),
             hits: hits.clone(),
             captured_headers: captured_headers.clone(),
+            captured_bodies: captured_bodies.clone(),
         };
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -2360,6 +2430,7 @@ mod tests {
             base_url: format!("http://{}", address),
             hits,
             captured_headers,
+            captured_bodies,
             shutdown: Some(shutdown_tx),
         }
     }
@@ -2588,6 +2659,27 @@ mod tests {
             "usage": {
                 "prompt_tokens": 1,
                 "completion_tokens": 1,
+                "total_tokens": 2
+            }
+        })
+    }
+
+    fn openai_responses_response(text: &str) -> Value {
+        json!({
+            "id": "resp-test",
+            "object": "response",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": text
+                }]
+            }],
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 1,
                 "total_tokens": 2
             }
         })
@@ -3979,6 +4071,223 @@ mod tests {
             forwarded.get("anthropic-version").map(String::as_str),
             Some("2025-02-19")
         );
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_inject_thinking_for_bound_claude_target() {
+        let upstream = spawn_capturing_json_upstream(
+            "/v1/messages",
+            vec![(200, anthropic_message_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![test_rule(
+                "p1",
+                RuleProtocol::Anthropic,
+                upstream.base_url.clone(),
+                "claude-test",
+            )],
+            1,
+        );
+
+        let shared = service_state
+            .shared_state
+            .clone()
+            .expect("headless service state should include shared state");
+        let config_dir = std::env::temp_dir().join("oc-proxy-thinking-test-claude");
+        std::fs::create_dir_all(&config_dir).expect("test claude config dir should exist");
+        shared
+            .integration_store
+            .put_target(
+                "claude-target",
+                IntegrationClientKind::Claude,
+                config_dir.to_string_lossy().to_string(),
+                Some(AgentConfig {
+                    agent_id: None,
+                    provider_id: None,
+                    url: None,
+                    api_token: None,
+                    api_format: None,
+                    model: None,
+                    fallback_models: None,
+                    timeout: None,
+                    always_thinking_enabled: Some(true),
+                    include_coauthored_by: None,
+                    skip_dangerous_mode_permission_prompt: None,
+                }),
+            )
+            .expect("claude target should persist");
+        shared
+            .integration_store
+            .set_target_group_id("claude-target", Some("dev".to_string()))
+            .expect("group binding should persist");
+
+        let (status, _) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let captured = upstream
+            .captured_bodies
+            .lock()
+            .expect("capture body lock should succeed");
+        let forwarded = captured.last().expect("captured request should exist");
+        assert_eq!(forwarded["thinking"], json!({"type": "enabled"}));
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_inject_reasoning_effort_for_bound_claude_target_on_openai_chat() {
+        let upstream = spawn_capturing_json_upstream(
+            "/chat/completions",
+            vec![(200, openai_chat_completion_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![test_rule(
+                "p1",
+                RuleProtocol::OpenaiCompletion,
+                upstream.base_url.clone(),
+                "gpt-test",
+            )],
+            1,
+        );
+
+        let shared = service_state
+            .shared_state
+            .clone()
+            .expect("headless service state should include shared state");
+        let config_dir = std::env::temp_dir().join("oc-proxy-thinking-test-openai-chat");
+        std::fs::create_dir_all(&config_dir).expect("test claude config dir should exist");
+        shared
+            .integration_store
+            .put_target(
+                "claude-target",
+                IntegrationClientKind::Claude,
+                config_dir.to_string_lossy().to_string(),
+                Some(AgentConfig {
+                    agent_id: None,
+                    provider_id: None,
+                    url: None,
+                    api_token: None,
+                    api_format: None,
+                    model: None,
+                    fallback_models: None,
+                    timeout: None,
+                    always_thinking_enabled: Some(true),
+                    include_coauthored_by: None,
+                    skip_dangerous_mode_permission_prompt: None,
+                }),
+            )
+            .expect("claude target should persist");
+        shared
+            .integration_store
+            .set_target_group_id("claude-target", Some("dev".to_string()))
+            .expect("group binding should persist");
+
+        let (status, _) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let captured = upstream
+            .captured_bodies
+            .lock()
+            .expect("capture body lock should succeed");
+        let forwarded = captured.last().expect("captured request should exist");
+        assert_eq!(forwarded["reasoning_effort"], json!("medium"));
+
+        let _ = std::fs::remove_dir_all(&config_dir);
+    }
+
+    #[tokio::test]
+    async fn anthropic_messages_inject_reasoning_effort_for_bound_claude_target_on_openai_responses(
+    ) {
+        let upstream = spawn_capturing_json_upstream(
+            "/responses",
+            vec![(200, openai_responses_response("ok"))],
+        )
+        .await;
+        let service_state = headless_service_state_for_tests();
+        install_failover_group(
+            &service_state,
+            vec![test_rule(
+                "p1",
+                RuleProtocol::Openai,
+                upstream.base_url.clone(),
+                "gpt-test",
+            )],
+            1,
+        );
+
+        let shared = service_state
+            .shared_state
+            .clone()
+            .expect("headless service state should include shared state");
+        let config_dir = std::env::temp_dir().join("oc-proxy-thinking-test-openai-responses");
+        std::fs::create_dir_all(&config_dir).expect("test claude config dir should exist");
+        shared
+            .integration_store
+            .put_target(
+                "claude-target",
+                IntegrationClientKind::Claude,
+                config_dir.to_string_lossy().to_string(),
+                Some(AgentConfig {
+                    agent_id: None,
+                    provider_id: None,
+                    url: None,
+                    api_token: None,
+                    api_format: None,
+                    model: None,
+                    fallback_models: None,
+                    timeout: None,
+                    always_thinking_enabled: Some(true),
+                    include_coauthored_by: None,
+                    skip_dangerous_mode_permission_prompt: None,
+                }),
+            )
+            .expect("claude target should persist");
+        shared
+            .integration_store
+            .set_target_group_id("claude-target", Some("dev".to_string()))
+            .expect("group binding should persist");
+
+        let (status, _) = send_messages_request(
+            &service_state,
+            json!({
+                "model": "claude-test",
+                "max_tokens": 16,
+                "messages": [{"role": "user", "content": "hello"}]
+            }),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let captured = upstream
+            .captured_bodies
+            .lock()
+            .expect("capture body lock should succeed");
+        let forwarded = captured.last().expect("captured request should exist");
+        assert_eq!(forwarded["reasoning"]["effort"], json!("medium"));
+
+        let _ = std::fs::remove_dir_all(&config_dir);
     }
 
     #[tokio::test]

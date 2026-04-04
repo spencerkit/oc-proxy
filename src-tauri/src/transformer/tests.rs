@@ -32,6 +32,77 @@ mod tests {
     }
 
     #[test]
+    fn test_claude_to_openai_request_maps_thinking_to_reasoning_effort() {
+        let claude_req = json!({
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 1024,
+            "thinking": {
+                "type": "enabled"
+            },
+            "messages": [
+                {"role": "user", "content": "Think first"}
+            ]
+        });
+
+        let result = claude_openai::claude_req_to_openai(
+            serde_json::to_vec(&claude_req).unwrap().as_slice(),
+            "gpt-5",
+        );
+
+        assert!(result.is_ok());
+        let openai_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        assert_eq!(openai_req["reasoning_effort"], "medium");
+    }
+
+    #[test]
+    fn test_claude_to_openai_request_maps_small_budget_to_low_reasoning_effort() {
+        let claude_req = json!({
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 1024,
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": 1024
+            },
+            "messages": [
+                {"role": "user", "content": "Think first"}
+            ]
+        });
+
+        let result = claude_openai::claude_req_to_openai(
+            serde_json::to_vec(&claude_req).unwrap().as_slice(),
+            "gpt-5.2",
+        );
+
+        assert!(result.is_ok());
+        let openai_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        assert_eq!(openai_req["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn test_claude_to_openai_request_clamps_large_budget_for_models_without_xhigh() {
+        let claude_req = json!({
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 1024,
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": 50000
+            },
+            "messages": [
+                {"role": "user", "content": "Think first"}
+            ]
+        });
+
+        let result = claude_openai::claude_req_to_openai(
+            serde_json::to_vec(&claude_req).unwrap().as_slice(),
+            "gpt-5.1",
+        );
+
+        assert!(result.is_ok());
+        let openai_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        assert_eq!(openai_req["reasoning_effort"], "high");
+    }
+
+    #[test]
     fn test_openai_to_claude_response() {
         let openai_resp = json!({
             "id": "chatcmpl-123",
@@ -135,6 +206,36 @@ mod tests {
         assert_eq!(messages[2]["content"][0]["content"], "Sunny");
         assert_eq!(claude_req["tools"][0]["name"], "get_weather");
         assert_eq!(claude_req["stream"], true);
+    }
+
+    #[test]
+    fn test_openai_req_to_claude_preserves_thinking_config() {
+        let openai_req = json!({
+            "model": "gpt-4.1",
+            "stream": true,
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": 2048
+            },
+            "messages": [
+                {"role": "user", "content": "Think carefully"}
+            ]
+        });
+
+        let result = claude_openai::openai_req_to_claude(
+            serde_json::to_vec(&openai_req).unwrap().as_slice(),
+            "claude-sonnet-4-6",
+        );
+
+        assert!(result.is_ok());
+        let claude_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        assert_eq!(
+            claude_req["thinking"],
+            json!({
+                "type": "enabled",
+                "budget_tokens": 2048
+            })
+        );
     }
 
     #[test]
@@ -323,6 +424,77 @@ mod tests {
         assert_eq!(input[1]["role"], "assistant");
         assert_eq!(input[1]["content"][0]["type"], "output_text");
         assert_eq!(input[1]["content"][0]["text"], "I can help.");
+    }
+
+    #[test]
+    fn test_claude_messages_to_responses_maps_thinking_to_reasoning_effort() {
+        let claude_req = json!({
+            "model": "claude-sonnet-4-6",
+            "thinking": {
+                "type": "enabled"
+            },
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]}
+            ],
+            "stream": false
+        });
+
+        let result = claude_openai_responses::claude_req_to_openai_responses(
+            serde_json::to_vec(&claude_req).unwrap().as_slice(),
+            "gpt-5.2",
+        );
+
+        assert!(result.is_ok());
+        let responses_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        assert_eq!(responses_req["reasoning"]["effort"], "medium");
+    }
+
+    #[test]
+    fn test_claude_messages_to_responses_maps_large_budget_to_xhigh_for_supported_models() {
+        let claude_req = json!({
+            "model": "claude-sonnet-4-6",
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": 50000
+            },
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]}
+            ],
+            "stream": false
+        });
+
+        let result = claude_openai_responses::claude_req_to_openai_responses(
+            serde_json::to_vec(&claude_req).unwrap().as_slice(),
+            "gpt-5.2",
+        );
+
+        assert!(result.is_ok());
+        let responses_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        assert_eq!(responses_req["reasoning"]["effort"], "xhigh");
+    }
+
+    #[test]
+    fn test_claude_messages_to_responses_clamps_low_budget_for_gpt_5_2_pro() {
+        let claude_req = json!({
+            "model": "claude-sonnet-4-6",
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": 1024
+            },
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hello"}]}
+            ],
+            "stream": false
+        });
+
+        let result = claude_openai_responses::claude_req_to_openai_responses(
+            serde_json::to_vec(&claude_req).unwrap().as_slice(),
+            "gpt-5.2-pro",
+        );
+
+        assert!(result.is_ok());
+        let responses_req: serde_json::Value = serde_json::from_slice(&result.unwrap()).unwrap();
+        assert_eq!(responses_req["reasoning"]["effort"], "medium");
     }
 
     #[test]
@@ -532,6 +704,40 @@ mod tests {
         assert_eq!(
             claude_req["tools"][0]["input_schema"]["properties"]["input"]["type"],
             "string"
+        );
+    }
+
+    #[test]
+    fn test_openai_responses_req_to_claude_preserves_thinking_config() {
+        let openai_req = json!({
+            "model": "gpt-5.2",
+            "stream": true,
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": 1024
+            },
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "think harder"}]
+                }
+            ]
+        });
+
+        let result = claude_openai_responses::openai_responses_req_to_claude(
+            serde_json::to_vec(&openai_req).unwrap().as_slice(),
+            "claude-sonnet-4-6",
+        )
+        .expect("convert");
+        let claude_req: serde_json::Value = serde_json::from_slice(&result).unwrap();
+
+        assert_eq!(
+            claude_req["thinking"],
+            json!({
+                "type": "enabled",
+                "budget_tokens": 1024
+            })
         );
     }
 

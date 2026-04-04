@@ -1,7 +1,7 @@
 //! Common utility functions for protocol conversion
 //! Reference: ccNexus/internal/transformer/convert/common.go
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashSet;
 
 /// Extract system text from Claude system prompt
@@ -90,6 +90,84 @@ pub fn override_request_model(request: &[u8], model: &str) -> Result<Vec<u8>, St
     }
 
     serde_json::to_vec(&value).map_err(|e| format!("serialize request: {}", e))
+}
+
+/// Map Claude `thinking` to the closest OpenAI reasoning effort knob.
+///
+/// Anthropic's `thinking` budget does not have a documented 1:1 equivalent in
+/// OpenAI APIs. We use a heuristic budget ladder and then clamp the result to
+/// the target model's documented effort support to reduce invalid upstream
+/// requests.
+pub fn claude_thinking_to_openai_reasoning_effort(
+    thinking: Option<&Value>,
+    model: &str,
+) -> Option<&'static str> {
+    let thinking_type = thinking
+        .and_then(|value| value.get("type"))
+        .and_then(|value| value.as_str());
+    if thinking_type != Some("enabled") {
+        return None;
+    }
+
+    let desired = match thinking
+        .and_then(|value| value.get("budget_tokens"))
+        .and_then(|value| value.as_i64())
+        .filter(|budget| *budget > 0)
+    {
+        Some(budget) if budget <= 2_048 => "low",
+        Some(budget) if budget <= 8_192 => "medium",
+        Some(budget) if budget <= 24_576 => "high",
+        Some(_) => "xhigh",
+        None => "medium",
+    };
+
+    Some(clamp_openai_reasoning_effort_for_model(desired, model))
+}
+
+pub fn claude_thinking_to_openai_reasoning(thinking: Option<&Value>, model: &str) -> Option<Value> {
+    claude_thinking_to_openai_reasoning_effort(thinking, model)
+        .map(|effort| json!({ "effort": effort }))
+}
+
+fn clamp_openai_reasoning_effort_for_model(desired: &'static str, model: &str) -> &'static str {
+    let normalized = model.trim().to_ascii_lowercase();
+
+    if normalized.starts_with("gpt-5-pro") {
+        return "high";
+    }
+
+    if normalized.starts_with("gpt-5.2-pro") {
+        return match desired {
+            "low" => "medium",
+            "medium" | "high" | "xhigh" => desired,
+            _ => "medium",
+        };
+    }
+
+    if normalized.starts_with("gpt-5.1") {
+        return match desired {
+            "xhigh" => "high",
+            "low" | "medium" | "high" => desired,
+            _ => "medium",
+        };
+    }
+
+    if model_supports_xhigh(&normalized) {
+        return desired;
+    }
+
+    match desired {
+        "xhigh" => "high",
+        "low" | "medium" | "high" => desired,
+        _ => "medium",
+    }
+}
+
+fn model_supports_xhigh(normalized_model: &str) -> bool {
+    normalized_model.starts_with("gpt-5.2")
+        || normalized_model.starts_with("gpt-5.2-codex")
+        || normalized_model.starts_with("gpt-5.2-chat")
+        || normalized_model.starts_with("gpt-5.2-pro")
 }
 
 /// Parsed textual tool call payload extracted from placeholder format.
