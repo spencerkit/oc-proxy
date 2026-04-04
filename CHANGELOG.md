@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.3.1 - 2026-04-04
+### Features
+- add safe upstream header passthrough controls to proxy configuration, routing, and rule form management flows (182a296)
+- persist Claude target-to-group bindings and auto-enable thinking for bound Claude `/messages` requests across Anthropic and OpenAI upstreams (49ea51e)
+### Fixes
+- map Claude thinking into OpenAI reasoning controls with budget-based effort heuristics and model-aware clamping (49ea51e)
+### Maintenance
+- expand proxy and transformer regression coverage for header passthrough, thinking injection, and reasoning mapping behavior (182a296, 49ea51e)
+
 ## v0.3.0 - 2026-03-29
 ### Features
 - add curated billing pricing templates for common vendors, including OpenAI, Anthropic, MiniMax, and Zhipu families (c4ab077)
