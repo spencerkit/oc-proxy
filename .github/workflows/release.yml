@@ -93,7 +93,7 @@ jobs:
           fi
 
       - name: Upload installer artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ai-open-router-${{ matrix.os_name }}-${{ github.ref_name }}
           path: |
